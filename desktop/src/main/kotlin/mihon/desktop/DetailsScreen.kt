@@ -205,12 +205,16 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             background = Theme.BG_APP
             top.background = Theme.BG_APP
             header.background = Theme.BG_SURFACE
+            actions.background = Theme.BG_APP
+            bottomBar.background = Theme.BG_APP
+            chapterHeaderBar.background = Theme.BG_APP
             chapterList.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             chapterHeaderLabel.foreground = Theme.TEXT_PRIMARY
             btnContinue.background = Theme.ACCENT
             btnContinue.foreground = Theme.TEXT_PRIMARY
+            manga?.let { renderHeader(it) }
             chapterList.repaint()
             repaint()
         }
@@ -263,15 +267,20 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             manga.genre?.take(4)?.forEach { add(escapeHtml(it)) }
         }.joinToString(" &nbsp;│&nbsp; ")
 
+        val titleColor = Theme.TEXT_PRIMARY.toHex()
+        val authorColor = Theme.TEXT_PRIMARY.toHex()
+        val metaColor = Theme.TEXT_MUTED.toHex()
+        val descColor = Theme.TEXT_SECONDARY.toHex()
+
         val descHtml = manga.description?.takeIf { it.isNotBlank() }?.let {
-            "<p style='margin-top:12px;color:#c8c4bc;line-height:1.5;font-size:12px'>${escapeHtml(it.take(500))}${if (it.length > 500) "…" else ""}</p>"
+            "<p style='margin-top:12px;color:$descColor;line-height:1.5;font-size:12px'>${escapeHtml(it.take(500))}${if (it.length > 500) "…" else ""}</p>"
         }.orEmpty()
         header.add(
             JLabel(
                 "<html><div style='width:720px'>" +
-                    "<h1 style='margin:0 0 6px 0;color:#f2efe9;font-family:Serif;font-size:22px'>${escapeHtml(manga.title)}</h1>" +
-                    (manga.author?.let { "<p style='margin:2px 0 8px 0;color:#8e8b82;font-size:12px'>Por <b style='color:#f2efe9'>${escapeHtml(it)}</b>" + (manga.artist?.takeIf { a -> a != it }?.let { a -> " &nbsp;•&nbsp; Arte de <b style='color:#f2efe9'>${escapeHtml(a)}</b>" } ?: "") + "</p>" } ?: "") +
-                    "<p style='margin:6px 0;color:#8e8b82;font-size:11.5px'>$metaItems</p>" +
+                    "<h1 style='margin:0 0 6px 0;color:$titleColor;font-family:SansSerif,Serif;font-size:22px'>${escapeHtml(manga.title)}</h1>" +
+                    (manga.author?.let { "<p style='margin:2px 0 8px 0;color:$metaColor;font-size:12px'>Por <b style='color:$authorColor'>${escapeHtml(it)}</b>" + (manga.artist?.takeIf { a -> a != it }?.let { a -> " &nbsp;•&nbsp; Arte de <b style='color:$authorColor'>${escapeHtml(a)}</b>" } ?: "") + "</p>" } ?: "") +
+                    "<p style='margin:6px 0;color:$metaColor;font-size:11.5px'>$metaItems</p>" +
                     descHtml +
                     "</div></html>",
             ),
