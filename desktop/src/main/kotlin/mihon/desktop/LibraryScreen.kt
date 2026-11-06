@@ -266,72 +266,60 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private fun showContextMenu(manga: Manga, x: Int, y: Int) {
-        val menu = JPopupMenu().apply {
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(6, 6, 6, 6),
-            )
-            background = Theme.BG_SURFACE
-        }
-
-        fun styleItem(item: JMenuItem, iconStr: String = "") {
-            item.isOpaque = false
-            item.foreground = Theme.TEXT_PRIMARY
-            item.font = font.deriveFont(Font.PLAIN, 13f)
-            item.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            item.border = BorderFactory.createEmptyBorder(6, 12, 6, 12)
-        }
-
-        val itemDetails = JMenuItem("📖  Abrir detalhes").apply {
-            styleItem(this)
-            addActionListener { ctx.navigator.showDetails(manga) }
-        }
-        menu.add(itemDetails)
-        menu.addSeparator()
-
-        LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }.forEach { (status, label) ->
-            val icon = when (status) {
-                1L -> "▶ "
-                2L -> "✔ "
-                3L -> "🔖 "
-                else -> "📁 "
-            }
-            val item = JMenuItem("$icon Mover para: $label").apply {
-                styleItem(this)
-                addActionListener {
-                    background({ ctx.service.setCategory(manga.id, status) }) { refresh() }
-                }
-            }
-            menu.add(item)
-        }
-        menu.addSeparator()
-
-        val itemRemove = JMenuItem("🗑  Remover da biblioteca").apply {
-            styleItem(this)
-            foreground = Theme.DANGER
-            addActionListener {
-                val ok = JOptionPane.showConfirmDialog(this@LibraryScreen, "Remover '${manga.title}' da biblioteca?", "Remover", JOptionPane.YES_NO_OPTION)
-                if (ok == JOptionPane.YES_OPTION) {
-                    background({ ctx.service.removeFromLibrary(manga.id) }) {
-                        ctx.covers.remove(manga.id)
-                        refresh()
+        val gooeyItems = listOf(
+            GooeyContextMenu.GooeyMenuItem(
+                id = "details",
+                label = "Abrir detalhes",
+                iconType = GooeyContextMenu.IconType.OPEN_DETAILS,
+                onClick = { ctx.navigator.showDetails(manga) },
+            ),
+            GooeyContextMenu.GooeyMenuItem(
+                id = "reading",
+                label = "Mover para: Lendo",
+                iconType = GooeyContextMenu.IconType.READING,
+                onClick = {
+                    background({ ctx.service.setCategory(manga.id, 1L) }) { refresh() }
+                },
+            ),
+            GooeyContextMenu.GooeyMenuItem(
+                id = "completed",
+                label = "Mover para: Completos",
+                iconType = GooeyContextMenu.IconType.COMPLETED,
+                onClick = {
+                    background({ ctx.service.setCategory(manga.id, 2L) }) { refresh() }
+                },
+            ),
+            GooeyContextMenu.GooeyMenuItem(
+                id = "plan_to_read",
+                label = "Mover para: Quero ler",
+                iconType = GooeyContextMenu.IconType.PLAN_TO_READ,
+                onClick = {
+                    background({ ctx.service.setCategory(manga.id, 3L) }) { refresh() }
+                },
+            ),
+            GooeyContextMenu.GooeyMenuItem(
+                id = "remove",
+                label = "Remover da biblioteca",
+                iconType = GooeyContextMenu.IconType.REMOVE,
+                isDanger = true,
+                onClick = {
+                    val ok = JOptionPane.showConfirmDialog(
+                        this@LibraryScreen,
+                        "Remover '${manga.title}' da biblioteca?",
+                        "Remover",
+                        JOptionPane.YES_NO_OPTION,
+                    )
+                    if (ok == JOptionPane.YES_OPTION) {
+                        background({ ctx.service.removeFromLibrary(manga.id) }) {
+                            ctx.covers.remove(manga.id)
+                            refresh()
+                        }
                     }
-                }
-            }
-        }
-        menu.add(itemRemove)
+                },
+            ),
+        )
 
-        // Gooey Ripple / Expand Animation: animates popup from a small bubble into the full menu
-        val animTimer = javax.swing.Timer(16, null)
-        var progress = 0.0f
-        animTimer.addActionListener {
-            progress = (progress + 0.18f).coerceAtMost(1.0f)
-            menu.repaint()
-            if (progress >= 1.0f) animTimer.stop()
-        }
-        animTimer.start()
-
-        menu.show(grid, x, y)
+        GooeyContextMenu(gooeyItems).showAt(grid, x, y)
     }
 
     fun refresh() {
