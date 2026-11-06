@@ -122,14 +122,21 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 }
             }
 
+            override fun mousePressed(e: MouseEvent) {
+                val index = grid.locationToIndex(e.point)
+                if (index < 0 || grid.getCellBounds(index, index)?.contains(e.point) != true) return
+                val manga = model[index]
+                if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger) {
+                    grid.selectedIndex = index
+                    showContextMenu(manga, e.x, e.y)
+                }
+            }
+
             override fun mouseClicked(e: MouseEvent) {
                 val index = grid.locationToIndex(e.point)
                 if (index < 0 || grid.getCellBounds(index, index)?.contains(e.point) != true) return
                 val manga = model[index]
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    grid.selectedIndex = index
-                    showContextMenu(manga, e.x, e.y)
-                } else if (SwingUtilities.isLeftMouseButton(e)) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
                     ctx.navigator.showDetails(manga)
                 }
             }

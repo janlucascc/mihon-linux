@@ -117,7 +117,7 @@ class GooeyContextMenu(
 
         addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
-                handleClick(e.point)
+                handleClick(e.point, e)
             }
         })
 
@@ -183,16 +183,12 @@ class GooeyContextMenu(
                 }
             }
         } else {
+            // Snappier, instant retraction when closing
             items.indices.forEach { i ->
-                val reverseDelay = (items.size - 1 - i) * 1
-                if (elapsedTicks >= reverseDelay) {
-                    itemSprings[i].target = 0.0
-                }
+                itemSprings[i].target = 0.0
             }
-            if (itemSprings.all { it.value < 0.25 }) {
-                hubScale.target = 0.0
-                crossMorph.target = 0.0
-            }
+            hubScale.target = 0.0
+            crossMorph.target = 0.0
         }
 
         var moving = false
@@ -206,7 +202,7 @@ class GooeyContextMenu(
 
         repaint()
 
-        if (closing && !moving && hubScale.value <= 0.02) {
+        if (closing && (!moving || hubScale.value <= 0.15)) {
             val action = pendingAction
             forceDismiss()
             action?.invoke()
@@ -286,7 +282,7 @@ class GooeyContextMenu(
         }
     }
 
-    private fun handleClick(pt: Point) {
+    private fun handleClick(pt: Point, originalEvent: MouseEvent? = null) {
         if (closing) return
 
         for (i in items.indices) {
@@ -298,7 +294,42 @@ class GooeyContextMenu(
             }
         }
 
-        closeMenu(null)
+        val distHub = hypot(pt.x - anchorX, pt.y - anchorY)
+        if (distHub <= HUB_RADIUS + 4) {
+            // Clicked directly on the central X button -> close smoothly
+            closeMenu(null)
+            return
+        }
+
+        // Clicked outside the menu!
+        // Immediately dismiss the blocking overlay so the underlying click/selection/right-click is instant,
+        // without waiting for any delay.
+        val host = hostLayeredPane
+        forceDismiss()
+
+        // Redispatch the event to the component underneath (e.g. library grid for immediate re-opening or selection)
+        if (host != null && originalEvent != null) {
+            val screenPt = originalEvent.locationOnScreen
+            val deep = SwingUtilities.getDeepestComponentAt(host, pt.x, pt.y)
+            if (deep != null && deep !== this) {
+                val localPt = SwingUtilities.convertPoint(host, pt, deep)
+                deep.dispatchEvent(
+                    MouseEvent(
+                        deep,
+                        originalEvent.id,
+                        originalEvent.`when`,
+                        originalEvent.modifiersEx,
+                        localPt.x,
+                        localPt.y,
+                        screenPt.x,
+                        screenPt.y,
+                        originalEvent.clickCount,
+                        originalEvent.isPopupTrigger,
+                        originalEvent.button,
+                    ),
+                )
+            }
+        }
     }
 
     /**
