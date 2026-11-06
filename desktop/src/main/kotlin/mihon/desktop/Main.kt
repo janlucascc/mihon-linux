@@ -305,6 +305,11 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         navigate(HISTORY)
     }
 
+    override fun openSourceCatalog(sourceName: String) {
+        browseHub.openSourceByName(sourceName)
+        navigate(BROWSE)
+    }
+
     private fun navigate(card: String, highlight: String = card) {
         cards.show(content, card)
         navButtons[highlight]?.isSelected = true
@@ -1021,6 +1026,16 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         btnExtensions.text = "Extensões (${ctx.extensions.size})"
         sourcesListScreen.rebuildList()
         searchScreen.loadPopular()
+    }
+
+    fun openSourceByName(sourceName: String) {
+        val ext = ctx.extensions.firstOrNull { it.name.equals(sourceName, ignoreCase = true) || it.name.startsWith(sourceName, ignoreCase = true) }
+        if (ext != null) {
+            searchScreen.openSource(ext.name)
+            sourcesCards.show(sourcesHub, "catalog")
+            cards.show(subContent, "sources")
+            btnSources.isSelected = true
+        }
     }
 }
 

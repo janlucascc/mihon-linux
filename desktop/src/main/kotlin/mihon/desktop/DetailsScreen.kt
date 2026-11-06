@@ -63,6 +63,11 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val catPicker = JComboBox(
         LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }.map { it.second }.toTypedArray(),
     )
+    private val btnFavorite = JButton("♥ Favoritar").apply {
+        font = font.deriveFont(Font.BOLD, 12.5f)
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        addActionListener { toggleFavorite() }
+    }
     private val btnContinue = JButton("▶ Continuar Leitura").apply {
         background = Theme.ACCENT
         foreground = Theme.TEXT_PRIMARY
@@ -156,6 +161,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             background = Theme.BG_APP
             border = BorderFactory.createEmptyBorder(4, 14, 4, 14)
             add(JButton("← Biblioteca").apply { addActionListener { ctx.navigator.showLibrary() } })
+            add(btnFavorite)
             add(btnContinue)
             add(JButton("⬇ Baixar Tudo").apply { addActionListener { downloadSelected() } })
             add(JButton("✔ Marcar Lido").apply { addActionListener { markSelected(true) } })
@@ -241,6 +247,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val catIdx = LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }
             .indexOfFirst { it.first == manga.status }.coerceAtLeast(0)
         catPicker.selectedIndex = catIdx
+        updateFavoriteButtonState(manga.favorite)
         updatingCategory = false
 
         renderHeader(manga)
@@ -258,9 +265,15 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val unreadCount = chapters.count { !it.read }
         val downloadedCount = chapters.count { ctx.service.isChapterDownloaded(manga, it) }
 
+        val sourceLinkHtml = if (!manga.isLocal && ctx.sourceFor(manga.source) != null) {
+            "<a href='source:${escapeHtml(sourceName)}' style='color:${Theme.ACCENT.toHex()};text-decoration:underline;'>${escapeHtml(sourceName)}</a>"
+        } else {
+            escapeHtml(sourceName)
+        }
+
         val metaItems = buildList {
             add("<b>$statusBadge</b>")
-            add(escapeHtml(sourceName))
+            add(sourceLinkHtml)
             add("${chapters.size} cap.")
             if (unreadCount > 0) add("$unreadCount não lido(s)")
             if (downloadedCount > 0) add("<span style='color:#2e9e6b'>⬇ $downloadedCount salvos offline</span>")
@@ -275,17 +288,27 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val descHtml = manga.description?.takeIf { it.isNotBlank() }?.let {
             "<p style='margin-top:12px;color:$descColor;line-height:1.5;font-size:12px'>${escapeHtml(it.take(500))}${if (it.length > 500) "…" else ""}</p>"
         }.orEmpty()
-        header.add(
-            JLabel(
-                "<html><div style='width:720px'>" +
-                    "<h1 style='margin:0 0 6px 0;color:$titleColor;font-family:SansSerif,Serif;font-size:22px'>${escapeHtml(manga.title)}</h1>" +
-                    (manga.author?.let { "<p style='margin:2px 0 8px 0;color:$metaColor;font-size:12px'>Por <b style='color:$authorColor'>${escapeHtml(it)}</b>" + (manga.artist?.takeIf { a -> a != it }?.let { a -> " &nbsp;•&nbsp; Arte de <b style='color:$authorColor'>${escapeHtml(a)}</b>" } ?: "") + "</p>" } ?: "") +
-                    "<p style='margin:6px 0;color:$metaColor;font-size:11.5px'>$metaItems</p>" +
-                    descHtml +
-                    "</div></html>",
-            ),
-            BorderLayout.CENTER,
-        )
+        val headerInfo = javax.swing.JEditorPane("text/html", "").apply {
+            isEditable = false
+            isOpaque = false
+            putClientProperty(javax.swing.JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
+            text = "<html><div style='width:720px'>" +
+                "<h1 style='margin:0 0 6px 0;color:$titleColor;font-family:SansSerif,Serif;font-size:22px'>${escapeHtml(manga.title)}</h1>" +
+                (manga.author?.let { "<p style='margin:2px 0 8px 0;color:$metaColor;font-size:12px'>Por <b style='color:$authorColor'>${escapeHtml(it)}</b>" + (manga.artist?.takeIf { a -> a != it }?.let { a -> " &nbsp;•&nbsp; Arte de <b style='color:$authorColor'>${escapeHtml(a)}</b>" } ?: "") + "</p>" } ?: "") +
+                "<p style='margin:6px 0;color:$metaColor;font-size:11.5px'>$metaItems</p>" +
+                descHtml +
+                "</div></html>"
+            addHyperlinkListener { e ->
+                if (e.eventType == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
+                    val desc = e.description
+                    if (desc.startsWith("source:")) {
+                        val srcName = desc.removePrefix("source:")
+                        ctx.navigator.openSourceCatalog(srcName)
+                    }
+                }
+            }
+        }
+        header.add(headerInfo, BorderLayout.CENTER)
         header.revalidate()
         header.repaint()
     }
@@ -483,6 +506,30 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 ctx.setStatus("Capítulos atualizados (${list.size} no total)")
             }.onFailure {
                 ctx.setStatus("Erro ao atualizar: ${it.message}")
+            }
+        }
+    }
+
+    private fun updateFavoriteButtonState(isFav: Boolean) {
+        if (isFav) {
+            btnFavorite.text = "♥ Na Biblioteca"
+            btnFavorite.background = Theme.ACCENT_SOFT
+            btnFavorite.foreground = Theme.ACCENT_HOVER
+        } else {
+            btnFavorite.text = "♡ Adicionar à Biblioteca"
+            btnFavorite.background = Theme.BG_SURFACE
+            btnFavorite.foreground = Theme.TEXT_PRIMARY
+        }
+    }
+
+    private fun toggleFavorite() {
+        val current = manga ?: return
+        background({ ctx.service.toggleFavorite(current.id) }) { result ->
+            result.onSuccess { isFav ->
+                manga = current.copy(favorite = isFav)
+                updateFavoriteButtonState(isFav)
+                val msg = if (isFav) "'${current.title}' adicionado à biblioteca" else "'${current.title}' removido da biblioteca"
+                ctx.setStatus(msg)
             }
         }
     }

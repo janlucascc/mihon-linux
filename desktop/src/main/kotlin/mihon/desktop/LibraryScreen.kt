@@ -285,7 +285,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 label = "Mover para: Lendo",
                 iconType = GooeyContextMenu.IconType.READING,
                 onClick = {
-                    background({ ctx.service.setCategory(manga.id, 1L) }) { refresh() }
+                    background({ ctx.service.setCategory(manga.id, LibraryCategory.READING) }) { refresh() }
                 },
             ),
             GooeyContextMenu.GooeyMenuItem(
@@ -293,7 +293,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 label = "Mover para: Completos",
                 iconType = GooeyContextMenu.IconType.COMPLETED,
                 onClick = {
-                    background({ ctx.service.setCategory(manga.id, 2L) }) { refresh() }
+                    background({ ctx.service.setCategory(manga.id, LibraryCategory.COMPLETED) }) { refresh() }
                 },
             ),
             GooeyContextMenu.GooeyMenuItem(
@@ -301,7 +301,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 label = "Mover para: Quero ler",
                 iconType = GooeyContextMenu.IconType.PLAN_TO_READ,
                 onClick = {
-                    background({ ctx.service.setCategory(manga.id, 3L) }) { refresh() }
+                    background({ ctx.service.setCategory(manga.id, LibraryCategory.PLAN_TO_READ) }) { refresh() }
                 },
             ),
             GooeyContextMenu.GooeyMenuItem(

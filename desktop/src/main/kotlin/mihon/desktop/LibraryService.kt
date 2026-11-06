@@ -188,22 +188,36 @@ class LibraryService(
     }
 
     /**
-     * Adds or updates a manga from an [ExtensionSource] into the library, fetching its details and chapters.
-     * If the manga is already in the library and initialized with chapters, returns it immediately without
-     * making any network requests.
+     * Loads a manga from an [ExtensionSource] into the local database (fetching its details and chapters).
+     * By default ([addToFavorites] = false), it caches the manga for viewing/reading without polluting
+     * the user's library with unwanted items.
+     * When [addToFavorites] = true, it explicitly bookmarks it into the Library.
      */
-    suspend fun addOnlineManga(source: ExtensionSource, item: MangaResult, forceRefresh: Boolean = false): Manga {
+    suspend fun addOnlineManga(
+        source: ExtensionSource,
+        item: MangaResult,
+        addToFavorites: Boolean = false,
+        forceRefresh: Boolean = false,
+    ): Manga {
         val existing = mangas.getMangaByUrlAndSource(item.url, source.id)
-            ?: mangas.getFavorites().firstOrNull { it.source == source.id && it.title.equals(item.title, ignoreCase = true) }
+            ?: mangas.getAll().firstOrNull { it.source == source.id && it.title.equals(item.title, ignoreCase = true) }
         if (existing != null && !forceRefresh) {
             val localChaps = chapters.getChapterByMangaId(existing.id)
-            if (localChaps.isNotEmpty()) return existing
+            if (localChaps.isNotEmpty()) {
+                if (addToFavorites && !existing.favorite) {
+                    val favManga = existing.copy(favorite = true, favoriteAt = Clock.System.now())
+                    mangas.update(favManga)
+                    return favManga
+                }
+                return existing
+            }
         }
 
         val details: MangaDetails = source.getMangaDetails(item.url)
         val now = Clock.System.now()
 
         val mangaId = if (existing != null) {
+            val isFav = if (addToFavorites) true else existing.favorite
             mangas.update(
                 existing.copy(
                     title = details.title.ifBlank { item.title },
@@ -211,8 +225,8 @@ class LibraryService(
                     artist = details.artist,
                     description = details.description,
                     thumbnailUrl = details.coverUrl ?: item.coverUrl,
-                    favorite = true,
-                    favoriteAt = existing.favoriteAt ?: now,
+                    favorite = isFav,
+                    favoriteAt = if (isFav) (existing.favoriteAt ?: now) else null,
                     lastUpdate = now,
                     initialized = true,
                 ),
@@ -228,8 +242,8 @@ class LibraryService(
                     artist = details.artist,
                     description = details.description,
                     thumbnailUrl = details.coverUrl ?: item.coverUrl,
-                    favorite = true,
-                    favoriteAt = now,
+                    favorite = addToFavorites,
+                    favoriteAt = if (addToFavorites) now else null,
                     dateAdded = now,
                     lastUpdate = now,
                     initialized = true,

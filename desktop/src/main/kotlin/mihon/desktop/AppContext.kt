@@ -256,6 +256,7 @@ interface Navigator {
     fun showLibrary()
     fun showDetails(manga: Manga)
     fun showHistory()
+    fun openSourceCatalog(sourceName: String)
 }
 
 /** Shared state handed to every screen. */
@@ -574,12 +575,6 @@ class CoverCache(
         // Subtle bottom vignette for legibility
         g.paint = GradientPaint(0f, (COVER_H - 56).toFloat(), Color(0, 0, 0, 0), 0f, COVER_H.toFloat(), Color(0, 0, 0, 145))
         g.fillRect(0, COVER_H - 56, COVER_W, 56)
-
-        // Left book-spine crease effect (authentic Tankobon volume feel)
-        g.color = Color(255, 255, 255, 38)
-        g.drawLine(4, 0, 4, COVER_H)
-        g.color = Color(0, 0, 0, 110)
-        g.drawLine(5, 0, 5, COVER_H)
 
         g.clip = null
         g.color = Color(242, 239, 233, 36)
