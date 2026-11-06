@@ -71,7 +71,6 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val btnContinue = JButton("▶ Continuar Leitura").apply {
         font = font.deriveFont(Font.BOLD, 13f)
         addActionListener { continueReading() }
-        updateContinueButtonStyle()
     }
     private val progressBar = JProgressBar(0, 100).apply {
         isStringPainted = true
@@ -222,14 +221,17 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             chapterList.repaint()
             repaint()
         }
+
+        updateContinueButtonStyle()
     }
 
     private fun updateContinueButtonStyle() {
+        val btn = btnContinue ?: return
         val bg = Theme.ACCENT
-        btnContinue.background = bg
+        btn.background = bg
         // Calculate relative luminance to guarantee readable high contrast
         val lum = (bg.red * 299 + bg.green * 587 + bg.blue * 114) / 1000
-        btnContinue.foreground = if (lum > 140) Color(0x10, 0x10, 0x12) else Color.WHITE
+        btn.foreground = if (lum > 140) Color(0x10, 0x10, 0x12) else Color.WHITE
     }
 
     private fun showChapterMenu(x: Int, y: Int) {
