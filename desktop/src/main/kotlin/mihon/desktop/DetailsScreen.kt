@@ -145,7 +145,10 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val chosen = LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }
                 .getOrNull(catPicker.selectedIndex)?.first ?: return@addActionListener
             background({ ctx.service.setCategory(current.id, chosen) }) {
-                manga = current.copy(status = chosen)
+                val updated = current.copy(status = chosen, favorite = true)
+                manga = updated
+                updateFavoriteButtonState(true)
+                renderHeader(updated)
                 ctx.setStatus("Categoria alterada para '${LibraryCategory.labelOf(chosen)}'")
             }
         }

@@ -3,7 +3,11 @@ package mihon.desktop
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferByte
 import java.awt.image.DataBufferInt
+import java.io.ByteArrayOutputStream
 import java.util.stream.IntStream
+import javax.imageio.IIOImage
+import javax.imageio.ImageIO
+import javax.imageio.ImageWriteParam
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -31,6 +35,85 @@ object MangaImageEnhancer {
         ULTRA("Ultra (Lanczos-3 + Anime4K Line-Art)"),
         SHARP("Nítido (Lanczos-3 + CAS)"),
         FAST("Rápido (Bilinear)"),
+    }
+
+    enum class InstallUpscaleFactor(val factor: Int, val label: String) {
+        OFF(1, "Desativado (1x Original — Mais rápido e compacto)"),
+        X2(2, "2x Super-Resolução HD (Recomendado — Equilíbrio ideal)"),
+        X3(3, "3x Full HD Ultra (Alta definição para telas grandes)"),
+        X5(5, "5x Master 4K/8K (Máxima densidade — Requer mais espaço)"),
+    }
+
+    enum class InstallOutputFormat(val ext: String, val label: String) {
+        JPEG_HQ("jpg", "JPEG Alta Qualidade (92% — Menor espaço em disco)"),
+        PNG_LOSSLESS("png", "PNG Sem Perdas (100% — Fidelidade absoluta de estúdio)"),
+    }
+
+    /**
+     * Pre-processes raw downloaded page bytes during chapter installation (.cbz creation).
+     * Applies [factor]x upscaling (2x, 3x, 5x) and [quality] algorithm, returning the encoded bytes and extension.
+     * Safeguards against OOM by capping any single dimension to 7680px (8K).
+     */
+    fun enhanceForInstall(
+        rawBytes: ByteArray,
+        originalExt: String,
+        factor: InstallUpscaleFactor,
+        quality: QualityMode,
+        outputFormat: InstallOutputFormat,
+    ): Pair<ByteArray, String> {
+        if (factor == InstallUpscaleFactor.OFF || factor.factor <= 1) {
+            return rawBytes to originalExt
+        }
+        val decoded = mihon.core.archive.ImageDecoder.decode(rawBytes) ?: return rawBytes to originalExt
+        try {
+            val maxDim = 7680 // Cap at 8K to prevent excessive heap allocation on long webtoon strips
+            val rawTargetW = decoded.width.toLong() * factor.factor
+            val rawTargetH = decoded.height.toLong() * factor.factor
+            val clampScale = if (rawTargetW > maxDim || rawTargetH > maxDim) {
+                min(maxDim.toDouble() / decoded.width, maxDim.toDouble() / decoded.height).coerceAtLeast(1.0)
+            } else {
+                factor.factor.toDouble()
+            }
+
+            val targetW = (decoded.width * clampScale).toInt().coerceAtLeast(1)
+            val targetH = (decoded.height * clampScale).toInt().coerceAtLeast(1)
+
+            val enhanced = scale(decoded, targetW, targetH, quality)
+            decoded.flush()
+
+            val outStream = ByteArrayOutputStream(rawBytes.size * 2)
+            if (outputFormat == InstallOutputFormat.PNG_LOSSLESS) {
+                ImageIO.write(enhanced, "png", outStream)
+                enhanced.flush()
+                return outStream.toByteArray() to "png"
+            } else {
+                val writers = ImageIO.getImageWritersByFormatName("jpeg")
+                if (writers.hasNext()) {
+                    val writer = writers.next()
+                    try {
+                        val param = writer.defaultWriteParam.apply {
+                            if (canWriteCompressed()) {
+                                compressionMode = ImageWriteParam.MODE_EXPLICIT
+                                compressionQuality = 0.92f
+                            }
+                        }
+                        ImageIO.createImageOutputStream(outStream).use { ios ->
+                            writer.output = ios
+                            writer.write(null, IIOImage(enhanced, null, null), param)
+                        }
+                    } finally {
+                        writer.dispose()
+                    }
+                } else {
+                    ImageIO.write(enhanced, "jpg", outStream)
+                }
+                enhanced.flush()
+                return outStream.toByteArray() to "jpg"
+            }
+        } catch (_: Throwable) {
+            decoded.flush()
+            return rawBytes to originalExt
+        }
     }
 
     private const val LANCZOS_A = 3.0

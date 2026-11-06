@@ -443,6 +443,47 @@ class MihonApp : JFrame("Mihon"), Navigator {
             addActionListener { readerPrefs.put("quality", MangaImageEnhancer.QualityMode.entries[selectedIndex].name) }
         }
 
+        // --- Gráficos & Instalação (Pré-processamento de Upscaling 2x, 3x, 5x nos downloads .cbz) ---
+        val installFactorBox = JComboBox(MangaImageEnhancer.InstallUpscaleFactor.entries.map { it.label }.toTypedArray()).apply {
+            val saved = runCatching {
+                MangaImageEnhancer.InstallUpscaleFactor.valueOf(readerPrefs.get("installUpscaleFactor", "OFF"))
+            }.getOrDefault(MangaImageEnhancer.InstallUpscaleFactor.OFF)
+            selectedIndex = saved.ordinal
+            maximumSize = Dimension(460, 32)
+            alignmentX = 0f
+            addActionListener {
+                val chosen = MangaImageEnhancer.InstallUpscaleFactor.entries[selectedIndex]
+                readerPrefs.put("installUpscaleFactor", chosen.name)
+                ctx.setStatus("Upscaling na instalação configurado para: ${chosen.label}")
+            }
+        }
+
+        val installQualityBox = JComboBox(MangaImageEnhancer.QualityMode.entries.map { it.label }.toTypedArray()).apply {
+            val saved = runCatching {
+                MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("installUpscaleQuality", "HD_64BIT"))
+            }.getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
+            selectedIndex = saved.ordinal
+            maximumSize = Dimension(460, 32)
+            alignmentX = 0f
+            addActionListener {
+                val chosen = MangaImageEnhancer.QualityMode.entries[selectedIndex]
+                readerPrefs.put("installUpscaleQuality", chosen.name)
+            }
+        }
+
+        val installFormatBox = JComboBox(MangaImageEnhancer.InstallOutputFormat.entries.map { it.label }.toTypedArray()).apply {
+            val saved = runCatching {
+                MangaImageEnhancer.InstallOutputFormat.valueOf(readerPrefs.get("installOutputFormat", "JPEG_HQ"))
+            }.getOrDefault(MangaImageEnhancer.InstallOutputFormat.JPEG_HQ)
+            selectedIndex = saved.ordinal
+            maximumSize = Dimension(460, 32)
+            alignmentX = 0f
+            addActionListener {
+                val chosen = MangaImageEnhancer.InstallOutputFormat.entries[selectedIndex]
+                readerPrefs.put("installOutputFormat", chosen.name)
+            }
+        }
+
         val btnBackup = JButton("Exportar Backup (.zip)").apply { addActionListener { exportBackup() } }
         val btnRestore = JButton("Restaurar Backup (.zip)").apply { addActionListener { importBackup() } }
         val backupRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
@@ -483,7 +524,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
         val lblThemeTitle = JLabel("Aparência e Tema:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
         val lblMode = JLabel("Modo de leitura padrão:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
         val lblFit = JLabel("Ajuste de página padrão:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
-        val lblQuality = JLabel("Qualidade de renderização e Upscaling (Zoom):").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val lblQuality = JLabel("Qualidade de renderização em Tempo Real (Leitor / Online):").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
         val lblBackupTitle = JLabel("Backup da Biblioteca e Histórico:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
         val lblSystemTitle = JLabel("Caminhos do sistema:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
         val lblDb = JLabel("Banco SQLite: ${dbFile.absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
@@ -491,12 +532,36 @@ class MihonApp : JFrame("Mihon"), Navigator {
         val lblSources = JLabel("Fontes JSON: ${File(home, ".mihon/sources").absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
         val lblLogs = JLabel("Logs: ${File(home, ".mihon/logs/mihon.log").absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
 
-        val panel = JPanel().apply {
+        val lblAppActionsTitle = JLabel("Aplicativo & Ajuda:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val btnAbout = JButton("ℹ️ Sobre o Mihon").apply {
+            addActionListener {
+                JOptionPane.showMessageDialog(
+                    this@MihonApp,
+                    "Mihon Desktop Linux\nLeitor de Mangá de Alta Performance\nKotlin + Exposed/SQLite + FlatLaf Swing",
+                    "Sobre o Mihon",
+                    JOptionPane.INFORMATION_MESSAGE,
+                )
+            }
+        }
+        val btnExit = JButton("Encerrar Aplicativo").apply {
+            addActionListener {
+                this@MihonApp.dispatchEvent(java.awt.event.WindowEvent(this@MihonApp, java.awt.event.WindowEvent.WINDOW_CLOSING))
+            }
+        }
+        val appActionsRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 38)
+            add(btnAbout)
+            add(Box.createHorizontalStrut(10))
+            add(btnExit)
+        }
+
+        // --- Aba 1: Geral & Sistema ---
+        val generalPanel = JPanel().apply {
             background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
-            add(topBar)
-            add(Box.createVerticalStrut(18))
+            border = BorderFactory.createEmptyBorder(16, 20, 20, 20)
 
             add(lblThemeTitle)
             add(Box.createVerticalStrut(6))
@@ -519,11 +584,6 @@ class MihonApp : JFrame("Mihon"), Navigator {
             add(lblFit)
             add(Box.createVerticalStrut(4))
             add(defaultFitBox)
-            add(Box.createVerticalStrut(12))
-
-            add(lblQuality)
-            add(Box.createVerticalStrut(4))
-            add(defaultQualityBox)
             add(Box.createVerticalStrut(20))
 
             add(lblBackupTitle)
@@ -539,42 +599,123 @@ class MihonApp : JFrame("Mihon"), Navigator {
             add(lblLogs)
             add(Box.createVerticalStrut(24))
 
-            val lblAppActionsTitle = JLabel("Aplicativo & Ajuda:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
-            val btnAbout = JButton("ℹ️ Sobre o Mihon").apply {
-                addActionListener {
-                    JOptionPane.showMessageDialog(
-                        this@MihonApp,
-                        "Mihon Desktop Linux\nLeitor de Mangá de Alta Performance\nKotlin + Exposed/SQLite + FlatLaf Swing",
-                        "Sobre o Mihon",
-                        JOptionPane.INFORMATION_MESSAGE,
-                    )
-                }
-            }
-            val btnExit = JButton("Encerrar Aplicativo").apply {
-                addActionListener {
-                    this@MihonApp.dispatchEvent(java.awt.event.WindowEvent(this@MihonApp, java.awt.event.WindowEvent.WINDOW_CLOSING))
-                }
-            }
-            val appActionsRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-                isOpaque = false
-                alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 38)
-                add(btnAbout)
-                add(Box.createHorizontalStrut(10))
-                add(btnExit)
-            }
             add(lblAppActionsTitle)
             add(Box.createVerticalStrut(8))
             add(appActionsRow)
+            add(Box.createVerticalGlue())
+        }
+
+        // --- Aba 2: Gráficos (Pré-processamento de Instalação & Leitor) ---
+        val lblGraphicsHero = JLabel("Motor Gráfico & Super-Resolução na Instalação").apply {
+            font = font.deriveFont(Font.BOLD, 16f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+        val lblGraphicsDesc = JLabel(
+            "<html><div style='width:580px'>Aplica algoritmos avançados de reconstrução de traço vetorial e cores vivas " +
+                "<b>diretamente durante o download/instalação do capítulo (.cbz)</b>. " +
+                "Assim, quando você abrir um mangá baixado, ele já estará aprimorado em 2x, 3x ou 5x sem gastar CPU ou memória em tempo real!</div></html>",
+        ).apply {
+            font = font.deriveFont(Font.PLAIN, 12.5f)
+            foreground = Theme.TEXT_SECONDARY
+            alignmentX = 0f
+        }
+
+        val lblInstallFactor = JLabel("Fator de Melhoria Visual na Instalação (Exclusivo para Mangás Baixados):").apply {
+            font = font.deriveFont(Font.BOLD, 13f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+        val lblInstallAlgo = JLabel("Algoritmo de Upscaling e Reconstrução de Imagem na Instalação:").apply {
+            font = font.deriveFont(Font.BOLD, 13f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+        val lblInstallFormat = JLabel("Formato de Compressão das Páginas Aprimoradas no .cbz:").apply {
+            font = font.deriveFont(Font.BOLD, 13f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+        val lblGraphicsNote = JLabel(
+            "<html><div style='width:580px'>💡 <b>Nota:</b> Escalas maiores (3x e 5x) produzem nitidez cristalina para zoom extremo e monitores 4K, " +
+                "mas aumentam o tempo de instalação do capítulo e o espaço ocupado em disco. Capítulos lidos via streaming online não sofrem pré-processamento de disco.</div></html>",
+        ).apply {
+            font = font.deriveFont(Font.PLAIN, 11.5f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0f
+        }
+        val lblRealtimeSection = JLabel("Renderização em Tempo Real (Zoom no Leitor):").apply {
+            font = font.deriveFont(Font.BOLD, 14f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+
+        val graphicsPanel = JPanel().apply {
+            background = Theme.BG_APP
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createEmptyBorder(16, 20, 20, 20)
+
+            add(lblGraphicsHero)
+            add(Box.createVerticalStrut(6))
+            add(lblGraphicsDesc)
+            add(Box.createVerticalStrut(18))
+
+            add(lblInstallFactor)
+            add(Box.createVerticalStrut(6))
+            add(installFactorBox)
+            add(Box.createVerticalStrut(14))
+
+            add(lblInstallAlgo)
+            add(Box.createVerticalStrut(6))
+            add(installQualityBox)
+            add(Box.createVerticalStrut(14))
+
+            add(lblInstallFormat)
+            add(Box.createVerticalStrut(6))
+            add(installFormatBox)
+            add(Box.createVerticalStrut(12))
+            add(lblGraphicsNote)
+            add(Box.createVerticalStrut(24))
+
+            add(lblRealtimeSection)
+            add(Box.createVerticalStrut(6))
+            add(lblQuality)
+            add(Box.createVerticalStrut(6))
+            add(defaultQualityBox)
 
             add(Box.createVerticalGlue())
         }
 
-        val scroll = JScrollPane(panel).apply {
+        val scrollGeneral = JScrollPane(generalPanel).apply {
             border = null
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 20
+        }
+        val scrollGraphics = JScrollPane(graphicsPanel).apply {
+            border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
+            verticalScrollBar.unitIncrement = 20
+        }
+
+        val tabs = javax.swing.JTabbedPane().apply {
+            background = Theme.BG_APP
+            foreground = Theme.TEXT_PRIMARY
+            font = font.deriveFont(Font.BOLD, 13f)
+            addTab("⚙ Geral & Sistema", scrollGeneral)
+            addTab("✨ Gráficos", scrollGraphics)
+        }
+
+        val root = JPanel(BorderLayout()).apply {
+            background = Theme.BG_APP
+            val headerWrap = JPanel(BorderLayout()).apply {
+                background = Theme.BG_APP
+                border = BorderFactory.createEmptyBorder(16, 24, 8, 24)
+                add(topBar, BorderLayout.WEST)
+            }
+            add(headerWrap, BorderLayout.NORTH)
+            add(tabs, BorderLayout.CENTER)
         }
 
         ctx.addThemeListener {
@@ -585,13 +726,27 @@ class MihonApp : JFrame("Mihon"), Navigator {
             lblQuality.foreground = Theme.TEXT_PRIMARY
             lblBackupTitle.foreground = Theme.TEXT_PRIMARY
             lblSystemTitle.foreground = Theme.TEXT_PRIMARY
+            lblAppActionsTitle.foreground = Theme.TEXT_PRIMARY
+            lblGraphicsHero.foreground = Theme.TEXT_PRIMARY
+            lblGraphicsDesc.foreground = Theme.TEXT_SECONDARY
+            lblInstallFactor.foreground = Theme.TEXT_PRIMARY
+            lblInstallAlgo.foreground = Theme.TEXT_PRIMARY
+            lblInstallFormat.foreground = Theme.TEXT_PRIMARY
+            lblGraphicsNote.foreground = Theme.TEXT_MUTED
+            lblRealtimeSection.foreground = Theme.TEXT_PRIMARY
             incognitoCheck.foreground = Theme.TEXT_PRIMARY
             autoPrefetchCheck.foreground = Theme.TEXT_PRIMARY
             incognitoCheck.isOpaque = false
             autoPrefetchCheck.isOpaque = false
-            panel.background = Theme.BG_APP
-            scroll.background = Theme.BG_APP
-            scroll.viewport.background = Theme.BG_APP
+            root.background = Theme.BG_APP
+            tabs.background = Theme.BG_APP
+            tabs.foreground = Theme.TEXT_PRIMARY
+            generalPanel.background = Theme.BG_APP
+            graphicsPanel.background = Theme.BG_APP
+            scrollGeneral.background = Theme.BG_APP
+            scrollGeneral.viewport.background = Theme.BG_APP
+            scrollGraphics.background = Theme.BG_APP
+            scrollGraphics.viewport.background = Theme.BG_APP
             lblDb.foreground = Theme.TEXT_MUTED
             lblDl.foreground = Theme.TEXT_MUTED
             lblSources.foreground = Theme.TEXT_MUTED
@@ -600,10 +755,10 @@ class MihonApp : JFrame("Mihon"), Navigator {
             if (themeBox.selectedIndex != currentIdx) {
                 themeBox.selectedIndex = currentIdx
             }
-            scroll.repaint()
+            root.repaint()
         }
 
-        return scroll
+        return root
     }
 
     private fun openCustomThemeDialog() {

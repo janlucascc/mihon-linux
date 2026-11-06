@@ -89,7 +89,25 @@ class LibraryService(
 
     fun isChapterDownloading(chapterId: Long): Boolean = chapterId in activeDownloads
 
-    suspend fun library(): List<Manga> = mangas.getFavorites().sortedBy { it.title.lowercase() }
+    suspend fun library(): List<Manga> {
+        val favs = mangas.getFavorites()
+        if (favs.size <= 1) return favs
+        val deduplicated = mutableListOf<Manga>()
+        val seenKeys = HashSet<String>()
+        for (m in favs.sortedBy { it.id }) {
+            val normUrl = m.url.trim().trimEnd('/').lowercase()
+            val normTitle = m.title.trim().lowercase()
+            val keyUrl = "${m.source}::$normUrl"
+            val keyTitle = "${m.source}::title::$normTitle"
+            if (seenKeys.add(keyUrl) && seenKeys.add(keyTitle)) {
+                deduplicated.add(m)
+            } else {
+                // Unfavorite duplicate entry so it stops polluting the Library
+                runCatching { mangas.update(m.copy(favorite = false, favoriteAt = null)) }
+            }
+        }
+        return deduplicated.sortedBy { it.title.lowercase() }
+    }
 
     suspend fun chaptersOf(mangaId: Long): List<Chapter> =
         chapters.getChapterByMangaId(mangaId).sortedBy { it.sourceOrder }
@@ -199,8 +217,14 @@ class LibraryService(
         addToFavorites: Boolean = false,
         forceRefresh: Boolean = false,
     ): Manga {
+        val normItemUrl = item.url.trim().trimEnd('/')
         val existing = mangas.getMangaByUrlAndSource(item.url, source.id)
-            ?: mangas.getAll().firstOrNull { it.source == source.id && it.title.equals(item.title, ignoreCase = true) }
+            ?: mangas.getAll().firstOrNull {
+                it.source == source.id && (
+                    it.url.trim().trimEnd('/').equals(normItemUrl, ignoreCase = true) ||
+                        it.title.trim().equals(item.title.trim(), ignoreCase = true)
+                    )
+            }
         if (existing != null && !forceRefresh) {
             val localChaps = chapters.getChapterByMangaId(existing.id)
             if (localChaps.isNotEmpty()) {
@@ -351,12 +375,27 @@ class LibraryService(
             val imageUrls = source.getChapterImages(chapter.url)
             require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
 
+            val readerPrefs = java.util.prefs.Preferences.userRoot().node("mihon-linux-reader")
+            val installFactor = runCatching {
+                MangaImageEnhancer.InstallUpscaleFactor.valueOf(readerPrefs.get("installUpscaleFactor", "OFF"))
+            }.getOrDefault(MangaImageEnhancer.InstallUpscaleFactor.OFF)
+            val installQuality = runCatching {
+                MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("installUpscaleQuality", "HD_64BIT"))
+            }.getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
+            val installFormat = runCatching {
+                MangaImageEnhancer.InstallOutputFormat.valueOf(readerPrefs.get("installOutputFormat", "JPEG_HQ"))
+            }.getOrDefault(MangaImageEnhancer.InstallOutputFormat.JPEG_HQ)
+
             val partFile = File(target.parentFile, "${target.name}.part")
             try {
                 ZipOutputStream(partFile.outputStream().buffered()).use { zip ->
                     imageUrls.forEachIndexed { idx, imgUrl ->
                         onProgress(idx + 1, imageUrls.size)
-                        queueItem.progress = "${idx + 1} / ${imageUrls.size} págs"
+                        queueItem.progress = if (installFactor != MangaImageEnhancer.InstallUpscaleFactor.OFF) {
+                            "${idx + 1} / ${imageUrls.size} págs (Upscale ${installFactor.factor}x)"
+                        } else {
+                            "${idx + 1} / ${imageUrls.size} págs"
+                        }
                         val cleanImgUrl = imgUrl.trim().replace(" ", "%20")
                         val ext = cleanImgUrl.substringBefore('?').substringAfterLast('.', "jpg")
                             .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "gif") } ?: "jpg"
@@ -369,13 +408,25 @@ class LibraryService(
                                 else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                             )
                             .header("Referer", if (isMangaDex) "https://mangadex.org/" else "${source.baseUrl}/")
+                            .apply {
+                                if (source.baseUrl.contains("hentaidatia")) {
+                                    header("Cookie", "tia_idade_confirmada=1")
+                                }
+                            }
                             .build()
-                        val bytes = httpClient.newCall(req).execute().use { resp ->
+                        val rawBytes = httpClient.newCall(req).execute().use { resp ->
                             if (!resp.isSuccessful) throw IOException("Falha HTTP ${resp.code} na página ${idx + 1}")
                             resp.body?.bytes() ?: throw IOException("Página ${idx + 1} vazia")
                         }
-                        zip.putNextEntry(ZipEntry("%04d.%s".format(idx + 1, ext)))
-                        zip.write(bytes)
+                        val (finalBytes, finalExt) = MangaImageEnhancer.enhanceForInstall(
+                            rawBytes = rawBytes,
+                            originalExt = ext,
+                            factor = installFactor,
+                            quality = installQuality,
+                            outputFormat = installFormat,
+                        )
+                        zip.putNextEntry(ZipEntry("%04d.%s".format(idx + 1, finalExt)))
+                        zip.write(finalBytes)
                         zip.closeEntry()
                     }
                 }
@@ -422,7 +473,14 @@ class LibraryService(
 
     suspend fun setCategory(mangaId: Long, categoryStatus: Long) {
         val current = mangas.getMangaById(mangaId) ?: return
-        mangas.update(current.copy(status = categoryStatus))
+        val now = Clock.System.now()
+        mangas.update(
+            current.copy(
+                status = categoryStatus,
+                favorite = true,
+                favoriteAt = current.favoriteAt ?: now,
+            ),
+        )
     }
 
     suspend fun markChaptersRead(chaptersToUpdate: List<Chapter>, readState: Boolean) {

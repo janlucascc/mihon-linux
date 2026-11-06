@@ -285,7 +285,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 label = "Mover para: Lendo",
                 iconType = GooeyContextMenu.IconType.READING,
                 onClick = {
-                    background({ ctx.service.setCategory(manga.id, LibraryCategory.READING) }) { refresh() }
+                    background({ ctx.service.setCategory(manga.id, LibraryCategory.READING) }) {
+                        ctx.setStatus("'${manga.title}' movido para: Lendo")
+                        refresh()
+                    }
                 },
             ),
             GooeyContextMenu.GooeyMenuItem(
@@ -293,7 +296,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 label = "Mover para: Completos",
                 iconType = GooeyContextMenu.IconType.COMPLETED,
                 onClick = {
-                    background({ ctx.service.setCategory(manga.id, LibraryCategory.COMPLETED) }) { refresh() }
+                    background({ ctx.service.setCategory(manga.id, LibraryCategory.COMPLETED) }) {
+                        ctx.setStatus("'${manga.title}' movido para: Completos")
+                        refresh()
+                    }
                 },
             ),
             GooeyContextMenu.GooeyMenuItem(
@@ -301,7 +307,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 label = "Mover para: Quero ler",
                 iconType = GooeyContextMenu.IconType.PLAN_TO_READ,
                 onClick = {
-                    background({ ctx.service.setCategory(manga.id, LibraryCategory.PLAN_TO_READ) }) { refresh() }
+                    background({ ctx.service.setCategory(manga.id, LibraryCategory.PLAN_TO_READ) }) {
+                        ctx.setStatus("'${manga.title}' movido para: Quero ler")
+                        refresh()
+                    }
                 },
             ),
             GooeyContextMenu.GooeyMenuItem(

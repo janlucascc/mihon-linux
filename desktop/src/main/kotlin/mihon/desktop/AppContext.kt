@@ -602,9 +602,6 @@ class CoverCache(
         g.color = Color(0x18, 0x18, 0x1E)
         g.fillRoundRect(0, 0, COVER_W, COVER_H, COVER_ARC, COVER_ARC)
 
-        g.color = Color(0xE0, 0x4F, 0x3E, 45)
-        g.fillRect(0, 0, 6, COVER_H)
-
         g.color = Color(242, 239, 233, 55)
         g.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 38f)
         val fm = g.fontMetrics
