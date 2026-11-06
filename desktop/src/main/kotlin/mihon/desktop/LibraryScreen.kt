@@ -213,14 +213,14 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             popup.show(anchor, 0, anchor.height)
         }
 
+        val titleLabel = JLabel("Biblioteca").apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+            foreground = Theme.TEXT_PRIMARY
+        }
+
         val topAppBar = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
             border = BorderFactory.createEmptyBorder(12, 22, 10, 22)
-
-            val titleLabel = JLabel("Biblioteca").apply {
-                font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
-                foreground = Theme.TEXT_PRIMARY
-            }
             add(titleLabel, BorderLayout.WEST)
 
             val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
@@ -241,10 +241,28 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         val scroll = JScrollPane(grid).apply {
             border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 28
         }
         add(topHeader, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            grid.background = Theme.BG_APP
+            topAppBar.background = Theme.BG_APP
+            topHeader.background = Theme.BG_APP
+            tabsBar.background = Theme.BG_SURFACE
+            titleLabel.foreground = Theme.TEXT_PRIMARY
+            btnSearch.foreground = Theme.TEXT_PRIMARY
+            btnFilter.foreground = Theme.TEXT_PRIMARY
+            btnOverflow.foreground = Theme.TEXT_PRIMARY
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            grid.repaint()
+            repaint()
+        }
     }
 
     private fun showContextMenu(manga: Manga, x: Int, y: Int) {

@@ -132,7 +132,7 @@ class MangaPosterCard : JPanel() {
         } else {
             var textY = coverY + COVER_H + 18
             g2.font = font.deriveFont(Font.BOLD, 13f)
-            g2.color = if (hoveredState) Color.WHITE else Theme.TEXT_PRIMARY
+            g2.color = if (hoveredState) (if (Theme.isDark) Color.WHITE else Color(0x00, 0x55, 0xAA)) else Theme.TEXT_PRIMARY
             val lines = wrapTwoLines(g2, titleText, maxTextW)
             lines.forEach { line ->
                 g2.drawString(line, textX, textY)

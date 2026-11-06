@@ -44,26 +44,69 @@ const val COVER_ARC = 10
  * - M3 Clean Sans-serif Font Hierarchy
  */
 object Theme {
-    val BG_APP = Color(0x00, 0x00, 0x00) // Pure Black AMOLED (Mihon Android)
-    val BG_SIDEBAR = Color(0x08, 0x08, 0x08)
-    val BG_SURFACE = Color(0x12, 0x12, 0x12)
-    val BG_CARD = Color(0x18, 0x18, 0x18)
-    val BG_CARD_HOVER = Color(0x26, 0x26, 0x26)
-    val BG_PILL_ACTIVE = Color(0x4A, 0x4A, 0x4A) // M3 Pill Selection Container
-    val BORDER_SUBTLE = Color(255, 255, 255, 26) // Hairline divider
-    val ACCENT = Color(0xFF, 0xFF, 0xFF) // M3 Primary high-contrast White
-    val ACCENT_HOVER = Color(0xE0, 0xE0, 0xE0)
-    val ACCENT_SOFT = Color(255, 255, 255, 36)
+    var isDark: Boolean = true
+        private set
+
+    var BG_APP = Color(0x00, 0x00, 0x00) // Pure Black AMOLED (Mihon Android)
+    var BG_SIDEBAR = Color(0x08, 0x08, 0x08)
+    var BG_SURFACE = Color(0x12, 0x12, 0x12)
+    var BG_CARD = Color(0x18, 0x18, 0x18)
+    var BG_CARD_HOVER = Color(0x26, 0x26, 0x26)
+    var BG_PILL_ACTIVE = Color(0x4A, 0x4A, 0x4A) // M3 Pill Selection Container
+    var BORDER_SUBTLE = Color(255, 255, 255, 26) // Hairline divider
+    var ACCENT = Color(0xFF, 0xFF, 0xFF) // M3 Primary high-contrast White
+    var ACCENT_HOVER = Color(0xE0, 0xE0, 0xE0)
+    var ACCENT_SOFT = Color(255, 255, 255, 36)
     val TERTIARY = Color(0x2E, 0x9E, 0x6B) // Offline Matcha
-    val TEXT_PRIMARY = Color(0xFF, 0xFF, 0xFF) // Pure White
-    val TEXT_SECONDARY = Color(0xCC, 0xCC, 0xCC)
-    val TEXT_MUTED = Color(0x9E, 0x9E, 0x9E) // M3 onSurfaceVariant
+    var TEXT_PRIMARY = Color(0xFF, 0xFF, 0xFF) // Pure White
+    var TEXT_SECONDARY = Color(0xCC, 0xCC, 0xCC)
+    var TEXT_MUTED = Color(0x9E, 0x9E, 0x9E) // M3 onSurfaceVariant
     val SUCCESS = Color(0x2E, 0x9E, 0x6B)
     val DANGER = Color(0xEF, 0x53, 0x50)
 
     val FONT_DISPLAY = Font("SansSerif", Font.BOLD, 20)
     val FONT_UI = Font("SansSerif", Font.PLAIN, 13)
     val FONT_MONO = Font("Monospaced", Font.PLAIN, 12)
+
+    private val listeners = mutableListOf<(Boolean) -> Unit>()
+
+    fun addListener(listener: (Boolean) -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun setDarkMode(dark: Boolean) {
+        isDark = dark
+        if (dark) {
+            BG_APP = Color(0x00, 0x00, 0x00)
+            BG_SIDEBAR = Color(0x08, 0x08, 0x08)
+            BG_SURFACE = Color(0x12, 0x12, 0x12)
+            BG_CARD = Color(0x18, 0x18, 0x18)
+            BG_CARD_HOVER = Color(0x26, 0x26, 0x26)
+            BG_PILL_ACTIVE = Color(0x4A, 0x4A, 0x4A)
+            BORDER_SUBTLE = Color(255, 255, 255, 26)
+            ACCENT = Color(0xFF, 0xFF, 0xFF)
+            ACCENT_HOVER = Color(0xE0, 0xE0, 0xE0)
+            ACCENT_SOFT = Color(255, 255, 255, 36)
+            TEXT_PRIMARY = Color(0xFF, 0xFF, 0xFF)
+            TEXT_SECONDARY = Color(0xCC, 0xCC, 0xCC)
+            TEXT_MUTED = Color(0x9E, 0x9E, 0x9E)
+        } else {
+            BG_APP = Color(0xF4, 0xF5, 0xF8)
+            BG_SIDEBAR = Color(0xEA, 0xED, 0xF2)
+            BG_SURFACE = Color(0xFF, 0xFF, 0xFF)
+            BG_CARD = Color(0xFF, 0xFF, 0xFF)
+            BG_CARD_HOVER = Color(0xDF, 0xE3, 0xE8)
+            BG_PILL_ACTIVE = Color(0xD0, 0xD6, 0xE0)
+            BORDER_SUBTLE = Color(0, 0, 0, 24)
+            ACCENT = Color(0x1F, 0x1F, 0x1F)
+            ACCENT_HOVER = Color(0x33, 0x33, 0x33)
+            ACCENT_SOFT = Color(0, 0, 0, 20)
+            TEXT_PRIMARY = Color(0x1C, 0x1D, 0x1F)
+            TEXT_SECONDARY = Color(0x4A, 0x4E, 0x54)
+            TEXT_MUTED = Color(0x71, 0x76, 0x80)
+        }
+        listeners.forEach { runCatching { it(dark) } }
+    }
 }
 
 /** Shared application coroutine scope on Dispatchers.IO for non-blocking background work. */
@@ -78,6 +121,8 @@ internal fun <T> background(work: suspend () -> T, onDone: (Result<T>) -> Unit) 
 }
 
 internal fun escapeHtml(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+internal fun Color.toHex(): String = String.format("#%02x%02x%02x", red, green, blue)
 
 /** Navigation between the screens of the main window. */
 interface Navigator {
@@ -98,6 +143,7 @@ class AppContext(
     var incognitoMode: Boolean = false
     var onlyOfflineFilter: Boolean = false
     private val offlineFilterListeners = mutableListOf<(Boolean) -> Unit>()
+    private val themeListeners = mutableListOf<(Boolean) -> Unit>()
 
     fun addOfflineFilterListener(listener: (Boolean) -> Unit) {
         offlineFilterListeners.add(listener)
@@ -108,6 +154,14 @@ class AppContext(
             onlyOfflineFilter = value
             offlineFilterListeners.forEach { it(value) }
         }
+    }
+
+    fun addThemeListener(listener: (Boolean) -> Unit) {
+        Theme.addListener(listener)
+    }
+
+    fun notifyThemeChanged(isDark: Boolean) {
+        Theme.setDarkMode(isDark)
     }
 
     fun sourceFor(sourceId: Long): ExtensionSource? =

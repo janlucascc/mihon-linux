@@ -31,6 +31,7 @@ import javax.swing.ButtonGroup
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JFileChooser
 import javax.swing.JFrame
 import javax.swing.JLabel
@@ -50,31 +51,46 @@ private const val PREF_DARK = "darkTheme"
 private val prefs: Preferences = Preferences.userRoot().node("mihon-linux")
 private val readerPrefs: Preferences = Preferences.userRoot().node("mihon-linux-reader")
 
-internal fun applyTheme(dark: Boolean) {
-    prefs.putBoolean(PREF_DARK, dark)
+internal fun configureTheme(dark: Boolean) {
+    Theme.setDarkMode(dark)
     if (dark) FlatDarkLaf.setup() else FlatLightLaf.setup()
-    FlatLaf.updateUI()
-}
-
-fun main() {
-    setupUncaughtErrorHandling()
-    if (prefs.getBoolean(PREF_DARK, true)) FlatDarkLaf.setup() else FlatLightLaf.setup()
     UIManager.put("Panel.background", Theme.BG_APP)
     UIManager.put("ScrollPane.background", Theme.BG_APP)
     UIManager.put("Viewport.background", Theme.BG_APP)
     UIManager.put("List.background", Theme.BG_APP)
     UIManager.put("Button.background", Theme.BG_CARD)
     UIManager.put("Button.foreground", Theme.TEXT_PRIMARY)
-    UIManager.put("ComboBox.background", Theme.BG_CARD)
-    UIManager.put("TextField.background", Theme.BG_CARD)
+    UIManager.put("ComboBox.background", Theme.BG_SURFACE)
+    UIManager.put("ComboBox.foreground", Theme.TEXT_PRIMARY)
+    UIManager.put("TextField.background", Theme.BG_SURFACE)
+    UIManager.put("TextField.foreground", Theme.TEXT_PRIMARY)
     UIManager.put("ToggleButton.selectedBackground", Theme.BG_PILL_ACTIVE)
     UIManager.put("ToggleButton.selectedForeground", Theme.TEXT_PRIMARY)
+    UIManager.put("CheckBox.background", Theme.BG_APP)
+    UIManager.put("CheckBox.foreground", Theme.TEXT_PRIMARY)
+    UIManager.put("Label.foreground", Theme.TEXT_PRIMARY)
     UIManager.put("Component.arc", 999) // M3 Pill shapes
     UIManager.put("Button.arc", 999)
     UIManager.put("TextComponent.arc", 16)
     UIManager.put("ProgressBar.arc", 999)
     UIManager.put("ScrollBar.thumbArc", 999)
     UIManager.put("ScrollBar.width", 10)
+}
+
+internal fun applyTheme(dark: Boolean) {
+    prefs.putBoolean(PREF_DARK, dark)
+    configureTheme(dark)
+    FlatLaf.updateUI()
+    java.awt.Window.getWindows().forEach { win ->
+        SwingUtilities.updateComponentTreeUI(win)
+        win.repaint()
+    }
+}
+
+fun main() {
+    setupUncaughtErrorHandling()
+    val isDark = prefs.getBoolean(PREF_DARK, true)
+    configureTheme(isDark)
     SwingUtilities.invokeLater { MihonApp() }
 }
 
@@ -163,11 +179,27 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         content.add(moreScreen, MORE)
         content.add(settingsScreen(), SETTINGS)
 
-        add(sidebar(), BorderLayout.WEST)
+        val side = sidebar()
+        add(side, BorderLayout.WEST)
         add(content, BorderLayout.CENTER)
         statusBar.border = BorderFactory.createEmptyBorder(5, 10, 5, 10)
         add(statusBar, BorderLayout.SOUTH)
         jMenuBar = menuBar()
+
+        ctx.addThemeListener {
+            side.background = Theme.BG_SIDEBAR
+            side.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(20, 14, 18, 14),
+            )
+            brandLabel.foreground = Theme.TEXT_PRIMARY
+            versionLabel.foreground = Theme.TEXT_MUTED
+            content.background = Theme.BG_APP
+            statusBar.background = Theme.BG_SIDEBAR
+            statusBar.foreground = Theme.TEXT_MUTED
+            jMenuBar = menuBar()
+            repaint()
+        }
 
         showLibrary()
         isVisible = true
@@ -193,6 +225,9 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         navButtons[highlight]?.isSelected = true
     }
 
+    private lateinit var brandLabel: JLabel
+    private lateinit var versionLabel: JLabel
+
     private fun sidebar(): JPanel {
         val panel = JPanel().apply {
             background = Theme.BG_SIDEBAR
@@ -203,26 +238,24 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             )
             preferredSize = Dimension(220, 0)
         }
+        brandLabel = JLabel("Mihon", SwingConstants.LEFT).apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+            foreground = Theme.TEXT_PRIMARY
+        }
         val brandRow = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
             isOpaque = false
             alignmentX = 0f
             maximumSize = Dimension(Int.MAX_VALUE, 40)
-            add(
-                JLabel("Mihon", SwingConstants.LEFT).apply {
-                    font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
-                    foreground = Theme.TEXT_PRIMARY
-                },
-            )
+            add(brandLabel)
         }
         panel.add(brandRow)
         panel.add(Box.createVerticalStrut(2))
-        panel.add(
-            JLabel("  Desktop Linux • v0.3").apply {
-                font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11f)
-                foreground = Theme.TEXT_MUTED
-                alignmentX = 0f
-            },
-        )
+        versionLabel = JLabel("  Desktop Linux • v0.3").apply {
+            font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0f
+        }
+        panel.add(versionLabel)
         panel.add(Box.createVerticalStrut(22))
 
         val group = ButtonGroup()
@@ -255,11 +288,20 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         return panel
     }
 
-    private fun settingsScreen(): JPanel {
-        val dark = JCheckBox("Tema escuro (FlatLaf Dark)", prefs.getBoolean(PREF_DARK, true))
-        dark.addActionListener { applyTheme(dark.isSelected) }
+    private fun settingsScreen(): JComponent {
+        val dark = JCheckBox("Tema escuro (FlatLaf Dark)", prefs.getBoolean(PREF_DARK, true)).apply {
+            isOpaque = false
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 28)
+            addActionListener { applyTheme(isSelected) }
+        }
 
         val incognitoCheck = JCheckBox("Modo anônimo (Pausa gravação no histórico de leitura)", ctx.incognitoMode).apply {
+            isOpaque = false
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 28)
             toolTipText = "Mihon M3: Quando ativado, os capítulos lidos não serão salvos no histórico"
             addActionListener {
                 ctx.incognitoMode = isSelected
@@ -268,6 +310,10 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         }
 
         val autoPrefetchCheck = JCheckBox("Pré-baixar próximos capítulos automaticamente ao ler online", readerPrefs.getBoolean("autoPrefetch", false)).apply {
+            isOpaque = false
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 28)
             toolTipText = "Quando ativado, os 2 próximos capítulos são baixados em segundo plano enquanto você lê"
             addActionListener { readerPrefs.putBoolean("autoPrefetch", isSelected) }
         }
@@ -276,12 +322,14 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             val saved = runCatching { ReadMode.valueOf(readerPrefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
             selectedIndex = saved.ordinal
             maximumSize = Dimension(280, 32)
+            alignmentX = 0f
             addActionListener { readerPrefs.put("mode", ReadMode.entries[selectedIndex].name) }
         }
         val defaultFitBox = JComboBox(FitMode.entries.map { it.label }.toTypedArray()).apply {
             val saved = runCatching { FitMode.valueOf(readerPrefs.get("fit", "WINDOW")) }.getOrDefault(FitMode.WINDOW)
             selectedIndex = saved.ordinal
             maximumSize = Dimension(280, 32)
+            alignmentX = 0f
             addActionListener { readerPrefs.put("fit", FitMode.entries[selectedIndex].name) }
         }
         val defaultQualityBox = JComboBox(MangaImageEnhancer.QualityMode.entries.map { it.label }.toTypedArray()).apply {
@@ -289,21 +337,31 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
                 .getOrDefault(MangaImageEnhancer.QualityMode.ULTRA)
             selectedIndex = saved.ordinal
             maximumSize = Dimension(320, 32)
+            alignmentX = 0f
             addActionListener { readerPrefs.put("quality", MangaImageEnhancer.QualityMode.entries[selectedIndex].name) }
         }
 
         val btnBackup = JButton("Exportar Backup (.zip)").apply { addActionListener { exportBackup() } }
         val btnRestore = JButton("Restaurar Backup (.zip)").apply { addActionListener { importBackup() } }
         val backupRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
             alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 38)
             add(btnBackup)
             add(Box.createHorizontalStrut(10))
             add(btnRestore)
         }
 
+        val titleLbl = JLabel("Configurações").apply {
+            font = font.deriveFont(Font.BOLD, 20f)
+            foreground = Theme.TEXT_PRIMARY
+        }
+
         val topBar = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             isOpaque = false
             alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 38)
+            preferredSize = Dimension(400, 38)
             val backBtn = JButton("← Voltar").apply {
                 isFocusable = false
                 font = font.deriveFont(Font.BOLD, 13f)
@@ -315,57 +373,94 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             }
             add(backBtn)
             add(Box.createHorizontalStrut(14))
-            add(JLabel("Configurações").apply { font = font.deriveFont(Font.BOLD, 20f); foreground = Theme.TEXT_PRIMARY })
+            add(titleLbl)
         }
 
-        return JPanel().apply {
+        val lblMode = JLabel("Modo de leitura padrão:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val lblFit = JLabel("Ajuste de página padrão:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val lblQuality = JLabel("Qualidade de renderização e Upscaling (Zoom):").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val lblBackupTitle = JLabel("Backup da Biblioteca e Histórico:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val lblSystemTitle = JLabel("Caminhos do sistema:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+        val lblDb = JLabel("Banco SQLite: ${dbFile.absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
+        val lblDl = JLabel("Downloads: ${ctx.service.downloadsDir.absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
+        val lblSources = JLabel("Fontes JSON: ${File(home, ".mihon/sources").absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
+        val lblLogs = JLabel("Logs: ${File(home, ".mihon/logs/mihon.log").absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
+
+        val panel = JPanel().apply {
+            background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
             add(topBar)
             add(Box.createVerticalStrut(18))
 
-            dark.alignmentX = 0f
             add(dark)
             add(Box.createVerticalStrut(8))
 
-            incognitoCheck.alignmentX = 0f
             add(incognitoCheck)
             add(Box.createVerticalStrut(8))
 
-            autoPrefetchCheck.alignmentX = 0f
             add(autoPrefetchCheck)
             add(Box.createVerticalStrut(16))
 
-            add(JLabel("Modo de leitura padrão:").apply { alignmentX = 0f })
+            add(lblMode)
             add(Box.createVerticalStrut(4))
-            defaultModeBox.alignmentX = 0f
             add(defaultModeBox)
             add(Box.createVerticalStrut(12))
 
-            add(JLabel("Ajuste de página padrão:").apply { alignmentX = 0f })
+            add(lblFit)
             add(Box.createVerticalStrut(4))
-            defaultFitBox.alignmentX = 0f
             add(defaultFitBox)
             add(Box.createVerticalStrut(12))
 
-            add(JLabel("Qualidade de renderização e Upscaling (Zoom):").apply { alignmentX = 0f })
+            add(lblQuality)
             add(Box.createVerticalStrut(4))
-            defaultQualityBox.alignmentX = 0f
             add(defaultQualityBox)
             add(Box.createVerticalStrut(20))
 
-            add(JLabel("Backup da Biblioteca e Histórico:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f })
+            add(lblBackupTitle)
             add(Box.createVerticalStrut(8))
             add(backupRow)
             add(Box.createVerticalStrut(24))
 
-            add(JLabel("Caminhos do sistema:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f })
+            add(lblSystemTitle)
             add(Box.createVerticalStrut(6))
-            add(JLabel("Banco SQLite: ${dbFile.absolutePath}").apply { alignmentX = 0f })
-            add(JLabel("Downloads: ${ctx.service.downloadsDir.absolutePath}").apply { alignmentX = 0f })
-            add(JLabel("Fontes JSON: ${File(home, ".mihon/sources").absolutePath}").apply { alignmentX = 0f })
-            add(JLabel("Logs: ${File(home, ".mihon/logs/mihon.log").absolutePath}").apply { alignmentX = 0f })
+            add(lblDb)
+            add(lblDl)
+            add(lblSources)
+            add(lblLogs)
+
+            add(Box.createVerticalGlue())
         }
+
+        val scroll = JScrollPane(panel).apply {
+            border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
+            verticalScrollBar.unitIncrement = 20
+        }
+
+        ctx.addThemeListener {
+            dark.isSelected = !it.not()
+            panel.background = Theme.BG_APP
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            titleLbl.foreground = Theme.TEXT_PRIMARY
+            dark.foreground = Theme.TEXT_PRIMARY
+            incognitoCheck.foreground = Theme.TEXT_PRIMARY
+            autoPrefetchCheck.foreground = Theme.TEXT_PRIMARY
+            lblMode.foreground = Theme.TEXT_PRIMARY
+            lblFit.foreground = Theme.TEXT_PRIMARY
+            lblQuality.foreground = Theme.TEXT_PRIMARY
+            lblBackupTitle.foreground = Theme.TEXT_PRIMARY
+            lblSystemTitle.foreground = Theme.TEXT_PRIMARY
+            lblDb.foreground = Theme.TEXT_MUTED
+            lblDl.foreground = Theme.TEXT_MUTED
+            lblSources.foreground = Theme.TEXT_MUTED
+            lblLogs.foreground = Theme.TEXT_MUTED
+            scroll.repaint()
+        }
+
+        return scroll
     }
 
     private fun exportBackup() {
@@ -505,7 +600,7 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
             val bh = 18
             val bx = w - bw - 14
             val by = (h - bh) / 2
-            g2.color = if (isSelected) Color(255, 255, 255, 45) else Color(255, 255, 255, 25)
+            g2.color = if (isSelected) (if (Theme.isDark) Color(255, 255, 255, 45) else Color(0, 0, 0, 30)) else (if (Theme.isDark) Color(255, 255, 255, 25) else Color(0, 0, 0, 16))
             g2.fillRoundRect(bx, by, bw, bh, bh, bh)
             g2.color = Theme.TEXT_PRIMARY
             g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
@@ -545,6 +640,7 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val btnSources = JToggleButton("Fontes")
     private val btnExtensions = JToggleButton("Extensões (${ctx.extensions.size})")
     private val btnMigrate = JToggleButton("Migrar")
+    private val tabBar: JPanel
 
     init {
         background = Theme.BG_APP
@@ -558,7 +654,7 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         subContent.add(extensionsScreen, "extensions")
         subContent.add(migratePlaceholder(), "migrate")
 
-        val tabBar = JPanel(FlowLayout(FlowLayout.CENTER, 10, 10)).apply {
+        tabBar = JPanel(FlowLayout(FlowLayout.CENTER, 10, 10)).apply {
             background = Theme.BG_APP
             border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
             val group = ButtonGroup()
@@ -578,15 +674,43 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         btnSources.isSelected = true
         add(tabBar, BorderLayout.NORTH)
         add(subContent, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            subContent.background = Theme.BG_APP
+            sourcesHub.background = Theme.BG_APP
+            tabBar.background = Theme.BG_APP
+            tabBar.border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+            repaint()
+        }
     }
 
     private fun migratePlaceholder(): JPanel = JPanel(java.awt.GridBagLayout()).apply {
         background = Theme.BG_APP
-        val label = JLabel(
-            "<html><div style='text-align:center'><h2 style='color:#FFFFFF'>Migrar Fontes</h2><p style='color:#9E9E9E'>Transfira mangás favoritados de uma fonte para outra fonte ativa.</p></div></html>",
-            SwingConstants.CENTER,
-        )
-        add(label)
+        val titleLbl = JLabel("Migrar Fontes", SwingConstants.CENTER).apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 18f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0.5f
+        }
+        val descLbl = JLabel("Transfira mangás favoritados de uma fonte para outra fonte ativa.", SwingConstants.CENTER).apply {
+            font = Theme.FONT_UI
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0.5f
+        }
+        val p = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(titleLbl)
+            add(Box.createVerticalStrut(6))
+            add(descLbl)
+        }
+        add(p)
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            titleLbl.foreground = Theme.TEXT_PRIMARY
+            descLbl.foreground = Theme.TEXT_MUTED
+            repaint()
+        }
     }
 
     fun reload() {
@@ -602,16 +726,34 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 class UpdatesPlaceholderScreen(ctx: AppContext) : JPanel(BorderLayout()) {
     init {
         background = Theme.BG_APP
-        val center = JPanel(java.awt.GridBagLayout()).apply {
-            background = Theme.BG_APP
-            add(
-                JLabel(
-                    "<html><div style='text-align:center'><h1 style='color:#FFFFFF;margin-bottom:8px'>Atualizações</h1><p style='color:#9E9E9E;font-size:13px'>Aqui são listados os capítulos mais recentes lançados pelas suas fontes instaladas.</p></div></html>",
-                    SwingConstants.CENTER,
-                ),
-            )
+        val titleLbl = JLabel("Atualizações", SwingConstants.CENTER).apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0.5f
         }
-        add(center, BorderLayout.CENTER)
+        val descLbl = JLabel("Aqui são listados os capítulos mais recentes lançados pelas suas fontes instaladas.", SwingConstants.CENTER).apply {
+            font = Theme.FONT_UI.deriveFont(13f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0.5f
+        }
+        val center = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(titleLbl)
+            add(Box.createVerticalStrut(8))
+            add(descLbl)
+        }
+        val wrap = JPanel(java.awt.GridBagLayout()).apply {
+            isOpaque = false
+            add(center)
+        }
+        add(wrap, BorderLayout.CENTER)
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            titleLbl.foreground = Theme.TEXT_PRIMARY
+            descLbl.foreground = Theme.TEXT_MUTED
+            repaint()
+        }
     }
 }
 
@@ -660,6 +802,9 @@ class MoreScreen(
         }
 
         // Header Switch Group (Material 3 Toggle Cards)
+        val lblOfflineDesc = JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
+        val lblIncognitoDesc = JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
+
         val switchGroup = JPanel().apply {
             background = Theme.BG_SURFACE
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -671,10 +816,10 @@ class MoreScreen(
             maximumSize = Dimension(Int.MAX_VALUE, 130)
 
             add(offlineSwitch)
-            add(JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) })
+            add(lblOfflineDesc)
             add(Box.createVerticalStrut(14))
             add(incognitoSwitch)
-            add(JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) })
+            add(lblIncognitoDesc)
         }
         content.add(switchGroup)
         content.add(Box.createVerticalStrut(20))
@@ -689,7 +834,14 @@ class MoreScreen(
             Triple("ℹ️", "Sobre", "Mihon Linux v0.3.0"),
         )
 
+        data class RowHolders(val row: JPanel, val titleLbl: JLabel, val descLbl: JLabel, val chevLbl: JLabel)
+        val rowHolders = mutableListOf<RowHolders>()
+
         rows.forEach { (icon, title, desc) ->
+            val titleLbl = JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13.5f); foreground = Theme.TEXT_PRIMARY }
+            val descLbl = JLabel(desc).apply { font = font.deriveFont(Font.PLAIN, 11f); foreground = Theme.TEXT_MUTED }
+            val chevLbl = JLabel("›").apply { font = font.deriveFont(Font.BOLD, 18f); foreground = Theme.TEXT_MUTED }
+
             val row = JPanel(BorderLayout(14, 0)).apply {
                 background = Theme.BG_SURFACE
                 border = BorderFactory.createCompoundBorder(
@@ -707,13 +859,13 @@ class MoreScreen(
                         JPanel().apply {
                             isOpaque = false
                             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                            add(JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13.5f); foreground = Theme.TEXT_PRIMARY })
-                            add(JLabel(desc).apply { font = font.deriveFont(Font.PLAIN, 11f); foreground = Theme.TEXT_MUTED })
+                            add(titleLbl)
+                            add(descLbl)
                         },
                     )
                 }
                 add(left, BorderLayout.WEST)
-                add(JLabel("›").apply { font = font.deriveFont(Font.BOLD, 18f); foreground = Theme.TEXT_MUTED }, BorderLayout.EAST)
+                add(chevLbl, BorderLayout.EAST)
 
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
@@ -729,11 +881,45 @@ class MoreScreen(
                     }
                 })
             }
+            rowHolders.add(RowHolders(row, titleLbl, descLbl, chevLbl))
             content.add(row)
             content.add(Box.createVerticalStrut(8))
         }
 
-        add(JScrollPane(content).apply { border = null; verticalScrollBar.unitIncrement = 24 }, BorderLayout.CENTER)
+        val scroll = JScrollPane(content).apply {
+            border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
+            verticalScrollBar.unitIncrement = 24
+        }
+        add(scroll, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            content.background = Theme.BG_APP
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            offlineSwitch.foreground = Theme.TEXT_PRIMARY
+            incognitoSwitch.foreground = Theme.TEXT_PRIMARY
+            lblOfflineDesc.foreground = Theme.TEXT_MUTED
+            lblIncognitoDesc.foreground = Theme.TEXT_MUTED
+            switchGroup.background = Theme.BG_SURFACE
+            switchGroup.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(16, 20, 16, 20),
+            )
+            rowHolders.forEach { (row, titleLbl, descLbl, chevLbl) ->
+                row.background = Theme.BG_SURFACE
+                row.border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                    BorderFactory.createEmptyBorder(14, 18, 14, 18),
+                )
+                titleLbl.foreground = Theme.TEXT_PRIMARY
+                descLbl.foreground = Theme.TEXT_MUTED
+                chevLbl.foreground = Theme.TEXT_MUTED
+            }
+            repaint()
+        }
     }
 }
 

@@ -194,10 +194,26 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         val scroll = JScrollPane(chapterList).apply {
             border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 24
         }
         add(top, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            top.background = Theme.BG_APP
+            header.background = Theme.BG_SURFACE
+            chapterList.background = Theme.BG_APP
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            chapterHeaderLabel.foreground = Theme.TEXT_PRIMARY
+            btnContinue.background = Theme.ACCENT
+            btnContinue.foreground = Theme.TEXT_PRIMARY
+            chapterList.repaint()
+            repaint()
+        }
     }
 
     private fun showChapterMenu(x: Int, y: Int) {

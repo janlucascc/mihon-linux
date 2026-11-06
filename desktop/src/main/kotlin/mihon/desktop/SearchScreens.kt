@@ -135,10 +135,23 @@ class SearchScreen(
         }
         val scroll = JScrollPane(grid).apply {
             border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 28
         }
         add(top, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            grid.background = Theme.BG_APP
+            top.background = Theme.BG_SURFACE
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            grid.repaint()
+            repaint()
+        }
+
         loadPopular()
     }
 
@@ -316,8 +329,24 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             add(JButton("↻ Atualizar").apply { addActionListener { refresh() } })
             add(JButton("Limpar histórico").apply { addActionListener { clearAll() } })
         }
+        val scroll = JScrollPane(list).apply {
+            border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
+            verticalScrollBar.unitIncrement = 24
+        }
         add(top, BorderLayout.NORTH)
-        add(JScrollPane(list).apply { border = null; verticalScrollBar.unitIncrement = 24 }, BorderLayout.CENTER)
+        add(scroll, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            list.background = Theme.BG_APP
+            top.background = Theme.BG_SURFACE
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            list.repaint()
+            repaint()
+        }
     }
 
     fun refresh() {
@@ -526,12 +555,27 @@ class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
                     }
                 }
             }
-        add(JScrollPane(list).apply { border = null }, BorderLayout.CENTER)
+        val scroll = JScrollPane(list).apply {
+            border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
+        }
+        add(scroll, BorderLayout.CENTER)
         val footer = JLabel("  ${ctx.extensions.size} fonte(s) ativa(s)  •  Adicione arquivos .json em ~/.mihon/sources/ ou .jar em ~/.mihon/extensions/").apply {
             foreground = Theme.TEXT_MUTED
             border = BorderFactory.createEmptyBorder(10, 14, 10, 14)
         }
         add(footer, BorderLayout.SOUTH)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            list.background = Theme.BG_APP
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            footer.foreground = Theme.TEXT_MUTED
+            list.repaint()
+            repaint()
+        }
     }
 }
 
@@ -576,9 +620,22 @@ class SourcesListScreen(
 
         val scroll = JScrollPane(container).apply {
             border = null
+            background = Theme.BG_APP
+            viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 24
         }
         add(scroll, BorderLayout.CENTER)
+
+        ctx.addThemeListener {
+            background = Theme.BG_APP
+            container.background = Theme.BG_APP
+            searchBar.background = Theme.BG_APP
+            searchBar.border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+            scroll.background = Theme.BG_APP
+            scroll.viewport.background = Theme.BG_APP
+            rebuildList()
+            repaint()
+        }
 
         rebuildList()
     }
