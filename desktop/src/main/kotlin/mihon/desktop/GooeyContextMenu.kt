@@ -469,9 +469,8 @@ class GooeyContextMenu(
     }
 
     /**
-     * Renders the unified liquid mesh:
-     * - Only adjacent satellite buttons in the arc are connected by smooth liquid bridges (creating the elegant fanned arc from the video).
-     * - The central trigger button (X) remains clean and detached without radial web bridges to satellites.
+     * Renders each circular action button independently with smooth drop shadow.
+     * All bridge connections between buttons have been removed for a clean, detached floating layout.
      */
     private fun renderLiquidMesh(
         g2: Graphics2D,
@@ -481,26 +480,6 @@ class GooeyContextMenu(
         currentHubR: Double,
         palette: GooeyPalette? = null,
     ) {
-        // Bridges between adjacent satellites in arc (chain liquid)
-        for (i in 0 until items.size - 1) {
-            if (radii[i] > 6.0 && radii[i + 1] > 6.0) {
-                if (palette != null) {
-                    val dangerBridge = (items[i].isDanger && hoveredIndex == i) || (items[i + 1].isDanger && hoveredIndex == i + 1)
-                    g2.color = if (dangerBridge) palette.dangerBg else palette.blobBg
-                }
-                drawMetaballBridge(
-                    g2 = g2,
-                    x1 = centersX[i],
-                    y1 = centersY[i],
-                    r1 = radii[i],
-                    x2 = centersX[i + 1],
-                    y2 = centersY[i + 1],
-                    r2 = radii[i + 1],
-                    maxDist = radii[i] + radii[i + 1] + 28.0,
-                )
-            }
-        }
-
         // Satellite circles
         for (i in items.indices) {
             val r = radii[i]
