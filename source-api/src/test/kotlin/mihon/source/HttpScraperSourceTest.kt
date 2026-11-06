@@ -56,6 +56,7 @@ class HttpScraperSourceTest {
                 detailsDescription = "p.desc",
                 chapterItem = "li.ch",
                 pageImage = "div.reader img",
+                userAgent = "MihonLinux/1.0 (X11; Linux x86_64)",
             ),
         )
     }
@@ -87,11 +88,12 @@ class HttpScraperSourceTest {
         assertEquals("Oda", details.author)
         assertEquals("Piratas.", details.description)
         assertEquals(2, details.chapters.size)
-        assertEquals("/manga/one-piece/ch-2", details.chapters[0].url)
-        assertEquals(1, details.chapters[0].volume)
-        assertEquals(2.5f, details.chapters[0].chapter)
-        assertNull(details.chapters[1].volume)
-        assertEquals(1f, details.chapters[1].chapter)
+        assertEquals("/manga/one-piece/ch-1", details.chapters[0].url)
+        assertNull(details.chapters[0].volume)
+        assertEquals(1f, details.chapters[0].chapter)
+        assertEquals("/manga/one-piece/ch-2", details.chapters[1].url)
+        assertEquals(1, details.chapters[1].volume)
+        assertEquals(2.5f, details.chapters[1].chapter)
     }
 
     @Test
