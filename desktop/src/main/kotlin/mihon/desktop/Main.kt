@@ -412,7 +412,15 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
     init {
         isOpaque = false
         isFocusable = false
+        isBorderPainted = false
+        isContentAreaFilled = false
+        isFocusPainted = false
+        border = null
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+    }
+
+    override fun paintBorder(g: java.awt.Graphics) {
+        // Suppress FlatLaf/Swing default button borders to preserve clean M3 look
     }
 
     override fun paintComponent(g: java.awt.Graphics) {
@@ -423,13 +431,20 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
         val w = width
         val h = height
 
+        val pillX = 4
+        val pillY = 3
+        val pillW = w - 8
+        val pillH = h - 6
+        // Material 3 Stadium Pill: corner arc equals height so ends are smooth semicircles and top/bottom are straight
+        val arc = pillH
+
         // M3 Active Pill Container
         if (isSelected) {
             g2.color = Theme.BG_PILL_ACTIVE
-            g2.fillRoundRect(4, 3, w - 8, h - 6, 999, 999)
+            g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
         } else if (model.isRollover) {
             g2.color = Theme.BG_CARD_HOVER
-            g2.fillRoundRect(4, 3, w - 8, h - 6, 999, 999)
+            g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
         }
 
         g2.font = font.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
@@ -446,7 +461,7 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
             val bx = w - bw - 14
             val by = (h - bh) / 2
             g2.color = if (isSelected) Color(255, 255, 255, 45) else Color(255, 255, 255, 25)
-            g2.fillRoundRect(bx, by, bw, bh, 999, 999)
+            g2.fillRoundRect(bx, by, bw, bh, bh, bh)
             g2.color = Theme.TEXT_PRIMARY
             g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
         }
