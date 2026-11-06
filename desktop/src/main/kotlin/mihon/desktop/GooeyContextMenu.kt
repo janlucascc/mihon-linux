@@ -417,16 +417,11 @@ class GooeyContextMenu(
         val shadowG = g2.create() as Graphics2D
         shadowG.translate(0.0, 3.5)
         shadowG.color = palette.shadowColor
-        renderLiquidMesh(shadowG, centersX, centersY, radii, currentHubR, isOutline = false)
+        renderLiquidMesh(shadowG, centersX, centersY, radii, currentHubR)
         shadowG.dispose()
 
-        // 2. Draw Liquid Body (Metaballs + Connecting Bridges)
-        renderLiquidMesh(g2, centersX, centersY, radii, currentHubR, isOutline = false, palette = palette)
-
-        // 3. Draw Crisp Subtle Outline (Hairline border for perfect clarity against any manga cover)
-        g2.color = palette.outlineColor
-        g2.stroke = BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
-        renderLiquidMesh(g2, centersX, centersY, radii, currentHubR, isOutline = true)
+        // 2. Draw Solid Liquid Body (Metaball circles + seamless Bezier bridges)
+        renderLiquidMesh(g2, centersX, centersY, radii, currentHubR, palette = palette)
 
         // 4. Draw Satellite Icons
         val cx = anchorX.toFloat()
@@ -484,13 +479,12 @@ class GooeyContextMenu(
         centersY: DoubleArray,
         radii: DoubleArray,
         currentHubR: Double,
-        isOutline: Boolean,
         palette: GooeyPalette? = null,
     ) {
         // Bridges between hub and satellite nodes (radial stretch)
         for (i in items.indices) {
             if (radii[i] > 4.0 && currentHubR > 4.0) {
-                if (palette != null && !isOutline) {
+                if (palette != null) {
                     g2.color = if (items[i].isDanger && hoveredIndex == i) palette.dangerBg else palette.blobBg
                 }
                 drawMetaballBridge(
@@ -502,7 +496,6 @@ class GooeyContextMenu(
                     y2 = centersY[i],
                     r2 = radii[i],
                     maxDist = currentHubR + radii[i] + 32.0,
-                    isOutline = isOutline,
                 )
             }
         }
@@ -510,7 +503,7 @@ class GooeyContextMenu(
         // Bridges between adjacent satellites in arc (chain liquid)
         for (i in 0 until items.size - 1) {
             if (radii[i] > 6.0 && radii[i + 1] > 6.0) {
-                if (palette != null && !isOutline) {
+                if (palette != null) {
                     val dangerBridge = (items[i].isDanger && hoveredIndex == i) || (items[i + 1].isDanger && hoveredIndex == i + 1)
                     g2.color = if (dangerBridge) palette.dangerBg else palette.blobBg
                 }
@@ -523,7 +516,6 @@ class GooeyContextMenu(
                     y2 = centersY[i + 1],
                     r2 = radii[i + 1],
                     maxDist = radii[i] + radii[i + 1] + 28.0,
-                    isOutline = isOutline,
                 )
             }
         }
@@ -532,7 +524,7 @@ class GooeyContextMenu(
         for (i in items.indices) {
             val r = radii[i]
             if (r > 1.0) {
-                if (palette != null && !isOutline) {
+                if (palette != null) {
                     g2.color = when {
                         items[i].isDanger && hoveredIndex == i -> palette.dangerBg
                         hoveredIndex == i -> palette.blobHoverBg
@@ -540,17 +532,17 @@ class GooeyContextMenu(
                     }
                 }
                 val shape = Ellipse2D.Double(centersX[i] - r, centersY[i] - r, r * 2.0, r * 2.0)
-                if (isOutline) g2.draw(shape) else g2.fill(shape)
+                g2.fill(shape)
             }
         }
 
         // Central hub circle
         if (currentHubR > 1.0) {
-            if (palette != null && !isOutline) {
+            if (palette != null) {
                 g2.color = palette.hubBg
             }
             val hubShape = Ellipse2D.Double(anchorX - currentHubR, anchorY - currentHubR, currentHubR * 2.0, currentHubR * 2.0)
-            if (isOutline) g2.draw(hubShape) else g2.fill(hubShape)
+            g2.fill(hubShape)
         }
     }
 
@@ -566,7 +558,6 @@ class GooeyContextMenu(
         y2: Double,
         r2: Double,
         maxDist: Double,
-        isOutline: Boolean = false,
     ) {
         val d = hypot(x2 - x1, y2 - y1)
         if (d <= kotlin.math.abs(r1 - r2) || d > maxDist || r1 <= 1.0 || r2 <= 1.0) return
@@ -628,7 +619,7 @@ class GooeyContextMenu(
             p1bY,
         )
         path.closePath()
-        if (isOutline) g2.draw(path) else g2.fill(path)
+        g2.fill(path)
     }
 
     private fun drawHubMorphIcon(g2: Graphics2D, cx: Float, cy: Float, scale: Float, morph: Float, color: Color) {
