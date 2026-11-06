@@ -232,6 +232,14 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         val dark = JCheckBox("Tema escuro (FlatLaf Dark)", prefs.getBoolean(PREF_DARK, true))
         dark.addActionListener { applyTheme(dark.isSelected) }
 
+        val incognitoCheck = JCheckBox("Modo anônimo (Pausa gravação no histórico de leitura)", ctx.incognitoMode).apply {
+            toolTipText = "Mihon M3: Quando ativado, os capítulos lidos não serão salvos no histórico"
+            addActionListener {
+                ctx.incognitoMode = isSelected
+                ctx.setStatus(if (isSelected) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
+            }
+        }
+
         val defaultModeBox = JComboBox(ReadMode.entries.map { it.label }.toTypedArray()).apply {
             val saved = runCatching { ReadMode.valueOf(readerPrefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
             selectedIndex = saved.ordinal
@@ -269,6 +277,10 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
 
             dark.alignmentX = 0f
             add(dark)
+            add(Box.createVerticalStrut(8))
+
+            incognitoCheck.alignmentX = 0f
+            add(incognitoCheck)
             add(Box.createVerticalStrut(16))
 
             add(JLabel("Modo de leitura padrão:").apply { alignmentX = 0f })

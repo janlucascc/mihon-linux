@@ -53,6 +53,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var hoveredIndex: Int = -1
     private var activeCategoryStatus: Long = LibraryCategory.ALL
     private var compactMode: Boolean = false
+    private var onlyDownloadedFilter: Boolean = false
 
     private val model = DefaultListModel<Manga>()
     private val grid = JList(model)
@@ -63,6 +64,13 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         putClientProperty("JTextField.placeholderText", "Pesquisar na biblioteca…")
     }
     private val sortBox = JComboBox(Sort.entries.map { it.label }.toTypedArray())
+    private val offlineFilterToggle = JToggleButton("Somente offline").apply {
+        toolTipText = "Mihon M3: Filtra e exibe somente itens com capítulos disponíveis offline"
+        addActionListener {
+            onlyDownloadedFilter = isSelected
+            applyFilter()
+        }
+    }
     private val displayModeBtn = JToggleButton("Compacto").apply {
         toolTipText = "Alternar entre Grade Confortável (título abaixo) e Grade Compacta (título sobre a capa)"
         addActionListener {
@@ -142,6 +150,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val rightBar = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 8)).apply {
             isOpaque = false
             add(filterField)
+            add(offlineFilterToggle)
             add(JLabel("Ordenar:"))
             add(sortBox)
             add(displayModeBtn)
@@ -226,7 +235,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             Sort.ADDED -> compareByDescending { it.dateAdded }
         }
         val shown = all
-            .filter { (cat == LibraryCategory.ALL || it.status == cat) && (query.isEmpty() || it.title.lowercase().contains(query)) }
+            .filter { (cat == LibraryCategory.ALL || it.status == cat) &&
+                (!onlyDownloadedFilter || (downloadedByManga[it.id] ?: 0) > 0) &&
+                (query.isEmpty() || it.title.lowercase().contains(query))
+            }
             .sortedWith(comparator)
         model.clear()
         shown.forEach { model.addElement(it) }

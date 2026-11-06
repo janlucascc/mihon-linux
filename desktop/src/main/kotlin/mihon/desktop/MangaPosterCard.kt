@@ -55,9 +55,19 @@ class MangaPosterCard : JPanel() {
             g2.drawImage(img, coverX, coverY, COVER_W, COVER_H, null)
         }
 
-        // Hanko-style rectangular stamp badges (Top-Left: Downloads + Unread)
-        var badgeCursorX = coverX + 7
-        val badgeY = coverY + 7
+        // Top-left: Material 3 Unread Badge (White solid pill with bold black digits, matching Mihon Android)
+        // and Downloads Offline Badge (Green pill with icon)
+        var badgeCursorX = coverX + 8
+        val badgeY = coverY + 8
+
+        if (unreadBadgeCount > 0) {
+            badgeCursorX += drawM3UnreadPill(
+                g2,
+                "$unreadBadgeCount",
+                badgeCursorX,
+                badgeY,
+            ) + 4
+        }
         if (downloadsBadgeCount > 0) {
             badgeCursorX += drawStamp(
                 g2,
@@ -67,18 +77,7 @@ class MangaPosterCard : JPanel() {
                 Theme.TERTIARY,
                 Color.WHITE,
                 alignRight = false,
-            ) + 3
-        }
-        if (unreadBadgeCount > 0) {
-            badgeCursorX += drawStamp(
-                g2,
-                "$unreadBadgeCount",
-                badgeCursorX,
-                badgeY,
-                Theme.ACCENT,
-                Color.WHITE,
-                alignRight = false,
-            ) + 3
+            ) + 4
         }
         if (downloadsBadgeCount == 0 && unreadBadgeCount == 0) {
             topLeftBadge?.takeIf { it.isNotBlank() }?.let { badge ->
@@ -90,7 +89,7 @@ class MangaPosterCard : JPanel() {
         val rightLabel = if (downloadsBadgeCount > 0 || unreadBadgeCount > 0) topLeftBadge else topRightBadge
         val rightColor = if (downloadsBadgeCount > 0 || unreadBadgeCount > 0) Color(13, 13, 15, 225) else topRightColor
         rightLabel?.takeIf { it.isNotBlank() }?.let { badge ->
-            drawStamp(g2, badge, coverX + COVER_W - 7, badgeY, rightColor, Color.WHITE, alignRight = true)
+            drawStamp(g2, badge, coverX + COVER_W - 8, badgeY, rightColor, Color.WHITE, alignRight = true)
         }
 
         // Crisp focus/hover frame around the book cover itself
@@ -148,6 +147,39 @@ class MangaPosterCard : JPanel() {
         }
 
         g2.dispose()
+    }
+
+    /**
+     * Material 3 Unread Pill Badge (Solid white rounded container with bold black tabular numbers,
+     * matching the official Mihon Android UI seen on the screenshots).
+     */
+    private fun drawM3UnreadPill(
+        g2: Graphics2D,
+        text: String,
+        x: Int,
+        y: Int,
+    ): Int {
+        g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
+        val fm = g2.fontMetrics
+        val textW = fm.stringWidth(text)
+        val h = 20
+        val w = (textW + 10).coerceAtLeast(h)
+        val arc = 10
+
+        // Subtle drop shadow
+        g2.color = Color(0, 0, 0, 95)
+        g2.fillRoundRect(x, y + 1, w, h, arc, arc)
+
+        // White solid pill container
+        g2.color = Color.WHITE
+        g2.fillRoundRect(x, y, w, h, arc, arc)
+
+        // High-contrast black digits
+        g2.color = Color.BLACK
+        val textX = x + (w - textW) / 2
+        val textY = y + ((h - fm.height) / 2) + fm.ascent
+        g2.drawString(text, textX, textY)
+        return w
     }
 
     private fun drawStamp(

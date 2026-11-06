@@ -92,6 +92,7 @@ class AppContext(
     val setStatus: (String) -> Unit,
 ) {
     lateinit var navigator: Navigator
+    var incognitoMode: Boolean = false
 
     fun sourceFor(sourceId: Long): ExtensionSource? =
         extensions.firstOrNull { it.id == sourceId }

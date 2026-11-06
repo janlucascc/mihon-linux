@@ -379,7 +379,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 onNextChapter = nextChap?.let { { openChapter(current, it) } },
             ) { page, count ->
                 val elapsed = System.currentTimeMillis() - started
-                background({ ctx.service.saveProgress(chapter, page, count, elapsed) }) { reloadChapters() }
+                background({ ctx.service.saveProgress(chapter, page, count, elapsed, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
             }
         } catch (e: Exception) {
             if (!current.isLocal && canRetryDownload && file.exists()) {

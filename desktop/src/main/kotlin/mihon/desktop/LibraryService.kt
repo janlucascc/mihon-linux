@@ -397,14 +397,16 @@ class LibraryService(
     }
 
     /** Records reading progress; marks the chapter as read when the last page was reached. */
-    suspend fun saveProgress(chapter: Chapter, page: Int, pageCount: Int, sessionMillis: Long = 0) {
+    suspend fun saveProgress(chapter: Chapter, page: Int, pageCount: Int, sessionMillis: Long = 0, incognitoMode: Boolean = false) {
         chapters.update(
             ChapterUpdate(chapter.id) {
                 lastPageRead = page
                 if (pageCount > 0 && page >= pageCount - 1) read = true
             },
         )
-        history.upsert(HistoryUpdate(chapter.id, Clock.System.now(), sessionMillis))
+        if (!incognitoMode) {
+            history.upsert(HistoryUpdate(chapter.id, Clock.System.now(), sessionMillis))
+        }
     }
 
     suspend fun recentHistory(): List<HistoryEntry> {
@@ -421,6 +423,17 @@ class LibraryService(
 
     suspend fun clearHistory() {
         history.deleteAll()
+    }
+
+    suspend fun deleteHistoryEntry(chapterId: Long) {
+        history.deleteByChapterId(chapterId)
+    }
+
+    suspend fun toggleFavorite(mangaId: Long): Boolean {
+        val current = mangas.getMangaById(mangaId) ?: return false
+        val newFav = !current.favorite
+        mangas.update(current.copy(favorite = newFav, favoriteAt = if (newFav) Clock.System.now() else null))
+        return newFav
     }
 
     private fun sanitizeFileName(name: String): String =

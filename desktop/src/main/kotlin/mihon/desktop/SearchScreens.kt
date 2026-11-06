@@ -28,6 +28,7 @@ import javax.swing.JScrollPane
 import javax.swing.JTextField
 import javax.swing.ListCellRenderer
 import javax.swing.SwingUtilities
+import javax.swing.ImageIcon
 
 /**
  * Visual poster grid for online manga discovery across all active sources (Manga Livre, MangaDex, JSONs).
@@ -207,32 +208,76 @@ class SearchScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 }
 
 /** Shows recent reading history with custom-painted row cards and 1-click resume. */
+sealed interface HistoryListItem {
+    data class DateHeader(val title: String) : HistoryListItem
+    data class Entry(val entry: HistoryEntry) : HistoryListItem
+}
+
+/** Shows recent reading history with sticky date headers, covers, and quick actions (favorite & remove). */
 class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
-    private val model = DefaultListModel<HistoryEntry>()
+    private val model = DefaultListModel<HistoryListItem>()
     private val list = JList(model)
-    private val fmt = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm").withZone(ZoneId.systemDefault())
-    private val renderer = HistoryRowCard()
+    private val timeFmt = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+    private val dateFmt = DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.systemDefault())
+    private val itemRenderer = HistoryRowCard()
+    private val headerRenderer = HistoryDateHeaderCard()
 
     init {
         background = Theme.BG_APP
         list.background = Theme.BG_APP
-        list.fixedCellHeight = 64
         list.border = BorderFactory.createEmptyBorder(12, 20, 18, 20)
-        list.cellRenderer = ListCellRenderer { _, entry, _, selected, _ ->
-            renderer.apply {
-                mangaTitle = entry.manga.title
-                chapterName = entry.chapter.name
-                progressLabel = if (entry.chapter.lastPageRead > 0) "Página ${entry.chapter.lastPageRead + 1}" else "Início"
-                dateLabel = entry.history.readAt?.let { fmt.format(java.time.Instant.ofEpochMilli(it.toEpochMilliseconds())) } ?: ""
-                selectedState = selected
+        list.cellRenderer = ListCellRenderer { _, item, _, selected, _ ->
+            when (item) {
+                is HistoryListItem.DateHeader -> headerRenderer.apply { text = item.title }
+                is HistoryListItem.Entry -> {
+                    val entry = item.entry
+                    val timeStr = entry.history.readAt?.let {
+                        timeFmt.format(java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()))
+                    }.orEmpty()
+                    itemRenderer.apply {
+                        mangaTitle = entry.manga.title
+                        chapterName = entry.chapter.name
+                        chapterTime = timeStr
+                        isFavorite = entry.manga.favorite
+                        coverIcon = ctx.covers.get(entry.manga.id, entry.manga.title)
+                        selectedState = selected
+                    }
+                }
             }
         }
         list.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 val idx = list.locationToIndex(e.point)
-                if (idx >= 0 && list.getCellBounds(idx, idx)?.contains(e.point) == true) {
-                    ctx.navigator.showDetails(model[idx].manga)
+                if (idx < 0 || list.getCellBounds(idx, idx)?.contains(e.point) != true) return
+                val item = model[idx] as? HistoryListItem.Entry ?: return
+
+                val cellBounds = list.getCellBounds(idx, idx)
+                val relX = e.x - cellBounds.x
+                val cardW = cellBounds.width - 16
+
+                // Right action buttons click detection:
+                // Delete button: (cardW - 40 .. cardW - 8)
+                // Favorite button: (cardW - 80 .. cardW - 48)
+                if (relX in (cardW - 40)..(cardW - 4)) {
+                    // Quick Delete individual history entry
+                    background({ ctx.service.deleteHistoryEntry(item.entry.chapter.id) }) {
+                        refresh()
+                        ctx.setStatus("Registro removido do histórico")
+                    }
+                    return
+                } else if (relX in (cardW - 80)..(cardW - 44)) {
+                    // Quick Toggle Favorite
+                    background({ ctx.service.toggleFavorite(item.entry.manga.id) }) { res ->
+                        refresh()
+                        val state = if (res.getOrDefault(false)) "adicionado aos favoritos" else "removido dos favoritos"
+                        ctx.setStatus("'${item.entry.manga.title}' $state")
+                    }
+                    return
+                }
+
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    ctx.navigator.showDetails(item.entry.manga)
                 }
             }
         })
@@ -244,13 +289,37 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             add(JButton("Limpar histórico").apply { addActionListener { clearAll() } })
         }
         add(top, BorderLayout.NORTH)
-        add(JScrollPane(list).apply { border = null }, BorderLayout.CENTER)
+        add(JScrollPane(list).apply { border = null; verticalScrollBar.unitIncrement = 24 }, BorderLayout.CENTER)
     }
 
     fun refresh() {
         background({ ctx.service.recentHistory() }) { result ->
             model.clear()
-            result.getOrDefault(emptyList()).forEach { model.addElement(it) }
+            val entries = result.getOrDefault(emptyList())
+            val todayStr = dateFmt.format(java.time.Instant.now())
+            val yesterdayStr = dateFmt.format(java.time.Instant.now().minus(java.time.Duration.ofDays(1)))
+
+            var lastGroup = ""
+            for (entry in entries) {
+                val itemDateStr = entry.history.readAt?.let {
+                    dateFmt.format(java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()))
+                } ?: "Anterior"
+
+                val groupHeader = when (itemDateStr) {
+                    todayStr -> "Hoje"
+                    yesterdayStr -> "Ontem"
+                    else -> itemDateStr
+                }
+
+                if (groupHeader != lastGroup) {
+                    model.addElement(HistoryListItem.DateHeader(groupHeader))
+                    lastGroup = groupHeader
+                }
+                model.addElement(HistoryListItem.Entry(entry))
+                if (!ctx.covers.has(entry.manga.id)) {
+                    ctx.covers.load(entry.manga, firstChapterPath = { null }, onLoaded = { list.repaint() })
+                }
+            }
         }
     }
 
@@ -263,15 +332,35 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
+    private class HistoryDateHeaderCard : JPanel() {
+        var text: String = ""
+        init {
+            isOpaque = false
+            preferredSize = java.awt.Dimension(0, 36)
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12.5f)
+            g2.color = Theme.TEXT_MUTED
+            g2.drawString(text, 14, 24)
+            g2.dispose()
+        }
+    }
+
     private class HistoryRowCard : JPanel() {
         var mangaTitle = ""
         var chapterName = ""
-        var progressLabel = ""
-        var dateLabel = ""
+        var chapterTime = ""
+        var isFavorite = false
+        var coverIcon: ImageIcon? = null
         var selectedState = false
 
         init {
             isOpaque = false
+            preferredSize = java.awt.Dimension(0, 68)
         }
 
         override fun paintComponent(g: Graphics) {
@@ -281,28 +370,56 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val x = 8
             val w = width - 16
             val h = height
+
             if (selectedState) {
                 g2.color = Theme.BG_CARD_HOVER
-                g2.fillRoundRect(x, 2, w, h - 4, 6, 6)
+                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
             }
             g2.color = Theme.BORDER_SUBTLE
             g2.drawLine(x + 6, h - 1, x + w - 6, h - 1)
 
-            g2.color = Theme.ACCENT
-            g2.fillRoundRect(x + 4, 14, 3, h - 28, 2, 2)
+            // Small vertical cover thumbnail on the left (Mihon Android style)
+            val thumbW = 38
+            val thumbH = 54
+            val thumbY = (h - thumbH) / 2
+            val coverImg = coverIcon?.image
+            if (coverImg != null) {
+                g2.clip = java.awt.geom.RoundRectangle2D.Float((x + 8).toFloat(), thumbY.toFloat(), thumbW.toFloat(), thumbH.toFloat(), 6f, 6f)
+                g2.drawImage(coverImg, x + 8, thumbY, thumbW, thumbH, null)
+                g2.clip = null
+            } else {
+                g2.color = Theme.BG_SURFACE
+                g2.fillRoundRect(x + 8, thumbY, thumbW, thumbH, 6, 6)
+            }
+            g2.color = Color(255, 255, 255, 24)
+            g2.drawRoundRect(x + 8, thumbY, thumbW - 1, thumbH - 1, 6, 6)
 
-            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 15f)
+            // Manga Title
+            val textX = x + thumbW + 20
+            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14.5f)
             g2.color = Theme.TEXT_PRIMARY
-            g2.drawString(mangaTitle, x + 18, 25)
+            g2.drawString(mangaTitle, textX, 28)
 
-            g2.font = font.deriveFont(Font.PLAIN, 12.5f)
+            // Chapter name + timestamp
+            g2.font = font.deriveFont(Font.PLAIN, 12f)
             g2.color = Theme.TEXT_SECONDARY
-            g2.drawString("$chapterName  —  $progressLabel", x + 18, 46)
+            val sub = if (chapterTime.isNotBlank()) "$chapterName  —  $chapterTime" else chapterName
+            g2.drawString(sub, textX, 48)
 
-            g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
+            // Action 1: Favorite icon (Heart: solid if favorited, outline if not)
+            val favX = x + w - 74
+            val favY = (h - 24) / 2
+            g2.font = font.deriveFont(Font.PLAIN, 16f)
+            g2.color = if (isFavorite) Theme.ACCENT else Theme.TEXT_MUTED
+            g2.drawString(if (isFavorite) "♥" else "♡", favX + 6, favY + 18)
+
+            // Action 2: Delete icon (Trash bin)
+            val delX = x + w - 36
+            val delY = (h - 24) / 2
             g2.color = Theme.TEXT_MUTED
-            val fm = g2.fontMetrics
-            g2.drawString(dateLabel, x + w - fm.stringWidth(dateLabel) - 16, (h / 2) + 5)
+            g2.font = font.deriveFont(Font.PLAIN, 15f)
+            g2.drawString("🗑", delX + 6, delY + 18)
+
             g2.dispose()
         }
     }
