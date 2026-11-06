@@ -469,9 +469,9 @@ class GooeyContextMenu(
     }
 
     /**
-     * Renders the unified liquid mesh (círculos + pontes orgânicas de Bézier tangentes).
-     * Computado diretamente como vetores primitivos acelerados pelo driver gráfico (OpenGL/X11),
-     * garantindo 60 FPS estáveis sem gargalo de CPU.
+     * Renders the unified liquid mesh:
+     * - Only adjacent satellite buttons in the arc are connected by smooth liquid bridges (creating the elegant fanned arc from the video).
+     * - The central trigger button (X) remains clean and detached without radial web bridges to satellites.
      */
     private fun renderLiquidMesh(
         g2: Graphics2D,
@@ -481,25 +481,6 @@ class GooeyContextMenu(
         currentHubR: Double,
         palette: GooeyPalette? = null,
     ) {
-        // Bridges between hub and satellite nodes (radial stretch)
-        for (i in items.indices) {
-            if (radii[i] > 4.0 && currentHubR > 4.0) {
-                if (palette != null) {
-                    g2.color = if (items[i].isDanger && hoveredIndex == i) palette.dangerBg else palette.blobBg
-                }
-                drawMetaballBridge(
-                    g2 = g2,
-                    x1 = anchorX,
-                    y1 = anchorY,
-                    r1 = currentHubR,
-                    x2 = centersX[i],
-                    y2 = centersY[i],
-                    r2 = radii[i],
-                    maxDist = currentHubR + radii[i] + 32.0,
-                )
-            }
-        }
-
         // Bridges between adjacent satellites in arc (chain liquid)
         for (i in 0 until items.size - 1) {
             if (radii[i] > 6.0 && radii[i + 1] > 6.0) {
