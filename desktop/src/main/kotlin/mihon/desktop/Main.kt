@@ -46,6 +46,7 @@ import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
 import javax.swing.filechooser.FileNameExtensionFilter
+import javax.swing.plaf.ColorUIResource
 
 private const val PREF_DARK = "darkTheme"
 private val prefs: Preferences = Preferences.userRoot().node("mihon-linux")
@@ -53,22 +54,36 @@ private val readerPrefs: Preferences = Preferences.userRoot().node("mihon-linux-
 
 internal fun configureTheme(dark: Boolean) {
     Theme.setDarkMode(dark)
-    if (dark) FlatDarkLaf.setup() else FlatLightLaf.setup()
-    UIManager.put("Panel.background", Theme.BG_APP)
-    UIManager.put("ScrollPane.background", Theme.BG_APP)
-    UIManager.put("Viewport.background", Theme.BG_APP)
-    UIManager.put("List.background", Theme.BG_APP)
-    UIManager.put("Button.background", Theme.BG_CARD)
-    UIManager.put("Button.foreground", Theme.TEXT_PRIMARY)
-    UIManager.put("ComboBox.background", Theme.BG_SURFACE)
-    UIManager.put("ComboBox.foreground", Theme.TEXT_PRIMARY)
-    UIManager.put("TextField.background", Theme.BG_SURFACE)
-    UIManager.put("TextField.foreground", Theme.TEXT_PRIMARY)
-    UIManager.put("ToggleButton.selectedBackground", Theme.BG_PILL_ACTIVE)
-    UIManager.put("ToggleButton.selectedForeground", Theme.TEXT_PRIMARY)
-    UIManager.put("CheckBox.background", Theme.BG_APP)
-    UIManager.put("CheckBox.foreground", Theme.TEXT_PRIMARY)
-    UIManager.put("Label.foreground", Theme.TEXT_PRIMARY)
+
+    // Descartar overrides manuais para que o Look and Feel assuma as cores nativas limpas sem cache
+    UIManager.put("Button.background", null)
+    UIManager.put("Button.foreground", null)
+    UIManager.put("ComboBox.background", null)
+    UIManager.put("ComboBox.foreground", null)
+    UIManager.put("TextField.background", null)
+    UIManager.put("TextField.foreground", null)
+    UIManager.put("CheckBox.background", null)
+    UIManager.put("CheckBox.foreground", null)
+    UIManager.put("Label.foreground", null)
+
+    try {
+        if (dark) {
+            UIManager.setLookAndFeel(FlatDarkLaf())
+        } else {
+            UIManager.setLookAndFeel(FlatLightLaf())
+        }
+    } catch (_: Exception) {
+        if (dark) FlatDarkLaf.setup() else FlatLightLaf.setup()
+    }
+
+    UIManager.put("Panel.background", ColorUIResource(Theme.BG_APP))
+    UIManager.put("ScrollPane.background", ColorUIResource(Theme.BG_APP))
+    UIManager.put("Viewport.background", ColorUIResource(Theme.BG_APP))
+    UIManager.put("List.background", ColorUIResource(Theme.BG_APP))
+    UIManager.put("List.foreground", ColorUIResource(Theme.TEXT_PRIMARY))
+    UIManager.put("Label.foreground", ColorUIResource(Theme.TEXT_PRIMARY))
+    UIManager.put("ToggleButton.selectedBackground", ColorUIResource(Theme.BG_PILL_ACTIVE))
+    UIManager.put("ToggleButton.selectedForeground", ColorUIResource(Theme.TEXT_PRIMARY))
     UIManager.put("Component.arc", 999) // M3 Pill shapes
     UIManager.put("Button.arc", 999)
     UIManager.put("TextComponent.arc", 16)
@@ -80,11 +95,28 @@ internal fun configureTheme(dark: Boolean) {
 internal fun applyTheme(dark: Boolean) {
     prefs.putBoolean(PREF_DARK, dark)
     configureTheme(dark)
-    FlatLaf.updateUI()
+
+    fun resetComponentStyles(comp: java.awt.Component) {
+        if (comp is JButton || comp is JComboBox<*>) {
+            comp.background = null
+            comp.foreground = null
+        }
+        if (comp is JCheckBox) {
+            comp.background = null
+            comp.foreground = null
+            comp.isOpaque = false
+        }
+        if (comp is java.awt.Container) {
+            comp.components.forEach { resetComponentStyles(it) }
+        }
+    }
+
     java.awt.Window.getWindows().forEach { win ->
+        resetComponentStyles(win)
         SwingUtilities.updateComponentTreeUI(win)
         win.repaint()
     }
+    FlatLaf.updateUI()
 }
 
 fun main() {
@@ -291,17 +323,13 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
     private fun settingsScreen(): JComponent {
         val dark = JCheckBox("Tema escuro (FlatLaf Dark)", prefs.getBoolean(PREF_DARK, true)).apply {
             isOpaque = false
-            foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 28)
             addActionListener { applyTheme(isSelected) }
         }
 
         val incognitoCheck = JCheckBox("Modo anônimo (Pausa gravação no histórico de leitura)", ctx.incognitoMode).apply {
             isOpaque = false
-            foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 28)
             toolTipText = "Mihon M3: Quando ativado, os capítulos lidos não serão salvos no histórico"
             addActionListener {
                 ctx.incognitoMode = isSelected
@@ -311,9 +339,7 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
 
         val autoPrefetchCheck = JCheckBox("Pré-baixar próximos capítulos automaticamente ao ler online", readerPrefs.getBoolean("autoPrefetch", false)).apply {
             isOpaque = false
-            foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 28)
             toolTipText = "Quando ativado, os 2 próximos capítulos são baixados em segundo plano enquanto você lê"
             addActionListener { readerPrefs.putBoolean("autoPrefetch", isSelected) }
         }
@@ -439,20 +465,14 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             verticalScrollBar.unitIncrement = 20
         }
 
-        ctx.addThemeListener {
-            dark.isSelected = !it.not()
+        ctx.addThemeListener { isDark ->
+            dark.isSelected = isDark
+            dark.isOpaque = false
+            incognitoCheck.isOpaque = false
+            autoPrefetchCheck.isOpaque = false
             panel.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
-            titleLbl.foreground = Theme.TEXT_PRIMARY
-            dark.foreground = Theme.TEXT_PRIMARY
-            incognitoCheck.foreground = Theme.TEXT_PRIMARY
-            autoPrefetchCheck.foreground = Theme.TEXT_PRIMARY
-            lblMode.foreground = Theme.TEXT_PRIMARY
-            lblFit.foreground = Theme.TEXT_PRIMARY
-            lblQuality.foreground = Theme.TEXT_PRIMARY
-            lblBackupTitle.foreground = Theme.TEXT_PRIMARY
-            lblSystemTitle.foreground = Theme.TEXT_PRIMARY
             lblDb.foreground = Theme.TEXT_MUTED
             lblDl.foreground = Theme.TEXT_MUTED
             lblSources.foreground = Theme.TEXT_MUTED
@@ -773,8 +793,8 @@ class MoreScreen(
 ) : JPanel(BorderLayout()) {
 
     private val offlineSwitch = JCheckBox("Somente disponíveis offline", ctx.onlyOfflineFilter).apply {
+        isOpaque = false
         font = font.deriveFont(Font.BOLD, 14f)
-        foreground = Theme.TEXT_PRIMARY
         toolTipText = "Filtra todos os itens da sua biblioteca para exibir apenas mangás salvos localmente"
         addActionListener {
             ctx.setOfflineFilter(isSelected)
@@ -783,8 +803,8 @@ class MoreScreen(
     }
 
     private val incognitoSwitch = JCheckBox("Modo anônimo", ctx.incognitoMode).apply {
+        isOpaque = false
         font = font.deriveFont(Font.BOLD, 14f)
-        foreground = Theme.TEXT_PRIMARY
         toolTipText = "Pausa temporariamente a gravação no histórico de leitura"
         addActionListener {
             ctx.incognitoMode = isSelected
