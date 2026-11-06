@@ -137,47 +137,53 @@ object MangaImageEnhancer {
             return scaleImageFast(src, tw, th)
         }
 
-        val srcPixels = extractRgbPixels(src)
-        val sw = src.width
-        val sh = src.height
-        val scaleRatio = max(tw.toDouble() / sw, th.toDouble() / sh)
+        return try {
+            val srcPixels = extractRgbPixels(src)
+            val sw = src.width
+            val sh = src.height
+            val scaleRatio = max(tw.toDouble() / sw, th.toDouble() / sh)
 
-        val resampled = if (sw == tw && sh == th) {
-            srcPixels.clone()
-        } else {
-            lanczos3Resample(srcPixels, sw, sh, tw, th)
-        }
-
-        val finalPixels = when (quality) {
-            QualityMode.HD_64BIT -> {
-                // High-fidelity 64-bit look:
-                // 1. Line art vectorization & sharpening
-                val lineArt = anime4kLineArtEnhance(
-                    resampled,
-                    tw,
-                    th,
-                    strength = if (scaleRatio > 1.05) 0.95f else 0.70f,
-                    isUpscale = true,
-                )
-                // 2. High-dynamic contrast & color vibrance / clarity
-                enhance64BitColorAndClarity(lineArt, tw, th)
+            val resampled = if (sw == tw && sh == th) {
+                srcPixels.clone()
+            } else {
+                lanczos3Resample(srcPixels, sw, sh, tw, th)
             }
-            QualityMode.ULTRA -> {
-                if (scaleRatio > 1.08) {
-                    val strength = ((scaleRatio - 1.0) * 0.65).coerceIn(0.28, 0.85).toFloat()
-                    anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = true)
-                } else {
-                    anime4kLineArtEnhance(resampled, tw, th, strength = 0.35f, isUpscale = false)
+
+            val finalPixels = when (quality) {
+                QualityMode.HD_64BIT -> {
+                    // High-fidelity 64-bit look:
+                    // 1. Line art vectorization & sharpening
+                    val lineArt = anime4kLineArtEnhance(
+                        resampled,
+                        tw,
+                        th,
+                        strength = if (scaleRatio > 1.05) 0.95f else 0.70f,
+                        isUpscale = true,
+                    )
+                    // 2. High-dynamic contrast & color vibrance / clarity
+                    enhance64BitColorAndClarity(lineArt, tw, th)
                 }
+                QualityMode.ULTRA -> {
+                    if (scaleRatio > 1.08) {
+                        val strength = ((scaleRatio - 1.0) * 0.65).coerceIn(0.28, 0.85).toFloat()
+                        anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = true)
+                    } else {
+                        anime4kLineArtEnhance(resampled, tw, th, strength = 0.35f, isUpscale = false)
+                    }
+                }
+                QualityMode.SHARP -> {
+                    val strength = if (scaleRatio > 1.0) 0.42f else 0.26f
+                    anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = false)
+                }
+                QualityMode.FAST -> resampled
             }
-            QualityMode.SHARP -> {
-                val strength = if (scaleRatio > 1.0) 0.42f else 0.26f
-                anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = false)
-            }
-            QualityMode.FAST -> resampled
-        }
 
-        return packRgbPixels(finalPixels, tw, th)
+            packRgbPixels(finalPixels, tw, th)
+        } catch (_: OutOfMemoryError) {
+            System.gc()
+            // Seamless fallback to lightweight bilinear scaling if heap is exhausted
+            scaleImageFast(src, tw, th)
+        }
     }
 
     /**

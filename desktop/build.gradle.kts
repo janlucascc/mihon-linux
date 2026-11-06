@@ -7,7 +7,7 @@ application {
     mainClass.set("mihon.desktop.MainKt")
     applicationDefaultJvmArgs = listOf(
         "-Xms128m",
-        "-Xmx768m",
+        "-Xmx1536m",
         "-XX:+UseG1GC",
         "-XX:+UseStringDeduplication",
         "-Dsun.java2d.opengl=true",
