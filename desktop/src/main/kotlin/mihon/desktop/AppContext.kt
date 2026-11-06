@@ -310,8 +310,14 @@ class AppContext(
 class CoverCache(
     private val cacheDir: File = File(System.getProperty("user.home"), ".mihon/cache/covers").apply { mkdirs() },
 ) {
-    private val icons = ConcurrentHashMap<Long, ImageIcon>()
-    private val urlIcons = ConcurrentHashMap<String, ImageIcon>()
+    private val iconsLock = Any()
+    private val icons = object : LinkedHashMap<Long, ImageIcon>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ImageIcon>): Boolean = size > 80
+    }
+    private val urlIconsLock = Any()
+    private val urlIcons = object : LinkedHashMap<String, ImageIcon>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageIcon>): Boolean = size > 80
+    }
     private val placeholders = ConcurrentHashMap<String, ImageIcon>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
 
@@ -328,25 +334,25 @@ class CoverCache(
     val placeholder: ImageIcon = placeholderFor("M")
 
     fun get(mangaId: Long, title: String = ""): ImageIcon =
-        icons[mangaId] ?: placeholderFor(title)
+        synchronized(iconsLock) { icons[mangaId] } ?: placeholderFor(title)
 
     fun getByUrl(url: String?, title: String = ""): ImageIcon {
         val clean = url?.trim()
         if (!clean.isNullOrEmpty()) {
-            urlIcons[clean]?.let { return it }
+            synchronized(urlIconsLock) { urlIcons[clean] }?.let { return it }
         }
         return placeholderFor(title)
     }
 
-    fun has(mangaId: Long): Boolean = icons.containsKey(mangaId)
+    fun has(mangaId: Long): Boolean = synchronized(iconsLock) { icons.containsKey(mangaId) }
 
     fun hasUrl(url: String?): Boolean {
         val clean = url?.trim() ?: return false
-        return urlIcons.containsKey(clean)
+        return synchronized(urlIconsLock) { urlIcons.containsKey(clean) }
     }
 
     fun remove(mangaId: Long) {
-        icons.remove(mangaId)
+        synchronized(iconsLock) { icons.remove(mangaId) }
         File(cacheDir, "$mangaId.png").delete()
     }
 
@@ -356,8 +362,8 @@ class CoverCache(
             totalFreed += f.length()
             f.delete()
         }
-        icons.clear()
-        urlIcons.clear()
+        synchronized(iconsLock) { icons.clear() }
+        synchronized(urlIconsLock) { urlIcons.clear() }
         return totalFreed
     }
 
@@ -431,7 +437,7 @@ class CoverCache(
     /** Loads or renders a library manga cover asynchronously on appScope. */
     fun load(manga: Manga, firstChapterPath: suspend () -> String?, onLoaded: () -> Unit) {
         val key = "manga_${manga.id}"
-        if (icons.containsKey(manga.id) || !inFlight.add(key)) return
+        if (has(manga.id) || !inFlight.add(key)) return
         appScope.launch {
             try {
                 val thumbUrl = manga.thumbnailUrl
@@ -455,7 +461,7 @@ class CoverCache(
                     }?.let { ImageIcon(it) }
                 }
                 if (icon != null) {
-                    icons[manga.id] = icon
+                    synchronized(iconsLock) { icons[manga.id] = icon }
                     SwingUtilities.invokeLater(onLoaded)
                 }
             } finally {
@@ -467,7 +473,7 @@ class CoverCache(
     /** Downloads and caches a cover by URL asynchronously on appScope. */
     fun loadUrl(url: String?, onLoaded: () -> Unit) {
         val cleanUrl = url?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return
-        if (urlIcons.containsKey(cleanUrl) || !inFlight.add(cleanUrl)) return
+        if (hasUrl(cleanUrl) || !inFlight.add(cleanUrl)) return
         appScope.launch {
             try {
                 val hash = sha1(cleanUrl)
@@ -486,7 +492,7 @@ class CoverCache(
                     }?.let { ImageIcon(it) }
                 }
                 if (icon != null) {
-                    urlIcons[cleanUrl] = icon
+                    synchronized(urlIconsLock) { urlIcons[cleanUrl] = icon }
                     SwingUtilities.invokeLater(onLoaded)
                 }
             } finally {

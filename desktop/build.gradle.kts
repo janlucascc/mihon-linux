@@ -6,6 +6,10 @@ plugins {
 application {
     mainClass.set("mihon.desktop.MainKt")
     applicationDefaultJvmArgs = listOf(
+        "-Xms128m",
+        "-Xmx768m",
+        "-XX:+UseG1GC",
+        "-XX:+UseStringDeduplication",
         "-Dsun.java2d.opengl=true",
         "-Dawt.useSystemAAFontSettings=on",
         "-Dswing.aatext=true",

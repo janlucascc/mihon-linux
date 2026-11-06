@@ -136,10 +136,10 @@ class ReaderWindow(
     private var togglingFullscreen = false
     private var zoomFactor = 1.0
 
-    /** Shared thread-safe LRU cache of decoded original images across all modes (up to 24 pages). */
+    /** Shared thread-safe bounded LRU cache of decoded original images (up to 8 pages to conserve RAM). */
     private val cacheLock = Any()
-    private val cache = object : LinkedHashMap<Int, BufferedImage>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>) = size > 24
+    private val cache = object : LinkedHashMap<Int, BufferedImage>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>) = size > 8
     }
 
     private fun getCachedImage(index: Int): BufferedImage? = synchronized(cacheLock) { cache[index] }
@@ -322,6 +322,12 @@ class ReaderWindow(
                 onProgress(reportedPage, pageCount)
                 io.shutdownNow()
                 reader.close()
+                synchronized(cacheLock) {
+                    cache.clear()
+                }
+                webtoon.invalidateScaledCache()
+                paged.setContent(emptyList(), null)
+                System.gc()
             }
         })
 
@@ -433,7 +439,7 @@ class ReaderWindow(
                 scroll.verticalScrollBar.value = 0
                 scroll.horizontalScrollBar.value = 0
             }
-            for (ahead in 1..6) {
+            for (ahead in 1..3) {
                 prefetch(indexes.last() + ahead)
             }
         }
@@ -817,18 +823,18 @@ class ReaderWindow(
                 syncPageUi(first, "Página ${first + 1}/$pageCount")
             }
             reportProgress(last)
-            // Keep a wide window in memory so scrolling up/down never triggers reloads
-            images.keys.filter { it < first - 15 || it > last + 20 }.toList().forEach {
+            // Keep a tight window in memory (4 behind, 6 ahead) so RAM stays minimal while reading smoothly
+            images.keys.filter { it < first - 4 || it > last + 6 }.toList().forEach {
                 images.remove(it)
                 requested.remove(it)
             }
-            // Request visible pages first, then prefetch 8 pages ahead and 3 behind
+            // Request visible pages first, then prefetch 3 pages ahead and 1 behind
             for (i in first..min(last, pageCount - 1)) request(i)
-            for (ahead in 1..8) {
+            for (ahead in 1..3) {
                 val idx = last + ahead
                 if (idx < pageCount) request(idx)
             }
-            for (behind in 1..3) {
+            for (behind in 1..1) {
                 val idx = first - behind
                 if (idx >= 0) request(idx)
             }

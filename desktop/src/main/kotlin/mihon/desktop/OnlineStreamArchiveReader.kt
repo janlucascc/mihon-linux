@@ -40,7 +40,10 @@ class OnlineStreamArchiveReader(
     }
 
     private val diskCacheDir = File(System.getProperty("java.io.tmpdir"), "mihon_stream_cache/${sourceName.hashCode()}").apply { mkdirs() }
-    private val memoryCache = ConcurrentHashMap<Int, ByteArray>()
+    private val memoryLock = Any()
+    private val memoryCache = object : LinkedHashMap<Int, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, ByteArray>): Boolean = size > 6
+    }
 
     override fun getPageStream(page: ArchivePage): InputStream {
         check(!isClosed) { "Reader is closed" }
@@ -53,13 +56,13 @@ class OnlineStreamArchiveReader(
         val index = page.index
 
         // 1. Check memory cache
-        memoryCache[index]?.let { return it }
+        synchronized(memoryLock) { memoryCache[index] }?.let { return it }
 
         // 2. Check disk cache
         val cacheFile = File(diskCacheDir, "p_${index}.bin")
         if (cacheFile.exists() && cacheFile.length() > 0) {
             val bytes = cacheFile.readBytes()
-            memoryCache[index] = bytes
+            synchronized(memoryLock) { memoryCache[index] = bytes }
             return bytes
         }
 
@@ -81,7 +84,7 @@ class OnlineStreamArchiveReader(
             resp.body?.bytes() ?: throw java.io.IOException("Resposta vazia da página $index")
         }
 
-        memoryCache[index] = downloadedBytes
+        synchronized(memoryLock) { memoryCache[index] = downloadedBytes }
         runCatching { cacheFile.writeBytes(downloadedBytes) }
         return downloadedBytes
     }
@@ -93,7 +96,7 @@ class OnlineStreamArchiveReader(
 
     override fun close() {
         isClosed = true
-        memoryCache.clear()
+        synchronized(memoryLock) { memoryCache.clear() }
         runCatching { diskCacheDir.deleteRecursively() }
     }
 }
