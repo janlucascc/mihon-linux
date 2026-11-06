@@ -11,9 +11,15 @@ object ImageDecoder {
     fun decode(bytes: ByteArray): BufferedImage? {
         if (bytes.isEmpty()) return null
         runCatching { ImageIO.read(ByteArrayInputStream(bytes)) }.getOrNull()?.let { return it }
-        // Fallback for AVIF/JXL via ImageMagick with deadlock protection
+        // Fallback for AVIF/JXL/corrupted via ImageMagick with deadlock protection
         return runCatching {
-            val proc = ProcessBuilder("magick", "-", "png:-").start()
+            val formatHint = when {
+                bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "jpeg:-"
+                bytes.size >= 8 && bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() -> "png:-"
+                bytes.size >= 12 && bytes[0] == 'R'.code.toByte() && bytes[8] == 'W'.code.toByte() -> "webp:-"
+                else -> "-"
+            }
+            val proc = ProcessBuilder("magick", formatHint, "png:-").start()
             val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
                 proc.inputStream.use { it.readAllBytes() }
             }

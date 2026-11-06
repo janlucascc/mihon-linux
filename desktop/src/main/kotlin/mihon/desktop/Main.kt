@@ -391,6 +391,8 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             val backBtn = JButton("← Voltar").apply {
                 isFocusable = false
                 font = font.deriveFont(Font.BOLD, 13f)
+                margin = java.awt.Insets(4, 10, 4, 10)
+                putClientProperty("JButton.buttonType", "roundRect")
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 toolTipText = "Voltar para o menu Mais"
                 addActionListener {
@@ -398,7 +400,7 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
                 }
             }
             add(backBtn)
-            add(Box.createHorizontalStrut(14))
+            add(Box.createHorizontalStrut(8))
             add(titleLbl)
         }
 
@@ -887,19 +889,37 @@ class MoreScreen(
                 add(left, BorderLayout.WEST)
                 add(chevLbl, BorderLayout.EAST)
 
-                addMouseListener(object : MouseAdapter() {
-                    override fun mouseClicked(e: MouseEvent) {
-                        when (title) {
-                            "Fila de downloads" -> onOpenDownloadsQueue()
-                            "Categorias" -> onOpenCategories()
-                            "Estatísticas" -> onOpenStatistics()
-                            "Dados e armazenamento" -> onOpenStorageManager()
-                            "Configurações" -> onOpenSettings()
-                            "Sobre" -> onOpenAbout()
-                            else -> ctx.setStatus("Opção '$title' selecionada")
-                        }
+                val rowPanel = this
+                val action = {
+                    when (title) {
+                        "Fila de downloads" -> onOpenDownloadsQueue()
+                        "Categorias" -> onOpenCategories()
+                        "Estatísticas" -> onOpenStatistics()
+                        "Dados e armazenamento" -> onOpenStorageManager()
+                        "Configurações" -> onOpenSettings()
+                        "Sobre" -> onOpenAbout()
+                        else -> ctx.setStatus("Opção '$title' selecionada")
                     }
-                })
+                }
+
+                fun bindClick(c: java.awt.Component) {
+                    c.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                    c.addMouseListener(object : MouseAdapter() {
+                        override fun mousePressed(e: MouseEvent) {
+                            action()
+                        }
+                        override fun mouseEntered(e: MouseEvent) {
+                            rowPanel.background = Theme.BG_CARD_HOVER
+                        }
+                        override fun mouseExited(e: MouseEvent) {
+                            rowPanel.background = Theme.BG_SURFACE
+                        }
+                    })
+                    if (c is java.awt.Container) {
+                        c.components.forEach { bindClick(it) }
+                    }
+                }
+                bindClick(this)
             }
             rowHolders.add(RowHolders(row, titleLbl, descLbl, chevLbl))
             content.add(row)

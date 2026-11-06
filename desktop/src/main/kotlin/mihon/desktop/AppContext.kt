@@ -254,10 +254,10 @@ class CoverCache(
             ext.name.contains("Manga Livre", ignoreCase = true) ->
                 "https://mangalivre.to/wp-content/uploads/2025/07/cropped-manga-livre-192x192.webp"
             ext.name.contains("MangaDex", ignoreCase = true) ->
-                "https://www.google.com/s2/favicons?domain=mangadex.org&sz=64"
+                "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://mangadex.org&size=64"
             else -> {
                 val host = ext.baseUrl.substringAfter("://").substringBefore('/')
-                "https://www.google.com/s2/favicons?domain=$host&sz=64"
+                "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://$host&size=64"
             }
         }
 
@@ -300,7 +300,12 @@ class CoverCache(
         if (icons.containsKey(manga.id) || !inFlight.add(key)) return
         appScope.launch {
             try {
-                val cachedFile = File(cacheDir, "${manga.id}.png")
+                val thumbUrl = manga.thumbnailUrl
+                val hasRemoteThumb = !thumbUrl.isNullOrBlank() &&
+                    (thumbUrl.startsWith("http://") || thumbUrl.startsWith("https://"))
+                val cacheKey = if (hasRemoteThumb) "manga_${manga.id}_" + sha1(thumbUrl) else "manga_${manga.id}"
+                val cachedFile = File(cacheDir, "$cacheKey.png")
+
                 val cachedImg = if (cachedFile.exists()) {
                     runCatching { ImageIO.read(cachedFile) }.getOrNull()
                         ?.takeIf { it.width == COVER_W && it.height == COVER_H }
@@ -401,14 +406,19 @@ class CoverCache(
     private fun downloadCover(url: String): BufferedImage? = runCatching {
         val clean = url.trim().replace(" ", "%20")
         val parsed = clean.toHttpUrl()
+        val isMangaDex = parsed.host.contains("mangadex.org")
         val reqBuilder = Request.Builder()
             .url(parsed)
-            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .header(
+                "User-Agent",
+                if (isMangaDex) "MihonLinux/0.3 (Linux Desktop)"
+                else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            )
             .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 
         // Specialized referer headers:
-        // MangaDex blocks CDN subdomains like 'uploads.mangadex.org' with 302 challenges, but accepts 'https://mangadex.org/'
-        if (parsed.host.contains("mangadex.org")) {
+        // MangaDex CDN requires 'https://mangadex.org/' or clean Referer to avoid edge challenge
+        if (isMangaDex) {
             reqBuilder.header("Referer", "https://mangadex.org/")
         } else if (!parsed.host.startsWith("uploads.") && !parsed.host.startsWith("cdn.")) {
             reqBuilder.header("Referer", "${parsed.scheme}://${parsed.host}/")

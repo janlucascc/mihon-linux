@@ -346,10 +346,15 @@ class LibraryService(
                         val cleanImgUrl = imgUrl.trim().replace(" ", "%20")
                         val ext = cleanImgUrl.substringBefore('?').substringAfterLast('.', "jpg")
                             .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "gif") } ?: "jpg"
+                        val isMangaDex = cleanImgUrl.contains("mangadex.org") || source.name.contains("MangaDex", ignoreCase = true)
                         val req = Request.Builder()
                             .url(cleanImgUrl.toHttpUrl())
-                            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-                            .header("Referer", "${source.baseUrl}/")
+                            .header(
+                                "User-Agent",
+                                if (isMangaDex) "MihonLinux/0.3 (Linux Desktop)"
+                                else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                            )
+                            .header("Referer", if (isMangaDex) "https://mangadex.org/" else "${source.baseUrl}/")
                             .build()
                         val bytes = httpClient.newCall(req).execute().use { resp ->
                             if (!resp.isSuccessful) throw IOException("Falha HTTP ${resp.code} na página ${idx + 1}")
