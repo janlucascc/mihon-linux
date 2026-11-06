@@ -23,6 +23,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-core:0.48.0")
     implementation("com.formdev:flatlaf:3.5.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.twelvemonkeys.imageio:imageio-webp:3.12.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")

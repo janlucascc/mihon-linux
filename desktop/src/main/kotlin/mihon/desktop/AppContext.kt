@@ -177,6 +177,61 @@ class CoverCache(
         return cacheDir.listFiles()?.sumOf { it.length() } ?: 0L
     }
 
+    private val sourceIcons = ConcurrentHashMap<String, ImageIcon>()
+    private val iconCacheDir = File(System.getProperty("user.home"), ".mihon/cache/icons").apply { mkdirs() }
+
+    fun getSourceIcon(ext: ExtensionSource, onLoaded: () -> Unit = {}): ImageIcon? {
+        val key = ext.name
+        sourceIcons[key]?.let { return it }
+
+        val hash = sha1(key)
+        val cachedFile = File(iconCacheDir, "$hash.png")
+        if (cachedFile.exists()) {
+            val img = runCatching { ImageIO.read(cachedFile) }.getOrNull()
+            if (img != null) {
+                val icon = ImageIcon(img)
+                sourceIcons[key] = icon
+                return icon
+            }
+        }
+
+        // Asynchronously fetch icon
+        val iconUrl = when {
+            ext.name.contains("Manga Livre", ignoreCase = true) ->
+                "https://mangalivre.to/wp-content/uploads/2025/07/cropped-manga-livre-192x192.webp"
+            ext.name.contains("MangaDex", ignoreCase = true) ->
+                "https://www.google.com/s2/favicons?domain=mangadex.org&sz=64"
+            else -> {
+                val host = ext.baseUrl.substringAfter("://").substringBefore('/')
+                "https://www.google.com/s2/favicons?domain=$host&sz=64"
+            }
+        }
+
+        if (inFlight.add("icon_$key")) {
+            appScope.launch {
+                try {
+                    val downloaded = downloadCover(iconUrl)
+                    if (downloaded != null) {
+                        val scaled = BufferedImage(38, 38, BufferedImage.TYPE_INT_ARGB).apply {
+                            val g = createGraphics()
+                            setupQuality(g)
+                            g.clip = RoundRectangle2D.Float(0f, 0f, 38f, 38f, 8f, 8f)
+                            g.drawImage(downloaded, 0, 0, 38, 38, null)
+                            g.dispose()
+                        }
+                        runCatching { ImageIO.write(scaled, "png", cachedFile) }
+                        val icon = ImageIcon(scaled)
+                        sourceIcons[key] = icon
+                        SwingUtilities.invokeLater(onLoaded)
+                    }
+                } finally {
+                    inFlight.remove("icon_$key")
+                }
+            }
+        }
+        return null
+    }
+
     private fun placeholderFor(title: String): ImageIcon {
         val initials = title.trim().split(Regex("\\s+")).take(2)
             .mapNotNull { it.firstOrNull()?.uppercaseChar() }

@@ -459,11 +459,12 @@ class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
         background = Theme.BG_APP
         val model = DefaultListModel<ExtensionSource>()
         ctx.extensions.forEach { model.addElement(it) }
-        val list = JList(model).apply {
-            background = Theme.BG_APP
-            fixedCellHeight = 66
-            border = BorderFactory.createEmptyBorder(14, 20, 18, 20)
-            cellRenderer = ListCellRenderer { _, ext, _, selected, _ ->
+        val list = JList(model)
+        list.background = Theme.BG_APP
+        list.fixedCellHeight = 66
+        list.border = BorderFactory.createEmptyBorder(14, 20, 18, 20)
+        list.cellRenderer = ListCellRenderer { _, ext, _, selected, _ ->
+            val iconImg = ctx.covers.getSourceIcon(ext) { list.repaint() }
                 object : JPanel() {
                     init { isOpaque = false }
                     override fun paintComponent(g: Graphics) {
@@ -478,23 +479,44 @@ class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
                         g2.color = Theme.BORDER_SUBTLE
                         g2.drawLine(x + 6, h - 1, x + w - 6, h - 1)
 
+                        // Extension Logo Box
+                        val iconX = x + 12
+                        val iconY = (h - 38) / 2
+                        g2.color = Theme.BG_SURFACE
+                        g2.fillRoundRect(iconX, iconY, 38, 38, 10, 10)
+                        if (iconImg != null && iconImg.image != null) {
+                            val clip = java.awt.geom.RoundRectangle2D.Float(iconX.toFloat(), iconY.toFloat(), 38f, 38f, 10f, 10f)
+                            g2.clip = clip
+                            g2.drawImage(iconImg.image, iconX, iconY, 38, 38, null)
+                            g2.clip = null
+                        } else {
+                            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
+                            g2.color = Theme.ACCENT
+                            val initials = ext.name.take(2).uppercase()
+                            val fm = g2.fontMetrics
+                            g2.drawString(initials, iconX + (38 - fm.stringWidth(initials)) / 2, iconY + (38 + fm.ascent) / 2 - 2)
+                        }
+                        g2.color = Theme.BORDER_SUBTLE
+                        g2.drawRoundRect(iconX, iconY, 38, 38, 10, 10)
+
+                        val textX = iconX + 48
                         g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 15f)
                         g2.color = Theme.TEXT_PRIMARY
-                        g2.drawString(ext.name, x + 16, 26)
+                        g2.drawString(ext.name, textX, 26)
                         if (ext.isNsfw) {
                             val titleW = g2.fontMetrics.stringWidth(ext.name)
                             g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
                             val nsfwText = "18+"
                             val nw = g2.fontMetrics.stringWidth(nsfwText) + 10
                             g2.color = Theme.ACCENT_SOFT
-                            g2.fillRoundRect(x + 24 + titleW, 12, nw, 18, 6, 6)
+                            g2.fillRoundRect(textX + 8 + titleW, 12, nw, 18, 6, 6)
                             g2.color = Theme.ACCENT_HOVER
-                            g2.drawString(nsfwText, x + 29 + titleW, 25)
+                            g2.drawString(nsfwText, textX + 13 + titleW, 25)
                         }
 
                         g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
                         g2.color = Theme.TEXT_MUTED
-                        g2.drawString("${ext.baseUrl}  │  ${ext.language.uppercase()}", x + 16, 46)
+                        g2.drawString("${ext.baseUrl}  │  ${ext.language.uppercase()}", textX, 46)
 
                         val badge = "● Instalada"
                         g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
@@ -504,7 +526,6 @@ class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
                     }
                 }
             }
-        }
         add(JScrollPane(list).apply { border = null }, BorderLayout.CENTER)
         val footer = JLabel("  ${ctx.extensions.size} fonte(s) ativa(s)  •  Adicione arquivos .json em ~/.mihon/sources/ ou .jar em ~/.mihon/extensions/").apply {
             foreground = Theme.TEXT_MUTED
@@ -623,14 +644,23 @@ class SourcesListScreen(
     }
 
     private fun addLocalSourceRow() {
-        val row = createRowPanel("📁", "Fonte local", "Local", onRecents = onSelectLocalSource, onRowClick = onSelectLocalSource)
+        val row = createRowPanel(
+            iconImage = null,
+            iconText = "📁",
+            title = "Fonte local",
+            subtitle = "Local",
+            onRecents = onSelectLocalSource,
+            onRowClick = onSelectLocalSource,
+        )
         container.add(row)
         container.add(Box.createVerticalStrut(6))
     }
 
     private fun addSourceRow(ext: ExtensionSource, isPinned: Boolean) {
         val iconText = ext.name.take(2).uppercase()
+        val iconImg = ctx.covers.getSourceIcon(ext) { rebuildList() }
         val row = createRowPanel(
+            iconImage = iconImg,
             iconText = iconText,
             title = ext.name,
             subtitle = ext.language.uppercase(),
@@ -647,6 +677,7 @@ class SourcesListScreen(
     }
 
     private fun createRowPanel(
+        iconImage: ImageIcon? = null,
         iconText: String,
         title: String,
         subtitle: String,
@@ -680,14 +711,23 @@ class SourcesListScreen(
                         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                         g2.color = Theme.BG_SURFACE
                         g2.fillRoundRect(0, 0, width, height, 10, 10)
+
+                        if (iconImage != null && iconImage.image != null) {
+                            val clip = java.awt.geom.RoundRectangle2D.Float(1f, 1f, (width - 2).toFloat(), (height - 2).toFloat(), 8f, 8f)
+                            g2.clip = clip
+                            g2.drawImage(iconImage.image, 2, 2, width - 4, height - 4, null)
+                            g2.clip = null
+                        } else {
+                            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
+                            g2.color = Theme.ACCENT
+                            val fm = g2.fontMetrics
+                            val tw = fm.stringWidth(iconText)
+                            val th = fm.ascent
+                            g2.drawString(iconText, (width - tw) / 2, (height + th) / 2 - 2)
+                        }
+
                         g2.color = Theme.BORDER_SUBTLE
                         g2.drawRoundRect(0, 0, width - 1, height - 1, 10, 10)
-                        g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
-                        g2.color = Theme.ACCENT
-                        val fm = g2.fontMetrics
-                        val tw = fm.stringWidth(iconText)
-                        val th = fm.ascent
-                        g2.drawString(iconText, (width - tw) / 2, (height + th) / 2 - 2)
                         g2.dispose()
                     }
                 }

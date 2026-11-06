@@ -11,13 +11,16 @@ object ImageDecoder {
     fun decode(bytes: ByteArray): BufferedImage? {
         if (bytes.isEmpty()) return null
         runCatching { ImageIO.read(ByteArrayInputStream(bytes)) }.getOrNull()?.let { return it }
-        // Fallback for WebP / AVIF on Linux via ImageMagick `magick - png:-`
+        // Fallback for AVIF/JXL via ImageMagick with deadlock protection
         return runCatching {
             val proc = ProcessBuilder("magick", "-", "png:-").start()
+            val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                proc.inputStream.use { it.readAllBytes() }
+            }
             proc.outputStream.use { it.write(bytes) }
-            val outBytes = proc.inputStream.use { it.readAllBytes() }
-            proc.waitFor()
-            if (outBytes.isNotEmpty()) ImageIO.read(ByteArrayInputStream(outBytes)) else null
+            val outBytes = stdoutFuture.get(4, java.util.concurrent.TimeUnit.SECONDS)
+            proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+            if (outBytes != null && outBytes.isNotEmpty()) ImageIO.read(ByteArrayInputStream(outBytes)) else null
         }.getOrNull()
     }
 
