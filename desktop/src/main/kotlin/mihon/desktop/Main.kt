@@ -49,11 +49,31 @@ import javax.swing.filechooser.FileNameExtensionFilter
 import javax.swing.plaf.ColorUIResource
 
 private const val PREF_DARK = "darkTheme"
+private const val PREF_PRESET = "themePreset"
+private const val PREF_CUSTOM_BG = "customBgApp"
+private const val PREF_CUSTOM_SIDEBAR = "customBgSidebar"
+private const val PREF_CUSTOM_SURFACE = "customBgSurface"
+private const val PREF_CUSTOM_ACCENT = "customAccent"
+private const val PREF_CUSTOM_TEXT = "customTextPrimary"
 private val prefs: Preferences = Preferences.userRoot().node("mihon-linux")
 private val readerPrefs: Preferences = Preferences.userRoot().node("mihon-linux-reader")
 
-internal fun configureTheme(dark: Boolean) {
-    Theme.setDarkMode(dark)
+internal fun configureTheme(presetName: String? = null) {
+    val chosenName = presetName ?: prefs.get(PREF_PRESET, if (prefs.getBoolean(PREF_DARK, true)) "AMOLED" else "LIGHT")
+    val preset = runCatching { Theme.ThemePreset.valueOf(chosenName) }.getOrDefault(Theme.ThemePreset.AMOLED)
+
+    if (preset == Theme.ThemePreset.CUSTOM) {
+        val bgApp = Color(prefs.getInt(PREF_CUSTOM_BG, 0x141414))
+        val bgSidebar = Color(prefs.getInt(PREF_CUSTOM_SIDEBAR, 0x1A1A1A))
+        val bgSurface = Color(prefs.getInt(PREF_CUSTOM_SURFACE, 0x222222))
+        val accent = Color(prefs.getInt(PREF_CUSTOM_ACCENT, 0xFFFFFF))
+        val textPrimary = Color(prefs.getInt(PREF_CUSTOM_TEXT, 0xFFFFFF))
+        Theme.setCustomColors(bgApp, bgSidebar, bgSurface, accent, textPrimary)
+    } else {
+        Theme.applyPreset(preset)
+    }
+
+    val dark = Theme.isDark
 
     // Descartar overrides manuais para que o Look and Feel assuma as cores nativas limpas sem cache
     UIManager.put("Button.background", null)
@@ -92,9 +112,43 @@ internal fun configureTheme(dark: Boolean) {
     UIManager.put("ScrollBar.width", 10)
 }
 
-internal fun applyTheme(dark: Boolean) {
-    prefs.putBoolean(PREF_DARK, dark)
-    configureTheme(dark)
+internal fun applyTheme(preset: Theme.ThemePreset) {
+    prefs.put(PREF_PRESET, preset.name)
+    prefs.putBoolean(PREF_DARK, preset.isDark)
+    configureTheme(preset.name)
+
+    fun resetComponentStyles(comp: java.awt.Component) {
+        if (comp is JButton || comp is JComboBox<*>) {
+            comp.background = null
+            comp.foreground = null
+        }
+        if (comp is JCheckBox) {
+            comp.background = null
+            comp.foreground = null
+            comp.isOpaque = false
+        }
+        if (comp is java.awt.Container) {
+            comp.components.forEach { resetComponentStyles(it) }
+        }
+    }
+
+    java.awt.Window.getWindows().forEach { win ->
+        resetComponentStyles(win)
+        SwingUtilities.updateComponentTreeUI(win)
+        win.repaint()
+    }
+    FlatLaf.updateUI()
+}
+
+internal fun applyCustomTheme(bgApp: Color, bgSidebar: Color, bgSurface: Color, accent: Color, textPrimary: Color) {
+    prefs.put(PREF_PRESET, Theme.ThemePreset.CUSTOM.name)
+    prefs.putInt(PREF_CUSTOM_BG, bgApp.rgb and 0xFFFFFF)
+    prefs.putInt(PREF_CUSTOM_SIDEBAR, bgSidebar.rgb and 0xFFFFFF)
+    prefs.putInt(PREF_CUSTOM_SURFACE, bgSurface.rgb and 0xFFFFFF)
+    prefs.putInt(PREF_CUSTOM_ACCENT, accent.rgb and 0xFFFFFF)
+    prefs.putInt(PREF_CUSTOM_TEXT, textPrimary.rgb and 0xFFFFFF)
+
+    configureTheme(Theme.ThemePreset.CUSTOM.name)
 
     fun resetComponentStyles(comp: java.awt.Component) {
         if (comp is JButton || comp is JComboBox<*>) {
@@ -121,8 +175,7 @@ internal fun applyTheme(dark: Boolean) {
 
 fun main() {
     setupUncaughtErrorHandling()
-    val isDark = prefs.getBoolean(PREF_DARK, true)
-    configureTheme(isDark)
+    configureTheme()
     SwingUtilities.invokeLater { MihonApp() }
 }
 
@@ -321,10 +374,28 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
     }
 
     private fun settingsScreen(): JComponent {
-        val dark = JCheckBox("Tema escuro (FlatLaf Dark)", prefs.getBoolean(PREF_DARK, true)).apply {
-            isOpaque = false
+        val themeBox = JComboBox(Theme.ThemePreset.entries.map { it.displayName }.toTypedArray()).apply {
+            val savedPreset = runCatching { Theme.ThemePreset.valueOf(prefs.get(PREF_PRESET, "AMOLED")) }
+                .getOrDefault(Theme.ThemePreset.AMOLED)
+            selectedIndex = savedPreset.ordinal
+            maximumSize = Dimension(320, 32)
             alignmentX = 0f
-            addActionListener { applyTheme(isSelected) }
+            addActionListener {
+                val selected = Theme.ThemePreset.entries[selectedIndex]
+                if (selected == Theme.ThemePreset.CUSTOM) {
+                    openCustomThemeDialog()
+                } else {
+                    applyTheme(selected)
+                }
+            }
+        }
+
+        val btnCustomTheme = JButton("Editar Cores do Tema...").apply {
+            font = font.deriveFont(Font.PLAIN, 12f)
+            alignmentX = 0f
+            margin = java.awt.Insets(4, 12, 4, 12)
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            addActionListener { openCustomThemeDialog() }
         }
 
         val incognitoCheck = JCheckBox("Modo anônimo (Pausa gravação no histórico de leitura)", ctx.incognitoMode).apply {
@@ -404,6 +475,7 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             add(titleLbl)
         }
 
+        val lblThemeTitle = JLabel("Aparência e Tema:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
         val lblMode = JLabel("Modo de leitura padrão:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
         val lblFit = JLabel("Ajuste de página padrão:").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
         val lblQuality = JLabel("Qualidade de renderização e Upscaling (Zoom):").apply { alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
@@ -421,8 +493,12 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             add(topBar)
             add(Box.createVerticalStrut(18))
 
-            add(dark)
-            add(Box.createVerticalStrut(8))
+            add(lblThemeTitle)
+            add(Box.createVerticalStrut(6))
+            add(themeBox)
+            add(Box.createVerticalStrut(6))
+            add(btnCustomTheme)
+            add(Box.createVerticalStrut(14))
 
             add(incognitoCheck)
             add(Box.createVerticalStrut(8))
@@ -467,9 +543,16 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             verticalScrollBar.unitIncrement = 20
         }
 
-        ctx.addThemeListener { isDark ->
-            dark.isSelected = isDark
-            dark.isOpaque = false
+        ctx.addThemeListener {
+            titleLbl.foreground = Theme.TEXT_PRIMARY
+            lblThemeTitle.foreground = Theme.TEXT_PRIMARY
+            lblMode.foreground = Theme.TEXT_PRIMARY
+            lblFit.foreground = Theme.TEXT_PRIMARY
+            lblQuality.foreground = Theme.TEXT_PRIMARY
+            lblBackupTitle.foreground = Theme.TEXT_PRIMARY
+            lblSystemTitle.foreground = Theme.TEXT_PRIMARY
+            incognitoCheck.foreground = Theme.TEXT_PRIMARY
+            autoPrefetchCheck.foreground = Theme.TEXT_PRIMARY
             incognitoCheck.isOpaque = false
             autoPrefetchCheck.isOpaque = false
             panel.background = Theme.BG_APP
@@ -479,10 +562,124 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             lblDl.foreground = Theme.TEXT_MUTED
             lblSources.foreground = Theme.TEXT_MUTED
             lblLogs.foreground = Theme.TEXT_MUTED
+            val currentIdx = Theme.currentPreset.ordinal
+            if (themeBox.selectedIndex != currentIdx) {
+                themeBox.selectedIndex = currentIdx
+            }
             scroll.repaint()
         }
 
         return scroll
+    }
+
+    private fun openCustomThemeDialog() {
+        val dlg = javax.swing.JDialog(this, "Personalizar Cores do Tema", true)
+        dlg.layout = BorderLayout()
+        dlg.setSize(480, 420)
+        dlg.setLocationRelativeTo(this)
+
+        val root = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = Theme.BG_APP
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+        }
+
+        val title = JLabel("Tema Personalizado").apply {
+            font = font.deriveFont(Font.BOLD, 18f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+        val sub = JLabel("Selecione as cores da interface ao seu gosto:").apply {
+            font = font.deriveFont(Font.PLAIN, 12f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0f
+        }
+        root.add(title)
+        root.add(Box.createVerticalStrut(4))
+        root.add(sub)
+        root.add(Box.createVerticalStrut(18))
+
+        var curBgApp = Theme.BG_APP
+        var curBgSidebar = Theme.BG_SIDEBAR
+        var curBgSurface = Theme.BG_SURFACE
+        var curAccent = Theme.ACCENT
+        var curTextPrimary = Theme.TEXT_PRIMARY
+
+        fun createColorRow(label: String, initialColor: Color, onPicked: (Color) -> Unit): JPanel {
+            val row = JPanel(BorderLayout(12, 0)).apply {
+                isOpaque = false
+                maximumSize = Dimension(Int.MAX_VALUE, 36)
+                alignmentX = 0f
+            }
+            val lbl = JLabel(label).apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(13f) }
+            val preview = object : JPanel() {
+                var color: Color = initialColor
+                override fun paintComponent(g: java.awt.Graphics) {
+                    super.paintComponent(g)
+                    val g2 = g as java.awt.Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = color
+                    g2.fillRoundRect(2, 2, width - 4, height - 4, 10, 10)
+                    g2.color = Color(255, 255, 255, 70)
+                    g2.drawRoundRect(2, 2, width - 4, height - 4, 10, 10)
+                }
+            }.apply {
+                preferredSize = Dimension(42, 26)
+                isOpaque = false
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            }
+
+            val pickBtn = JButton("Escolher").apply {
+                font = font.deriveFont(11.5f)
+                addActionListener {
+                    val picked = javax.swing.JColorChooser.showDialog(dlg, "Escolher $label", preview.color)
+                    if (picked != null) {
+                        preview.color = picked
+                        preview.repaint()
+                        onPicked(picked)
+                    }
+                }
+            }
+
+            val right = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+                isOpaque = false
+                add(preview)
+                add(pickBtn)
+            }
+            row.add(lbl, BorderLayout.WEST)
+            row.add(right, BorderLayout.EAST)
+            return row
+        }
+
+        root.add(createColorRow("Fundo do Aplicativo", curBgApp) { curBgApp = it })
+        root.add(Box.createVerticalStrut(8))
+        root.add(createColorRow("Barra Lateral", curBgSidebar) { curBgSidebar = it })
+        root.add(Box.createVerticalStrut(8))
+        root.add(createColorRow("Superfície dos Cartões", curBgSurface) { curBgSurface = it })
+        root.add(Box.createVerticalStrut(8))
+        root.add(createColorRow("Cor de Destaque / Acentos", curAccent) { curAccent = it })
+        root.add(Box.createVerticalStrut(8))
+        root.add(createColorRow("Texto Principal", curTextPrimary) { curTextPrimary = it })
+        root.add(Box.createVerticalStrut(24))
+
+        val btnRow = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 0)).apply {
+            isOpaque = false
+            alignmentX = 0f
+            val cancel = JButton("Cancelar").apply { addActionListener { dlg.dispose() } }
+            val save = JButton("Aplicar Tema").apply {
+                font = font.deriveFont(Font.BOLD, 13f)
+                addActionListener {
+                    applyCustomTheme(curBgApp, curBgSidebar, curBgSurface, curAccent, curTextPrimary)
+                    dlg.dispose()
+                }
+            }
+            add(cancel)
+            add(save)
+        }
+        root.add(btnRow)
+
+        dlg.add(root)
+        dlg.isVisible = true
     }
 
     private fun exportBackup() {
@@ -564,6 +761,91 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         const val HISTORY = "history"
         const val MORE = "more"
         const val SETTINGS = "settings"
+    }
+}
+
+/**
+ * Material 3 Switch Component matching Android Mihon:
+ * Sleek stadium pill track with round thumb, smooth hover effect, and on/off state.
+ */
+class M3Switch(
+    initialState: Boolean = false,
+    private val onToggle: (Boolean) -> Unit = {},
+) : JComponent() {
+    var isSelected: Boolean = initialState
+        set(value) {
+            if (field != value) {
+                field = value
+                repaint()
+                onToggle(value)
+            }
+        }
+
+    private var isHovered: Boolean = false
+
+    init {
+        isOpaque = false
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        preferredSize = Dimension(52, 32)
+        minimumSize = Dimension(52, 32)
+        maximumSize = Dimension(52, 32)
+
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseEntered(e: MouseEvent) {
+                isHovered = true
+                repaint()
+            }
+            override fun mouseExited(e: MouseEvent) {
+                isHovered = false
+                repaint()
+            }
+            override fun mousePressed(e: MouseEvent) {
+                isSelected = !isSelected
+            }
+        })
+    }
+
+    override fun paintComponent(g: java.awt.Graphics) {
+        val g2 = g.create() as java.awt.Graphics2D
+        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+
+        val trackW = 50
+        val trackH = 28
+        val trackX = 1
+        val trackY = (height - trackH) / 2
+        val arc = trackH
+
+        if (isSelected) {
+            // Active / Checked Track: filled stadium pill
+            g2.color = if (Theme.isDark) Color(0xFF, 0xFF, 0xFF) else Color(0x1C, 0x1D, 0x1F)
+            g2.fillRoundRect(trackX, trackY, trackW, trackH, arc, arc)
+
+            // Thumb: inside active track (contrast color)
+            val thumbD = 22
+            val thumbX = trackX + trackW - thumbD - 3
+            val thumbY = trackY + (trackH - thumbD) / 2
+            g2.color = if (Theme.isDark) Color(0x00, 0x00, 0x00) else Color(0xFF, 0xFF, 0xFF)
+            g2.fillOval(thumbX, thumbY, thumbD, thumbD)
+        } else {
+            // Inactive Track: outlined stadium pill with transparent/surface background
+            g2.color = if (isHovered) (if (Theme.isDark) Color(0x28, 0x28, 0x28) else Color(0xEE, 0xF0, 0xF4))
+                       else (if (Theme.isDark) Color(0x12, 0x12, 0x12) else Color(0xFA, 0xFA, 0xFA))
+            g2.fillRoundRect(trackX, trackY, trackW, trackH, arc, arc)
+
+            // Pill outline (thick crisp border)
+            g2.stroke = java.awt.BasicStroke(2f)
+            g2.color = if (isHovered) (if (Theme.isDark) Color(255, 255, 255, 180) else Color(0, 0, 0, 160))
+                       else (if (Theme.isDark) Color(255, 255, 255, 120) else Color(0, 0, 0, 100))
+            g2.drawRoundRect(trackX + 1, trackY + 1, trackW - 2, trackH - 2, arc - 2, arc - 2)
+
+            // Thumb: small circle inside inactive track
+            val thumbD = 14
+            val thumbX = trackX + 6
+            val thumbY = trackY + (trackH - thumbD) / 2
+            g2.color = if (Theme.isDark) Color(255, 255, 255, 200) else Color(0, 0, 0, 160)
+            g2.fillOval(thumbX, thumbY, thumbD, thumbD)
+        }
+        g2.dispose()
     }
 }
 
@@ -794,24 +1076,14 @@ class MoreScreen(
     private val onOpenAbout: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
-    private val offlineSwitch = JCheckBox("Somente disponíveis offline", ctx.onlyOfflineFilter).apply {
-        isOpaque = false
-        font = font.deriveFont(Font.BOLD, 14f)
-        toolTipText = "Filtra todos os itens da sua biblioteca para exibir apenas mangás salvos localmente"
-        addActionListener {
-            ctx.setOfflineFilter(isSelected)
-            ctx.setStatus(if (isSelected) "Filtro: Somente disponíveis offline ativado" else "Filtro offline desativado")
-        }
+    private val offlineSwitch = M3Switch(ctx.onlyOfflineFilter) { enabled ->
+        ctx.setOfflineFilter(enabled)
+        ctx.setStatus(if (enabled) "Filtro: Somente disponíveis offline ativado" else "Filtro offline desativado")
     }
 
-    private val incognitoSwitch = JCheckBox("Modo anônimo", ctx.incognitoMode).apply {
-        isOpaque = false
-        font = font.deriveFont(Font.BOLD, 14f)
-        toolTipText = "Pausa temporariamente a gravação no histórico de leitura"
-        addActionListener {
-            ctx.incognitoMode = isSelected
-            ctx.setStatus(if (isSelected) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
-        }
+    private val incognitoSwitch = M3Switch(ctx.incognitoMode) { enabled ->
+        ctx.incognitoMode = enabled
+        ctx.setStatus(if (enabled) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
     }
 
     init {
@@ -823,9 +1095,55 @@ class MoreScreen(
             border = BorderFactory.createEmptyBorder(24, 32, 24, 32)
         }
 
-        // Header Switch Group (Material 3 Toggle Cards)
+        // Header Switch Group (Material 3 Toggle Cards with Switch on right)
+        val lblOfflineTitle = JLabel("Somente disponíveis offline").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
         val lblOfflineDesc = JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
+        val lblOfflineIcon = JLabel("☁⃠").apply { font = font.deriveFont(18f); foreground = Theme.TEXT_PRIMARY }
+
+        val lblIncognitoTitle = JLabel("Modo anônimo").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
         val lblIncognitoDesc = JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
+        val lblIncognitoIcon = JLabel("👓").apply { font = font.deriveFont(18f); foreground = Theme.TEXT_PRIMARY }
+
+        fun createSwitchRow(iconLbl: JLabel, titleLbl: JLabel, descLbl: JLabel, switchComp: M3Switch): JPanel {
+            val row = JPanel(BorderLayout(14, 0)).apply {
+                isOpaque = false
+                alignmentX = 0f
+                maximumSize = Dimension(Int.MAX_VALUE, 46)
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                val left = JPanel(FlowLayout(FlowLayout.LEFT, 12, 0)).apply {
+                    isOpaque = false
+                    add(iconLbl)
+                    add(
+                        JPanel().apply {
+                            isOpaque = false
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            add(titleLbl)
+                            add(descLbl)
+                        },
+                    )
+                }
+                add(left, BorderLayout.WEST)
+                add(switchComp, BorderLayout.EAST)
+
+                fun bindClick(c: java.awt.Component) {
+                    c.addMouseListener(object : MouseAdapter() {
+                        override fun mousePressed(e: MouseEvent) {
+                            if (c !== switchComp) {
+                                switchComp.isSelected = !switchComp.isSelected
+                            }
+                        }
+                    })
+                    if (c is java.awt.Container) {
+                        c.components.forEach { bindClick(it) }
+                    }
+                }
+                bindClick(this)
+            }
+            return row
+        }
+
+        val offlineRow = createSwitchRow(lblOfflineIcon, lblOfflineTitle, lblOfflineDesc, offlineSwitch)
+        val incognitoRow = createSwitchRow(lblIncognitoIcon, lblIncognitoTitle, lblIncognitoDesc, incognitoSwitch)
 
         val switchGroup = JPanel().apply {
             background = Theme.BG_SURFACE
@@ -837,11 +1155,9 @@ class MoreScreen(
             alignmentX = 0f
             maximumSize = Dimension(Int.MAX_VALUE, 130)
 
-            add(offlineSwitch)
-            add(lblOfflineDesc)
+            add(offlineRow)
             add(Box.createVerticalStrut(14))
-            add(incognitoSwitch)
-            add(lblIncognitoDesc)
+            add(incognitoRow)
         }
         content.add(switchGroup)
         content.add(Box.createVerticalStrut(20))
@@ -939,15 +1255,19 @@ class MoreScreen(
             content.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
-            offlineSwitch.foreground = Theme.TEXT_PRIMARY
-            incognitoSwitch.foreground = Theme.TEXT_PRIMARY
+            lblOfflineIcon.foreground = Theme.TEXT_PRIMARY
+            lblOfflineTitle.foreground = Theme.TEXT_PRIMARY
             lblOfflineDesc.foreground = Theme.TEXT_MUTED
+            lblIncognitoIcon.foreground = Theme.TEXT_PRIMARY
+            lblIncognitoTitle.foreground = Theme.TEXT_PRIMARY
             lblIncognitoDesc.foreground = Theme.TEXT_MUTED
             switchGroup.background = Theme.BG_SURFACE
             switchGroup.border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
                 BorderFactory.createEmptyBorder(16, 20, 16, 20),
             )
+            offlineSwitch.repaint()
+            incognitoSwitch.repaint()
             rowHolders.forEach { (row, titleLbl, descLbl, chevLbl) ->
                 row.background = Theme.BG_SURFACE
                 row.border = BorderFactory.createCompoundBorder(

@@ -68,44 +68,171 @@ object Theme {
     val FONT_UI = Font("SansSerif", Font.PLAIN, 13)
     val FONT_MONO = Font("Monospaced", Font.PLAIN, 12)
 
+    enum class ThemePreset(
+        val displayName: String,
+        val isDark: Boolean,
+        val bgApp: Color,
+        val bgSidebar: Color,
+        val bgSurface: Color,
+        val bgCard: Color,
+        val bgCardHover: Color,
+        val bgPillActive: Color,
+        val borderSubtle: Color,
+        val accent: Color,
+        val accentHover: Color,
+        val accentSoft: Color,
+        val textPrimary: Color,
+        val textSecondary: Color,
+        val textMuted: Color,
+    ) {
+        AMOLED(
+            "AMOLED Puro (Preto Total)",
+            true,
+            Color(0x00, 0x00, 0x00),
+            Color(0x08, 0x08, 0x08),
+            Color(0x12, 0x12, 0x12),
+            Color(0x18, 0x18, 0x18),
+            Color(0x26, 0x26, 0x26),
+            Color(0x4A, 0x4A, 0x4A),
+            Color(255, 255, 255, 26),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xE0, 0xE0, 0xE0),
+            Color(255, 255, 255, 36),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xCC, 0xCC, 0xCC),
+            Color(0x9E, 0x9E, 0x9E),
+        ),
+        DARK(
+            "Material 3 Dark (Grafite)",
+            true,
+            Color(0x12, 0x13, 0x16),
+            Color(0x1A, 0x1B, 0x1F),
+            Color(0x20, 0x22, 0x27),
+            Color(0x28, 0x2A, 0x30),
+            Color(0x35, 0x38, 0x41),
+            Color(0x43, 0x47, 0x52),
+            Color(255, 255, 255, 30),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xE5, 0xE7, 0xEB),
+            Color(255, 255, 255, 40),
+            Color(0xFA, 0xFA, 0xFA),
+            Color(0xD1, 0xD5, 0xDB),
+            Color(0x9C, 0xA3, 0xAF),
+        ),
+        MIDNIGHT_BLUE(
+            "Midnight Navy (Azul Noturno)",
+            true,
+            Color(0x0B, 0x11, 0x1A),
+            Color(0x10, 0x18, 0x26),
+            Color(0x16, 0x22, 0x36),
+            Color(0x1C, 0x2B, 0x42),
+            Color(0x27, 0x3B, 0x59),
+            Color(0x25, 0x4B, 0x77),
+            Color(80, 140, 220, 40),
+            Color(0x70, 0xB4, 0xFF),
+            Color(0x94, 0xC8, 0xFF),
+            Color(112, 180, 255, 45),
+            Color(0xF0, 0xF6, 0xFC),
+            Color(0xC9, 0xD1, 0xD9),
+            Color(0x8B, 0x94, 0x9E),
+        ),
+        LIGHT(
+            "Material 3 Claro (Padrão)",
+            false,
+            Color(0xF4, 0xF5, 0xF8),
+            Color(0xEA, 0xED, 0xF2),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xDF, 0xE3, 0xE8),
+            Color(0xD0, 0xD6, 0xE0),
+            Color(0, 0, 0, 24),
+            Color(0x1F, 0x1F, 0x1F),
+            Color(0x33, 0x33, 0x33),
+            Color(0, 0, 0, 20),
+            Color(0x1C, 0x1D, 0x1F),
+            Color(0x4A, 0x4E, 0x54),
+            Color(0x71, 0x76, 0x80),
+        ),
+        CUSTOM(
+            "Personalizado...",
+            true,
+            Color(0x14, 0x14, 0x14),
+            Color(0x1A, 0x1A, 0x1A),
+            Color(0x22, 0x22, 0x22),
+            Color(0x28, 0x28, 0x28),
+            Color(0x36, 0x36, 0x36),
+            Color(0x4D, 0x4D, 0x4D),
+            Color(255, 255, 255, 30),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xE0, 0xE0, 0xE0),
+            Color(255, 255, 255, 36),
+            Color(0xFF, 0xFF, 0xFF),
+            Color(0xCC, 0xCC, 0xCC),
+            Color(0x9E, 0x9E, 0x9E),
+        ),
+    }
+
+    var currentPreset: ThemePreset = ThemePreset.AMOLED
+        private set
+
     private val listeners = mutableListOf<(Boolean) -> Unit>()
 
     fun addListener(listener: (Boolean) -> Unit) {
         listeners.add(listener)
     }
 
+    fun applyPreset(preset: ThemePreset) {
+        currentPreset = preset
+        isDark = preset.isDark
+        BG_APP = preset.bgApp
+        BG_SIDEBAR = preset.bgSidebar
+        BG_SURFACE = preset.bgSurface
+        BG_CARD = preset.bgCard
+        BG_CARD_HOVER = preset.bgCardHover
+        BG_PILL_ACTIVE = preset.bgPillActive
+        BORDER_SUBTLE = preset.borderSubtle
+        ACCENT = preset.accent
+        ACCENT_HOVER = preset.accentHover
+        ACCENT_SOFT = preset.accentSoft
+        TEXT_PRIMARY = preset.textPrimary
+        TEXT_SECONDARY = preset.textSecondary
+        TEXT_MUTED = preset.textMuted
+        listeners.forEach { runCatching { it(isDark) } }
+    }
+
+    fun setCustomColors(
+        bgApp: Color,
+        bgSidebar: Color,
+        bgSurface: Color,
+        accent: Color,
+        textPrimary: Color,
+    ) {
+        currentPreset = ThemePreset.CUSTOM
+        // Determine whether light or dark based on background luminance
+        val lum = (0.299 * bgApp.red + 0.587 * bgApp.green + 0.114 * bgApp.blue) / 255
+        isDark = lum < 0.5
+
+        BG_APP = bgApp
+        BG_SIDEBAR = bgSidebar
+        BG_SURFACE = bgSurface
+        BG_CARD = bgSurface
+        BG_CARD_HOVER = if (isDark) Color((bgSurface.red + 20).coerceAtMost(255), (bgSurface.green + 20).coerceAtMost(255), (bgSurface.blue + 20).coerceAtMost(255))
+                        else Color((bgSurface.red - 20).coerceAtLeast(0), (bgSurface.green - 20).coerceAtLeast(0), (bgSurface.blue - 20).coerceAtLeast(0))
+        BG_PILL_ACTIVE = if (isDark) Color((bgSurface.red + 45).coerceAtMost(255), (bgSurface.green + 45).coerceAtMost(255), (bgSurface.blue + 45).coerceAtMost(255))
+                         else Color((bgSurface.red - 40).coerceAtLeast(0), (bgSurface.green - 40).coerceAtLeast(0), (bgSurface.blue - 40).coerceAtLeast(0))
+        BORDER_SUBTLE = if (isDark) Color(255, 255, 255, 28) else Color(0, 0, 0, 24)
+        ACCENT = accent
+        ACCENT_HOVER = accent
+        ACCENT_SOFT = if (isDark) Color(accent.red, accent.green, accent.blue, 45) else Color(accent.red, accent.green, accent.blue, 30)
+        TEXT_PRIMARY = textPrimary
+        TEXT_SECONDARY = if (isDark) Color(200, 200, 200) else Color(70, 70, 70)
+        TEXT_MUTED = if (isDark) Color(150, 150, 150) else Color(110, 110, 110)
+
+        listeners.forEach { runCatching { it(isDark) } }
+    }
+
     fun setDarkMode(dark: Boolean) {
-        isDark = dark
-        if (dark) {
-            BG_APP = Color(0x00, 0x00, 0x00)
-            BG_SIDEBAR = Color(0x08, 0x08, 0x08)
-            BG_SURFACE = Color(0x12, 0x12, 0x12)
-            BG_CARD = Color(0x18, 0x18, 0x18)
-            BG_CARD_HOVER = Color(0x26, 0x26, 0x26)
-            BG_PILL_ACTIVE = Color(0x4A, 0x4A, 0x4A)
-            BORDER_SUBTLE = Color(255, 255, 255, 26)
-            ACCENT = Color(0xFF, 0xFF, 0xFF)
-            ACCENT_HOVER = Color(0xE0, 0xE0, 0xE0)
-            ACCENT_SOFT = Color(255, 255, 255, 36)
-            TEXT_PRIMARY = Color(0xFF, 0xFF, 0xFF)
-            TEXT_SECONDARY = Color(0xCC, 0xCC, 0xCC)
-            TEXT_MUTED = Color(0x9E, 0x9E, 0x9E)
-        } else {
-            BG_APP = Color(0xF4, 0xF5, 0xF8)
-            BG_SIDEBAR = Color(0xEA, 0xED, 0xF2)
-            BG_SURFACE = Color(0xFF, 0xFF, 0xFF)
-            BG_CARD = Color(0xFF, 0xFF, 0xFF)
-            BG_CARD_HOVER = Color(0xDF, 0xE3, 0xE8)
-            BG_PILL_ACTIVE = Color(0xD0, 0xD6, 0xE0)
-            BORDER_SUBTLE = Color(0, 0, 0, 24)
-            ACCENT = Color(0x1F, 0x1F, 0x1F)
-            ACCENT_HOVER = Color(0x33, 0x33, 0x33)
-            ACCENT_SOFT = Color(0, 0, 0, 20)
-            TEXT_PRIMARY = Color(0x1C, 0x1D, 0x1F)
-            TEXT_SECONDARY = Color(0x4A, 0x4E, 0x54)
-            TEXT_MUTED = Color(0x71, 0x76, 0x80)
-        }
-        listeners.forEach { runCatching { it(dark) } }
+        applyPreset(if (dark) ThemePreset.AMOLED else ThemePreset.LIGHT)
     }
 }
 
