@@ -199,12 +199,12 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
 
         val group = ButtonGroup()
         // 5 Primary Material 3 destinations matching Mihon Android's NavigationBar:
-        // Biblioteca, Atualizações, Histórico, Navegar (with badge), Mais
+        // Biblioteca, Atualizações, Histórico, Navegar, Mais
         listOf(
             Triple(LIBRARY, "Biblioteca", null),
             Triple(UPDATES, "Atualizações", null),
             Triple(HISTORY, "Histórico", null),
-            Triple(BROWSE, "Navegar", "${ctx.extensions.size}"),
+            Triple(BROWSE, "Navegar", null),
             Triple(MORE, "Mais", null),
         ).forEach { (card, label, badge) ->
             val button = M3NavPillButton(label, badge).apply {
@@ -437,17 +437,17 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
         val fm = g2.fontMetrics
         g2.drawString(label, 20, ((h - fm.height) / 2) + fm.ascent)
 
-        // White M3 Counter Badge on the right (like "11" on Navegar in Android screenshot)
+        // Subtle M3 Counter Badge on the right (if provided)
         if (!badgeText.isNullOrBlank()) {
             g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
             val bFm = g2.fontMetrics
             val bw = (bFm.stringWidth(badgeText) + 12).coerceAtLeast(20)
-            val bh = 20
+            val bh = 18
             val bx = w - bw - 14
             val by = (h - bh) / 2
-            g2.color = Color.WHITE
+            g2.color = if (isSelected) Color(255, 255, 255, 45) else Color(255, 255, 255, 25)
             g2.fillRoundRect(bx, by, bw, bh, 999, 999)
-            g2.color = Color.BLACK
+            g2.color = Theme.TEXT_PRIMARY
             g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
         }
         g2.dispose()
