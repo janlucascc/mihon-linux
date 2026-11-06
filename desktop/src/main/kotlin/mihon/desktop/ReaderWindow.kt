@@ -101,21 +101,25 @@ internal fun scaleImage(
  */
 class ReaderWindow(
     title: String,
-    source: File,
+    source: Any, // File or ArchiveReader
     startPage: Int = 0,
     private val onPrevChapter: (() -> Unit)? = null,
     private val onNextChapter: (() -> Unit)? = null,
     private val onProgress: (page: Int, pageCount: Int) -> Unit = { _, _ -> },
 ) : JFrame("Mihon Linux - $title") {
 
-    private val reader: ArchiveReader = ArchiveReaderFactory.of(source)
+    private val reader: ArchiveReader = when (source) {
+        is ArchiveReader -> source
+        is File -> ArchiveReaderFactory.of(source)
+        else -> throw IllegalArgumentException("Fonte não suportada: $source")
+    }
     private val pageCount = reader.pageCount
     private val prefs = Preferences.userRoot().node("mihon-linux-reader")
 
     private var mode = runCatching { ReadMode.valueOf(prefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
     private var fit = runCatching { FitMode.valueOf(prefs.get("fit", "WINDOW")) }.getOrDefault(FitMode.WINDOW)
-    private var quality = runCatching { MangaImageEnhancer.QualityMode.valueOf(prefs.get("quality", "ULTRA")) }
-        .getOrDefault(MangaImageEnhancer.QualityMode.ULTRA)
+    private var quality = runCatching { MangaImageEnhancer.QualityMode.valueOf(prefs.get("quality", "HD_64BIT")) }
+        .getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
 
     /** Natural size of each page; filled in the background (webtoon layout and wide-page detection). */
     private val sizes = arrayOfNulls<Dimension>(pageCount)

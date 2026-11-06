@@ -198,7 +198,7 @@ private fun setupUncaughtErrorHandling() {
     }
 }
 
-class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
+class MihonApp : JFrame("Mihon"), Navigator {
     private val home = System.getProperty("user.home")
     private val dbFile = File(home, ".mihon/mihon.db")
     private val db = DatabaseManager(dbFile).apply { initialize() }
@@ -251,6 +251,7 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
     private val navButtons = linkedMapOf<String, JToggleButton>()
 
     init {
+        iconImage = AppIcon.createImage(64)
         ctx.navigator = this
         defaultCloseOperation = EXIT_ON_CLOSE
         setSize(1240, 840)
@@ -269,7 +270,6 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         add(content, BorderLayout.CENTER)
         statusBar.border = BorderFactory.createEmptyBorder(5, 10, 5, 10)
         add(statusBar, BorderLayout.SOUTH)
-        jMenuBar = menuBar()
 
         ctx.addThemeListener {
             side.background = Theme.BG_SIDEBAR
@@ -282,7 +282,6 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             content.background = Theme.BG_APP
             statusBar.background = Theme.BG_SIDEBAR
             statusBar.foreground = Theme.TEXT_MUTED
-            jMenuBar = menuBar()
             repaint()
         }
 
@@ -328,11 +327,12 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             )
             preferredSize = Dimension(220, 0)
         }
-        brandLabel = JLabel("Mihon", SwingConstants.LEFT).apply {
+        brandLabel = JLabel("Mihon", AppIcon.getIcon(28), SwingConstants.LEFT).apply {
             font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
             foreground = Theme.TEXT_PRIMARY
+            iconTextGap = 10
         }
-        val brandRow = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
+        val brandRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             isOpaque = false
             alignmentX = 0f
             maximumSize = Dimension(Int.MAX_VALUE, 40)
@@ -340,7 +340,7 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         }
         panel.add(brandRow)
         panel.add(Box.createVerticalStrut(2))
-        versionLabel = JLabel("  Desktop Linux • v0.3").apply {
+        versionLabel = JLabel("Desktop Linux").apply {
             font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11f)
             foreground = Theme.TEXT_MUTED
             alignmentX = 0f
@@ -435,10 +435,10 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             addActionListener { readerPrefs.put("fit", FitMode.entries[selectedIndex].name) }
         }
         val defaultQualityBox = JComboBox(MangaImageEnhancer.QualityMode.entries.map { it.label }.toTypedArray()).apply {
-            val saved = runCatching { MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("quality", "ULTRA")) }
-                .getOrDefault(MangaImageEnhancer.QualityMode.ULTRA)
+            val saved = runCatching { MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("quality", "HD_64BIT")) }
+                .getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
             selectedIndex = saved.ordinal
-            maximumSize = Dimension(320, 32)
+            maximumSize = Dimension(380, 32)
             alignmentX = 0f
             addActionListener { readerPrefs.put("quality", MangaImageEnhancer.QualityMode.entries[selectedIndex].name) }
         }
@@ -537,6 +537,35 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             add(lblDl)
             add(lblSources)
             add(lblLogs)
+            add(Box.createVerticalStrut(24))
+
+            val lblAppActionsTitle = JLabel("Aplicativo & Ajuda:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
+            val btnAbout = JButton("ℹ️ Sobre o Mihon").apply {
+                addActionListener {
+                    JOptionPane.showMessageDialog(
+                        this@MihonApp,
+                        "Mihon Desktop Linux\nLeitor de Mangá de Alta Performance\nKotlin + Exposed/SQLite + FlatLaf Swing",
+                        "Sobre o Mihon",
+                        JOptionPane.INFORMATION_MESSAGE,
+                    )
+                }
+            }
+            val btnExit = JButton("Encerrar Aplicativo").apply {
+                addActionListener {
+                    this@MihonApp.dispatchEvent(java.awt.event.WindowEvent(this@MihonApp, java.awt.event.WindowEvent.WINDOW_CLOSING))
+                }
+            }
+            val appActionsRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                alignmentX = 0f
+                maximumSize = Dimension(Int.MAX_VALUE, 38)
+                add(btnAbout)
+                add(Box.createHorizontalStrut(10))
+                add(btnExit)
+            }
+            add(lblAppActionsTitle)
+            add(Box.createVerticalStrut(8))
+            add(appActionsRow)
 
             add(Box.createVerticalGlue())
         }

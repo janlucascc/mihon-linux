@@ -69,10 +69,9 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         addActionListener { toggleFavorite() }
     }
     private val btnContinue = JButton("▶ Continuar Leitura").apply {
-        background = Theme.ACCENT
-        foreground = Theme.TEXT_PRIMARY
         font = font.deriveFont(Font.BOLD, 13f)
         addActionListener { continueReading() }
+        updateContinueButtonStyle()
     }
     private val progressBar = JProgressBar(0, 100).apply {
         isStringPainted = true
@@ -218,27 +217,68 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             chapterHeaderLabel.foreground = Theme.TEXT_PRIMARY
-            btnContinue.background = Theme.ACCENT
-            btnContinue.foreground = Theme.TEXT_PRIMARY
+            updateContinueButtonStyle()
             manga?.let { renderHeader(it) }
             chapterList.repaint()
             repaint()
         }
     }
 
+    private fun updateContinueButtonStyle() {
+        val bg = Theme.ACCENT
+        btnContinue.background = bg
+        // Calculate relative luminance to guarantee readable high contrast
+        val lum = (bg.red * 299 + bg.green * 587 + bg.blue * 114) / 1000
+        btnContinue.foreground = if (lum > 140) Color(0x10, 0x10, 0x12) else Color.WHITE
+    }
+
     private fun showChapterMenu(x: Int, y: Int) {
         val current = manga ?: return
         val selected = chapterList.selectedValuesList
         if (selected.isEmpty()) return
-        val menu = JPopupMenu()
-        menu.add("▶ Ler agora").addActionListener { openChapter(current, selected.first()) }
+        val target = selected.first()
+
+        val gooeyItems = mutableListOf<GooeyContextMenu.GooeyMenuItem>()
+
+        gooeyItems.add(
+            GooeyContextMenu.GooeyMenuItem(
+                id = "read_now",
+                label = "Ler agora",
+                iconType = GooeyContextMenu.IconType.READING,
+                onClick = { openChapter(current, target) }
+            )
+        )
+
         if (!current.isLocal) {
-            menu.add("⬇ Baixar selecionado(s) (.cbz)").addActionListener { downloadSelected() }
+            gooeyItems.add(
+                GooeyContextMenu.GooeyMenuItem(
+                    id = "download",
+                    label = "Baixar selecionado(s) (.cbz)",
+                    iconType = GooeyContextMenu.IconType.DOWNLOAD,
+                    onClick = { downloadSelected() }
+                )
+            )
         }
-        menu.addSeparator()
-        menu.add("✔ Marcar como lido").addActionListener { markSelected(true) }
-        menu.add("Marcar como não lido").addActionListener { markSelected(false) }
-        menu.show(chapterList, x, y)
+
+        gooeyItems.add(
+            GooeyContextMenu.GooeyMenuItem(
+                id = "mark_read",
+                label = "Marcar como lido",
+                iconType = GooeyContextMenu.IconType.COMPLETED,
+                onClick = { markSelected(true) }
+            )
+        )
+
+        gooeyItems.add(
+            GooeyContextMenu.GooeyMenuItem(
+                id = "mark_unread",
+                label = "Marcar como não lido",
+                iconType = GooeyContextMenu.IconType.UNREAD,
+                onClick = { markSelected(false) }
+            )
+        )
+
+        GooeyContextMenu(gooeyItems).showAt(chapterList, x, y)
     }
 
     fun show(manga: Manga) {
@@ -365,31 +405,63 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         val source = ctx.sourceFor(current.source)
         if (source == null) {
-            JOptionPane.showMessageDialog(this, "Fonte não encontrada para baixar o capítulo.", "Erro", JOptionPane.ERROR_MESSAGE)
+            JOptionPane.showMessageDialog(this, "Fonte não encontrada para ler o capítulo.", "Erro", JOptionPane.ERROR_MESSAGE)
             return
         }
+
+        // Open streaming reader directly without forcing full download
         progressBar.value = 0
-        progressBar.string = "Iniciando download de '${chapter.name}'…"
+        progressBar.string = "Obtendo páginas de '${chapter.name}'…"
+        progressBar.isIndeterminate = true
         progressBar.isVisible = true
+        ctx.setStatus("Carregando páginas de '${chapter.name}'…")
+
         background({
-            ctx.service.downloadChapter(current, chapter, source) { page, total ->
-                SwingUtilities.invokeLater {
-                    progressBar.maximum = total.coerceAtLeast(1)
-                    progressBar.value = page
-                    progressBar.string = "Baixando '${chapter.name}' — página $page de $total"
-                    ctx.setStatus("Baixando '${chapter.name}': página $page/$total…")
-                }
-            }
+            val imageUrls = source.getChapterImages(chapter.url)
+            require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
+            val referer = if (source.name.contains("MangaDex", ignoreCase = true)) "https://mangadex.org/" else "${source.baseUrl}/"
+            val userAgent = if (source.name.contains("MangaDex", ignoreCase = true)) "MihonLinux/0.3 (Linux Desktop)" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            val cookie = if (source.baseUrl.contains("hentaidatia")) "tia_idade_confirmada=1" else null
+            OnlineStreamArchiveReader(
+                sourceName = "${current.title} - ${chapter.name}",
+                imageUrls = imageUrls,
+                client = ctx.service.httpClient,
+                referer = referer,
+                userAgent = userAgent,
+                cookie = cookie,
+            )
         }) { result ->
+            progressBar.isIndeterminate = false
             progressBar.isVisible = false
-            result.onSuccess { cbz ->
-                ctx.setStatus("Capítulo '${chapter.name}' pronto")
-                reloadChapters()
-                openReaderFile(current, chapter, cbz, canRetryDownload = false)
+            result.onSuccess { streamReader ->
+                ctx.setStatus("Pronto para leitura: '${chapter.name}'")
+                openReaderArchive(current, chapter, streamReader)
             }.onFailure {
-                ctx.setStatus("Erro ao baixar capítulo: ${it.message}")
-                JOptionPane.showMessageDialog(this, "Falha ao baixar capítulo:\n${it.message}", "Erro", JOptionPane.ERROR_MESSAGE)
+                ctx.setStatus("Erro ao abrir capítulo: ${it.message}")
+                JOptionPane.showMessageDialog(this, "Falha ao carregar páginas do capítulo:\n${it.message}", "Erro", JOptionPane.ERROR_MESSAGE)
             }
+        }
+    }
+
+    private fun openReaderArchive(current: Manga, chapter: Chapter, reader: mihon.core.archive.ArchiveReader) {
+        try {
+            val started = System.currentTimeMillis()
+            val idx = chapters.indexOfFirst { it.id == chapter.id }
+            val prevChap = if (idx > 0) chapters[idx - 1] else null
+            val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
+
+            ReaderWindow(
+                title = "${current.title} - ${chapter.name}",
+                source = reader,
+                startPage = if (chapter.read) 0 else chapter.lastPageRead,
+                onPrevChapter = prevChap?.let { { openChapter(current, it) } },
+                onNextChapter = nextChap?.let { { openChapter(current, it) } },
+            ) { page, count ->
+                val elapsed = System.currentTimeMillis() - started
+                background({ ctx.service.saveProgress(chapter, page, count, elapsed, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
+            }
+        } catch (e: Exception) {
+            JOptionPane.showMessageDialog(this, "Não foi possível abrir o leitor: ${e.message}", "Erro", JOptionPane.ERROR_MESSAGE)
         }
     }
 

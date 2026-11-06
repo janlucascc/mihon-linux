@@ -63,7 +63,7 @@ class LibraryService(
     private val history: HistoryRepository,
     val downloadsDir: File = File(System.getProperty("user.home"), ".mihon/downloads"),
 ) {
-    private val httpClient = OkHttpClient.Builder()
+    val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .build()

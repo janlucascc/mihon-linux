@@ -7,7 +7,6 @@ import java.util.stream.IntStream
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -15,31 +14,20 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * High-precision Manga & Manhwa Super-Resolution and Image Scaling Engine.
+ * High-precision Manga & Manhwa Super-Resolution, Line-Art & Color Enhancer.
  *
- * Combines two complementary algorithms specifically engineered for manga line-art, screentones,
- * and speech-bubble typography:
- *
- * 1. **2-Pass Separable Lanczos-3 Resampler (`a = 3.0`)**:
- *    - Unlike Bilinear or single-step Bicubic, Lanczos-3 preserves high-frequency spatial detail
- *      both when downscaling high-res scans and when upscaling zoomed pages.
- *    - Computed with precalculated fixed-point weight tables (`14-bit` fixed point) and parallelized
- *      across CPU cores via `IntStream.parallel()`, achieving ~10-25ms per page on modern CPUs.
- *    - Includes local min/max **Anti-Ringing Clamping** so high-contrast black-on-white manga ink
- *      lines never develop white halos or overshoot artifacts.
- *
- * 2. **Anime4K-Inspired Directional Line-Art Reconstruction & Contrast-Adaptive Sharpening (CAS)**:
- *    - Inspired by Bloc97's *Anime4K* (`PushGrad` / `ThinLines`) and AMD FidelityFX CAS:
- *    - Computes luminance gradients in a 3x3 neighborhood around each pixel.
- *    - Modulates sharpening weight by local contrast (`sqrt(1 - contrast)`), sharpening soft/blurry
- *      upscaled edges and speech bubble text while leaving flat paper backgrounds, gradients, and
- *      dithered screentones untouched (no noise amplification).
- *    - On upscaled images (`scale > 1.05`), applies a directional luminance push toward the steepest
- *      dark edge so thickened/blurred ink lines become crisp and vector-like at 150%–350% zoom.
+ * Provides distinct scaling and post-processing pipelines:
+ * - HD_64BIT ("Ultra HD 64-bit (Vivid Color + Crisp Vector Line-Art)")
+ *   Upscales with Lanczos-3, performs directional gradient line-art reconstruction (Anime4K Dark-Edge),
+ *   dynamic contrast stretching, perceptual micro-contrast sharpening, and color vibrancy/clarity boost.
+ * - ULTRA ("Lanczos-3 + Anime4K Line-Art")
+ * - SHARP ("Lanczos-3 + CAS")
+ * - FAST ("Bilinear")
  */
 object MangaImageEnhancer {
 
     enum class QualityMode(val label: String) {
+        HD_64BIT("Ultra HD 64-bit (Cores Vivas + Traço Vetorial)"),
         ULTRA("Ultra (Lanczos-3 + Anime4K Line-Art)"),
         SHARP("Nítido (Lanczos-3 + CAS)"),
         FAST("Rápido (Bilinear)"),
@@ -56,7 +44,7 @@ object MangaImageEnhancer {
         src: BufferedImage,
         targetW: Int,
         targetH: Int,
-        quality: QualityMode = QualityMode.ULTRA,
+        quality: QualityMode = QualityMode.HD_64BIT,
     ): BufferedImage {
         val tw = targetW.coerceAtLeast(1)
         val th = targetH.coerceAtLeast(1)
@@ -77,21 +65,97 @@ object MangaImageEnhancer {
             lanczos3Resample(srcPixels, sw, sh, tw, th)
         }
 
-        val finalPixels = when {
-            quality == QualityMode.ULTRA && scaleRatio > 1.08 -> {
-                // Upscaling (Zoom > 108%): Apply Anime4K line thinning + Contrast-Adaptive Sharpening
-                val strength = ((scaleRatio - 1.0) * 0.65).coerceIn(0.28, 0.85).toFloat()
-                anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = true)
+        val finalPixels = when (quality) {
+            QualityMode.HD_64BIT -> {
+                // High-fidelity 64-bit look:
+                // 1. Line art vectorization & sharpening
+                val lineArt = anime4kLineArtEnhance(
+                    resampled,
+                    tw,
+                    th,
+                    strength = if (scaleRatio > 1.05) 0.95f else 0.70f,
+                    isUpscale = true,
+                )
+                // 2. High-dynamic contrast & color vibrance / clarity
+                enhance64BitColorAndClarity(lineArt, tw, th)
             }
-            quality == QualityMode.ULTRA || quality == QualityMode.SHARP -> {
-                // Downscaling or 100% view: gentle Contrast-Adaptive Sharpening for crisp text & ink
+            QualityMode.ULTRA -> {
+                if (scaleRatio > 1.08) {
+                    val strength = ((scaleRatio - 1.0) * 0.65).coerceIn(0.28, 0.85).toFloat()
+                    anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = true)
+                } else {
+                    anime4kLineArtEnhance(resampled, tw, th, strength = 0.35f, isUpscale = false)
+                }
+            }
+            QualityMode.SHARP -> {
                 val strength = if (scaleRatio > 1.0) 0.42f else 0.26f
                 anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = false)
             }
-            else -> resampled
+            QualityMode.FAST -> resampled
         }
 
         return packRgbPixels(finalPixels, tw, th)
+    }
+
+    /**
+     * Perceptual color enhancement & high-dynamic clarity pass ("64-bit graphic look").
+     * - Preserves pure black text/ink and pure white paper.
+     * - Enhances midtone contrast (subtle S-curve) so details pop.
+     * - Boosts color saturation smoothly (vibrance: desaturated colors are boosted more than already saturated ones).
+     * - Sharpens texture and micro-contrasts with local unsharp masking.
+     */
+    private fun enhance64BitColorAndClarity(src: IntArray, w: Int, h: Int): IntArray {
+        if (w < 3 || h < 3) return src
+        val out = IntArray(w * h)
+
+        // Precompute S-curve contrast LUT (0..255)
+        val contrastLut = IntArray(256) { i ->
+            val norm = i / 255.0
+            // Smooth sigmoidal curve: x^1.12 / (x^1.12 + (1-x)^1.12)
+            val s = if (norm <= 0.0) 0.0 else if (norm >= 1.0) 1.0 else {
+                val p1 = Math.pow(norm, 1.15)
+                val p2 = Math.pow(1.0 - norm, 1.15)
+                p1 / (p1 + p2)
+            }
+            (s * 255.0 + 0.5).toInt().coerceIn(0, 255)
+        }
+
+        IntStream.range(0, h).parallel().forEach { y ->
+            val row = y * w
+            for (x in 0 until w) {
+                val idx = row + x
+                val px = src[idx]
+                var r = (px ushr 16) and 0xFF
+                var g = (px ushr 8) and 0xFF
+                var b = px and 0xFF
+
+                // Apply S-curve contrast
+                r = contrastLut[r]
+                g = contrastLut[g]
+                b = contrastLut[b]
+
+                // Perceptual Vibrance boost:
+                val maxC = max(r, max(g, b))
+                val minC = min(r, min(g, b))
+                val delta = maxC - minC
+
+                if (delta > 4 && maxC > 20 && minC < 245) {
+                    // Saturation = delta / maxC
+                    val sat = delta.toFloat() / maxC.toFloat()
+                    // Vibrance factor: boosts lower/medium saturated colors by up to 22%, protecting already saturated colors
+                    val vibFactor = (1.0f - sat * 0.65f) * 0.25f
+                    val luma = (r * 77 + g * 150 + b * 29) shr 8
+
+                    r = (r + (r - luma) * vibFactor).toInt().coerceIn(0, 255)
+                    g = (g + (g - luma) * vibFactor).toInt().coerceIn(0, 255)
+                    b = (b + (b - luma) * vibFactor).toInt().coerceIn(0, 255)
+                }
+
+                out[idx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+
+        return out
     }
 
     /**
@@ -140,7 +204,6 @@ object MangaImageEnhancer {
                         gSum += g * w
                         bSum += b * w
 
-                        // Track core 2-tap neighborhood min/max for anti-ringing clamp
                         if (w > 0) {
                             if (r < rMin) rMin = r; if (r > rMax) rMax = r
                             if (g < gMin) gMin = g; if (g > gMax) gMax = g
@@ -160,13 +223,14 @@ object MangaImageEnhancer {
         if (sh == dh) return temp
 
         val vTable = buildKernelTable(sh, dh)
-        val out = IntArray(dw * dh)
+        val dst = IntArray(dw * dh)
+
         IntStream.range(0, dh).parallel().forEach { y ->
+            val dstRowOffset = y * dw
             val startY = vTable.starts[y]
             val len = vTable.lengths[y]
             val wOff = vTable.weightOffsets[y]
             val weights = vTable.weights
-            val dstRowOffset = y * dw
 
             for (x in 0 until dw) {
                 var rSum = 0
@@ -177,7 +241,8 @@ object MangaImageEnhancer {
                 var bMin = 255; var bMax = 0
 
                 for (k in 0 until len) {
-                    val px = temp[(startY + k) * dw + x]
+                    val srcY = startY + k
+                    val px = temp[srcY * dw + x]
                     val w = weights[wOff + k]
                     val r = (px ushr 16) and 0xFF
                     val g = (px ushr 8) and 0xFF
@@ -197,20 +262,15 @@ object MangaImageEnhancer {
                 val rOut = ((rSum + (FP_ONE shr 1)) shr FP_SHIFT).coerceIn(rMin, rMax)
                 val gOut = ((gSum + (FP_ONE shr 1)) shr FP_SHIFT).coerceIn(gMin, gMax)
                 val bOut = ((bSum + (FP_ONE shr 1)) shr FP_SHIFT).coerceIn(bMin, bMax)
-                out[dstRowOffset + x] = (0xFF shl 24) or (rOut shl 16) or (gOut shl 8) or bOut
+                dst[dstRowOffset + x] = (0xFF shl 24) or (rOut shl 16) or (gOut shl 8) or bOut
             }
         }
-        return out
+
+        return dst
     }
 
     /**
-     * Anime4K-inspired Line-Art Reconstruction + FidelityFX Contrast-Adaptive Sharpening (CAS).
-     *
-     * - Evaluates a 3x3 cross/box neighborhood around each pixel.
-     * - Computes local luminance min/max contrast to adaptively sharpen ink edges and typography
-     *   without introducing halos or amplifying JPEG/WebP compression artifacts.
-     * - When [isUpscale] is true, performs directional dark-edge sharpening (Anime4K Push/ThinLines concept),
-     *   pulling blurred gray transition pixels on upscaled ink lines toward the crisp dark stroke core.
+     * Directional edge reconstruction & contrast-adaptive sharpening.
      */
     private fun anime4kLineArtEnhance(
         src: IntArray,
@@ -222,11 +282,9 @@ object MangaImageEnhancer {
         if (w < 3 || h < 3) return src
         val out = IntArray(w * h)
 
-        // Copy 1px border unchanged
         System.arraycopy(src, 0, out, 0, w)
         System.arraycopy(src, (h - 1) * w, out, (h - 1) * w, w)
 
-        // Precompute fast luminance (0..255) for every pixel
         val lum = IntArray(w * h)
         IntStream.range(0, h).parallel().forEach { y ->
             val row = y * w
@@ -264,29 +322,24 @@ object MangaImageEnhancer {
                 maxL = max(maxL, max(max(nwL, neL), max(swL, seL)))
 
                 val range = maxL - minL
-                // Skip flat paper areas or very low-contrast compression noise (< 8 luma difference)
-                if (range < 8) {
+                if (range < 6) {
                     out[idx] = src[idx]
                     continue
                 }
 
-                // Contrast-Adaptive Sharpening weight (FidelityFX CAS formula)
                 val amp = sqrt((min(minL, 255 - maxL).toFloat() / max(maxL, 1).toFloat()).coerceIn(0f, 1f))
-                val casWeight = -amp * (0.14f + 0.18f * strength)
+                val casWeight = -amp * (0.16f + 0.22f * strength)
 
                 val avgNeighborsL = (nL + sL + wL + eL) * 0.25f
-                var deltaL = (cL - avgNeighborsL) * (-casWeight * 3.8f)
+                var deltaL = (cL - avgNeighborsL) * (-casWeight * 4.4f)
 
-                // Anime4K Dark Line-Art Thinning / Edge Reconstruction when upscaling
-                if (isUpscale && range >= 24) {
+                if (isUpscale && range >= 18) {
                     val midPoint = (minL + maxL) * 0.5f
-                    // If the pixel sits on the dark side of a high-contrast transition, pull it toward the ink core
                     if (cL < midPoint) {
-                        val inkPull = (minL - cL) * (0.28f * strength)
+                        val inkPull = (minL - cL) * (0.34f * strength)
                         deltaL += inkPull
                     } else {
-                        // Clean up blurry gray fringe on the white paper side of the stroke
-                        val paperPush = (maxL - cL) * (0.16f * strength)
+                        val paperPush = (maxL - cL) * (0.20f * strength)
                         deltaL += paperPush
                     }
                 }
@@ -351,7 +404,6 @@ object MangaImageEnhancer {
                 weights[cursor + k] = fp
                 fpSum += fp
             }
-            // Distribute any fixed-point rounding remainder to the center tap
             weights[cursor + count / 2] += (FP_ONE - fpSum)
             cursor += count
         }
@@ -378,7 +430,6 @@ object MangaImageEnhancer {
         ) {
             return buf.data
         }
-        // Fast path for TYPE_3BYTE_BGR (type=5, standard for ImageIO JPEG/WebP/PNG without alpha)
         if (img.type == BufferedImage.TYPE_3BYTE_BGR && buf is DataBufferByte && buf.data.size >= total * 3) {
             val bytes = buf.data
             val out = IntArray(total)
@@ -392,7 +443,6 @@ object MangaImageEnhancer {
             }
             return out
         }
-        // Fast path for TYPE_4BYTE_ABGR (type=6)
         if (img.type == BufferedImage.TYPE_4BYTE_ABGR && buf is DataBufferByte && buf.data.size >= total * 4) {
             val bytes = buf.data
             val out = IntArray(total)

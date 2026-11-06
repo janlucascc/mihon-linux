@@ -17,6 +17,7 @@ import java.awt.Color
 import java.awt.Font
 import java.awt.GradientPaint
 import java.awt.Graphics2D
+import java.awt.GraphicsEnvironment
 import java.awt.RenderingHints
 import java.awt.geom.RoundRectangle2D
 import java.awt.image.BufferedImage
@@ -64,7 +65,12 @@ object Theme {
     val SUCCESS = Color(0x2E, 0x9E, 0x6B)
     val DANGER = Color(0xEF, 0x53, 0x50)
 
-    val FONT_DISPLAY = Font("SansSerif", Font.BOLD, 20)
+    val FONT_DISPLAY: Font by lazy {
+        val candidates = listOf("Inter", "Roboto", "Cantarell", "Noto Sans", "Liberation Sans", "SansSerif")
+        val available = GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames.toSet()
+        val chosen = candidates.firstOrNull { it in available } ?: "SansSerif"
+        Font(chosen, Font.BOLD, 22)
+    }
     val FONT_UI = Font("SansSerif", Font.PLAIN, 13)
     val FONT_MONO = Font("Monospaced", Font.PLAIN, 12)
 

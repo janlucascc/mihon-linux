@@ -44,6 +44,13 @@ class ExtensionLoader(
         )
         extensions.add(MangaDexSource("pt-br"))
 
+        // Carrega extensões locais/privadas compiladas ou opcionais dinamicamente via reflexão
+        runCatching {
+            val tiaClass = Class.forName("mihon.source.HentaiDaTiaSource")
+            val instance = tiaClass.getDeclaredConstructor().newInstance() as ExtensionSource
+            extensions.add(instance)
+        }
+
         if (!extensionsDir.exists()) extensionsDir.mkdirs()
         if (!sourcesDir.exists()) {
             sourcesDir.mkdirs()
