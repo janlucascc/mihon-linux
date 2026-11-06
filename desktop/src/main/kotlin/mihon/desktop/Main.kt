@@ -15,6 +15,8 @@ import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -37,6 +39,7 @@ import javax.swing.JMenuBar
 import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JScrollPane
 import javax.swing.JToggleButton
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
@@ -64,12 +67,12 @@ fun main() {
     UIManager.put("Button.foreground", Theme.TEXT_PRIMARY)
     UIManager.put("ComboBox.background", Theme.BG_CARD)
     UIManager.put("TextField.background", Theme.BG_CARD)
-    UIManager.put("ToggleButton.selectedBackground", Theme.ACCENT)
-    UIManager.put("ToggleButton.selectedForeground", Color.WHITE)
-    UIManager.put("Component.arc", 14)
-    UIManager.put("Button.arc", 12)
-    UIManager.put("TextComponent.arc", 12)
-    UIManager.put("ProgressBar.arc", 12)
+    UIManager.put("ToggleButton.selectedBackground", Theme.BG_PILL_ACTIVE)
+    UIManager.put("ToggleButton.selectedForeground", Theme.TEXT_PRIMARY)
+    UIManager.put("Component.arc", 999) // M3 Pill shapes
+    UIManager.put("Button.arc", 999)
+    UIManager.put("TextComponent.arc", 16)
+    UIManager.put("ProgressBar.arc", 999)
     UIManager.put("ScrollBar.thumbArc", 999)
     UIManager.put("ScrollBar.width", 10)
     SwingUtilities.invokeLater { MihonApp() }
@@ -112,20 +115,24 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
     private val content = JPanel(cards)
     private val library = LibraryScreen(ctx)
     private val details = DetailsScreen(ctx)
+    private val browseHub = BrowseHubScreen(ctx)
     private val historyScreen = HistoryScreen(ctx)
+    private val updatesScreen = UpdatesPlaceholderScreen(ctx)
+    private val moreScreen = MoreScreen(ctx, onOpenSettings = { navigate(SETTINGS) }, onExportBackup = { exportBackup() }, onImportBackup = { importBackup() })
     private val navButtons = linkedMapOf<String, JToggleButton>()
 
     init {
         ctx.navigator = this
         defaultCloseOperation = EXIT_ON_CLOSE
-        setSize(1220, 820)
+        setSize(1240, 840)
         setLocationRelativeTo(null)
 
         content.add(library, LIBRARY)
         content.add(details, DETAILS)
-        content.add(SearchScreen(ctx), SEARCH)
+        content.add(browseHub, BROWSE)
         content.add(historyScreen, HISTORY)
-        content.add(ExtensionsScreen(ctx), EXTENSIONS)
+        content.add(updatesScreen, UPDATES)
+        content.add(moreScreen, MORE)
         content.add(settingsScreen(), SETTINGS)
 
         add(sidebar(), BorderLayout.WEST)
@@ -164,58 +171,50 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(22, 14, 18, 14),
+                BorderFactory.createEmptyBorder(20, 14, 18, 14),
             )
-            preferredSize = Dimension(224, 0)
+            preferredSize = Dimension(220, 0)
         }
         val brandRow = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
             isOpaque = false
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 38)
-            // Hanko Vermilion Seal Mark ("本" - Book/Origin)
+            maximumSize = Dimension(Int.MAX_VALUE, 40)
             add(
-                JLabel("本", SwingConstants.CENTER).apply {
-                    isOpaque = true
-                    background = Theme.ACCENT
-                    foreground = Color.WHITE
-                    font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 16f)
-                    preferredSize = Dimension(30, 30)
-                },
-            )
-            add(
-                JLabel("Mihon").apply {
+                JLabel("Mihon", SwingConstants.LEFT).apply {
                     font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
                     foreground = Theme.TEXT_PRIMARY
                 },
             )
         }
         panel.add(brandRow)
-        panel.add(Box.createVerticalStrut(4))
+        panel.add(Box.createVerticalStrut(2))
         panel.add(
-            JLabel("  Edição Linux • v0.3").apply {
+            JLabel("  Desktop Linux • v0.3").apply {
                 font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11f)
                 foreground = Theme.TEXT_MUTED
                 alignmentX = 0f
             },
         )
-        panel.add(Box.createVerticalStrut(24))
+        panel.add(Box.createVerticalStrut(22))
+
         val group = ButtonGroup()
+        // 5 Primary Material 3 destinations matching Mihon Android's NavigationBar:
+        // Biblioteca, Atualizações, Histórico, Navegar (with badge), Mais
         listOf(
-            LIBRARY to "Acervo da Biblioteca",
-            SEARCH to "Explorar Catálogo",
-            HISTORY to "Leituras Recentes",
-            EXTENSIONS to "Fontes Instaladas",
-            SETTINGS to "Preferências",
-        ).forEach { (card, label) ->
-            val button = JToggleButton(label).apply {
+            Triple(LIBRARY, "Biblioteca", null),
+            Triple(UPDATES, "Atualizações", null),
+            Triple(HISTORY, "Histórico", null),
+            Triple(BROWSE, "Navegar", "${ctx.extensions.size}"),
+            Triple(MORE, "Mais", null),
+        ).forEach { (card, label, badge) ->
+            val button = M3NavPillButton(label, badge).apply {
                 alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 40)
-                font = font.deriveFont(Font.BOLD, 13f)
-                horizontalAlignment = SwingConstants.LEFT
+                maximumSize = Dimension(Int.MAX_VALUE, 44)
                 addActionListener {
                     when (card) {
                         LIBRARY -> showLibrary()
                         HISTORY -> showHistory()
+                        BROWSE -> { browseHub.reload(); navigate(card) }
                         else -> navigate(card)
                     }
                 }
@@ -382,10 +381,276 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
     private companion object {
         const val LIBRARY = "library"
         const val DETAILS = "details"
-        const val SEARCH = "search"
+        const val BROWSE = "browse"
+        const val UPDATES = "updates"
         const val HISTORY = "history"
-        const val EXTENSIONS = "extensions"
+        const val MORE = "more"
         const val SETTINGS = "settings"
+    }
+}
+
+/**
+ * Material 3 Navigation Pill Button (emulating Mihon Android's active pill selection and badge counters).
+ */
+class M3NavPillButton(private val label: String, private val badgeText: String? = null) : JToggleButton() {
+    init {
+        isOpaque = false
+        isFocusable = false
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+    }
+
+    override fun paintComponent(g: java.awt.Graphics) {
+        val g2 = g.create() as java.awt.Graphics2D
+        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+        g2.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING, java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+
+        val w = width
+        val h = height
+
+        // M3 Active Pill Container
+        if (isSelected) {
+            g2.color = Theme.BG_PILL_ACTIVE
+            g2.fillRoundRect(4, 3, w - 8, h - 6, 999, 999)
+        } else if (model.isRollover) {
+            g2.color = Theme.BG_CARD_HOVER
+            g2.fillRoundRect(4, 3, w - 8, h - 6, 999, 999)
+        }
+
+        g2.font = font.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
+        g2.color = if (isSelected) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+        val fm = g2.fontMetrics
+        g2.drawString(label, 20, ((h - fm.height) / 2) + fm.ascent)
+
+        // White M3 Counter Badge on the right (like "11" on Navegar in Android screenshot)
+        if (!badgeText.isNullOrBlank()) {
+            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
+            val bFm = g2.fontMetrics
+            val bw = (bFm.stringWidth(badgeText) + 12).coerceAtLeast(20)
+            val bh = 20
+            val bx = w - bw - 14
+            val by = (h - bh) / 2
+            g2.color = Color.WHITE
+            g2.fillRoundRect(bx, by, bw, bh, 999, 999)
+            g2.color = Color.BLACK
+            g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
+        }
+        g2.dispose()
+    }
+}
+
+/**
+ * Material 3 "Navegar" Hub (BrowseScreen):
+ * Top TabRow with [Fontes], [Extensões (N)], and [Migrar] tabs, matching Mihon Android's Extensoes.jpeg.
+ */
+class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
+    private val cards = CardLayout()
+    private val subContent = JPanel(cards)
+
+    private val sourcesCards = CardLayout()
+    private val sourcesHub = JPanel(sourcesCards)
+
+    private val searchScreen = SearchScreen(ctx, onBackToSources = {
+        sourcesCards.show(sourcesHub, "sources_list")
+    })
+
+    private val sourcesListScreen = SourcesListScreen(
+        ctx = ctx,
+        onSelectSource = { ext ->
+            searchScreen.openSource(ext.name)
+            sourcesCards.show(sourcesHub, "catalog")
+        },
+        onSelectLocalSource = {
+            ctx.navigator.showLibrary()
+            ctx.setStatus("Exibindo biblioteca local")
+        },
+    )
+
+    private val extensionsScreen = ExtensionsScreen(ctx)
+    private val btnSources = JToggleButton("Fontes")
+    private val btnExtensions = JToggleButton("Extensões (${ctx.extensions.size})")
+    private val btnMigrate = JToggleButton("Migrar")
+
+    init {
+        background = Theme.BG_APP
+        subContent.background = Theme.BG_APP
+
+        sourcesHub.background = Theme.BG_APP
+        sourcesHub.add(sourcesListScreen, "sources_list")
+        sourcesHub.add(searchScreen, "catalog")
+
+        subContent.add(sourcesHub, "sources")
+        subContent.add(extensionsScreen, "extensions")
+        subContent.add(migratePlaceholder(), "migrate")
+
+        val tabBar = JPanel(FlowLayout(FlowLayout.CENTER, 10, 10)).apply {
+            background = Theme.BG_APP
+            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+            val group = ButtonGroup()
+            listOf(btnSources to "sources", btnExtensions to "extensions", btnMigrate to "migrate").forEach { (btn, card) ->
+                btn.isFocusable = false
+                btn.font = font.deriveFont(Font.BOLD, 13f)
+                btn.addActionListener {
+                    if (card == "sources") {
+                        sourcesCards.show(sourcesHub, "sources_list")
+                    }
+                    cards.show(subContent, card)
+                }
+                group.add(btn)
+                add(btn)
+            }
+        }
+        btnSources.isSelected = true
+        add(tabBar, BorderLayout.NORTH)
+        add(subContent, BorderLayout.CENTER)
+    }
+
+    private fun migratePlaceholder(): JPanel = JPanel(java.awt.GridBagLayout()).apply {
+        background = Theme.BG_APP
+        val label = JLabel(
+            "<html><div style='text-align:center'><h2 style='color:#FFFFFF'>Migrar Fontes</h2><p style='color:#9E9E9E'>Transfira mangás favoritados de uma fonte para outra fonte ativa.</p></div></html>",
+            SwingConstants.CENTER,
+        )
+        add(label)
+    }
+
+    fun reload() {
+        btnExtensions.text = "Extensões (${ctx.extensions.size})"
+        sourcesListScreen.rebuildList()
+        searchScreen.loadPopular()
+    }
+}
+
+/**
+ * Placeholder screen for "Atualizações" (recent chapters feed).
+ */
+class UpdatesPlaceholderScreen(ctx: AppContext) : JPanel(BorderLayout()) {
+    init {
+        background = Theme.BG_APP
+        val center = JPanel(java.awt.GridBagLayout()).apply {
+            background = Theme.BG_APP
+            add(
+                JLabel(
+                    "<html><div style='text-align:center'><h1 style='color:#FFFFFF;margin-bottom:8px'>Atualizações</h1><p style='color:#9E9E9E;font-size:13px'>Aqui são listados os capítulos mais recentes lançados pelas suas fontes instaladas.</p></div></html>",
+                    SwingConstants.CENTER,
+                ),
+            )
+        }
+        add(center, BorderLayout.CENTER)
+    }
+}
+
+/**
+ * Material 3 "Mais" Screen (MoreScreen / Configs.jpeg):
+ * Switches for "Somente disponíveis offline" & "Modo anônimo", quick menu rows for Fila de Downloads,
+ * Categorias, Estatísticas, Dados & Armazenamento, Configurações e Sobre.
+ */
+class MoreScreen(
+    private val ctx: AppContext,
+    private val onOpenSettings: () -> Unit,
+    private val onExportBackup: () -> Unit,
+    private val onImportBackup: () -> Unit,
+) : JPanel(BorderLayout()) {
+
+    private val offlineSwitch = JCheckBox("Somente disponíveis offline", false).apply {
+        font = font.deriveFont(Font.BOLD, 14f)
+        foreground = Theme.TEXT_PRIMARY
+        toolTipText = "Filtra todos os itens da sua biblioteca para exibir apenas mangás salvos localmente"
+    }
+
+    private val incognitoSwitch = JCheckBox("Modo anônimo", ctx.incognitoMode).apply {
+        font = font.deriveFont(Font.BOLD, 14f)
+        foreground = Theme.TEXT_PRIMARY
+        toolTipText = "Pausa temporariamente a gravação no histórico de leitura"
+        addActionListener {
+            ctx.incognitoMode = isSelected
+            ctx.setStatus(if (isSelected) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
+        }
+    }
+
+    init {
+        background = Theme.BG_APP
+        val content = JPanel().apply {
+            background = Theme.BG_APP
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createEmptyBorder(24, 32, 24, 32)
+        }
+
+        // Header Switch Group (Material 3 Toggle Cards)
+        val switchGroup = JPanel().apply {
+            background = Theme.BG_SURFACE
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(16, 20, 16, 20),
+            )
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 130)
+
+            add(offlineSwitch)
+            add(JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) })
+            add(Box.createVerticalStrut(14))
+            add(incognitoSwitch)
+            add(JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) })
+        }
+        content.add(switchGroup)
+        content.add(Box.createVerticalStrut(20))
+
+        // Action Rows from Configs.jpeg
+        val rows = listOf(
+            Triple("📥", "Fila de downloads", "Gerencie os capítulos sendo baixados"),
+            Triple("📁", "Categorias", "Organize os mangás da biblioteca"),
+            Triple("📈", "Estatísticas", "Tempo de leitura e mangás lidos"),
+            Triple("🗄️", "Dados e armazenamento", "Limpar caches e backups"),
+            Triple("⚙️", "Configurações", "Preferências gerais do Mihon Linux"),
+            Triple("ℹ️", "Sobre", "Mihon Linux v0.3.0"),
+        )
+
+        rows.forEach { (icon, title, desc) ->
+            val row = JPanel(BorderLayout(14, 0)).apply {
+                background = Theme.BG_SURFACE
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                    BorderFactory.createEmptyBorder(14, 18, 14, 18),
+                )
+                alignmentX = 0f
+                maximumSize = Dimension(Int.MAX_VALUE, 64)
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+
+                val left = JPanel(FlowLayout(FlowLayout.LEFT, 12, 0)).apply {
+                    isOpaque = false
+                    add(JLabel(icon).apply { font = font.deriveFont(18f) })
+                    add(
+                        JPanel().apply {
+                            isOpaque = false
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            add(JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13.5f); foreground = Theme.TEXT_PRIMARY })
+                            add(JLabel(desc).apply { font = font.deriveFont(Font.PLAIN, 11f); foreground = Theme.TEXT_MUTED })
+                        },
+                    )
+                }
+                add(left, BorderLayout.WEST)
+                add(JLabel("›").apply { font = font.deriveFont(Font.BOLD, 18f); foreground = Theme.TEXT_MUTED }, BorderLayout.EAST)
+
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) {
+                        when (title) {
+                            "Configurações" -> onOpenSettings()
+                            "Dados e armazenamento" -> {
+                                val opts = arrayOf("Exportar Backup (.zip)", "Restaurar Backup (.zip)", "Cancelar")
+                                val chosen = JOptionPane.showOptionDialog(this@MoreScreen, "Gerenciamento de Dados e Backup", "Dados e armazenamento", JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE, null, opts, opts[0])
+                                if (chosen == 0) onExportBackup() else if (chosen == 1) onImportBackup()
+                            }
+                            "Sobre" -> JOptionPane.showMessageDialog(this@MoreScreen, "Mihon Linux v0.3.0\nPort Desktop de Alta Performance (Kotlin + Swing/FlatLaf)", "Sobre", JOptionPane.INFORMATION_MESSAGE)
+                            else -> ctx.setStatus("Opção '$title' selecionada")
+                        }
+                    }
+                })
+            }
+            content.add(row)
+            content.add(Box.createVerticalStrut(8))
+        }
+
+        add(JScrollPane(content).apply { border = null; verticalScrollBar.unitIncrement = 24 }, BorderLayout.CENTER)
     }
 }
 

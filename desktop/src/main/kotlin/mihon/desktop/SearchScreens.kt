@@ -6,6 +6,7 @@ import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
 import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Graphics
@@ -17,6 +18,8 @@ import java.awt.event.MouseMotionAdapter
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JComboBox
@@ -29,12 +32,17 @@ import javax.swing.JTextField
 import javax.swing.ListCellRenderer
 import javax.swing.SwingUtilities
 import javax.swing.ImageIcon
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
 /**
  * Visual poster grid for online manga discovery across all active sources (Manga Livre, MangaDex, JSONs).
  * Single-click on any cover opens its chapters and details immediately.
  */
-class SearchScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
+class SearchScreen(
+    private val ctx: AppContext,
+    private val onBackToSources: (() -> Unit)? = null,
+) : JPanel(BorderLayout()) {
 
     data class Hit(val source: ExtensionSource, val item: MangaResult)
 
@@ -110,6 +118,15 @@ class SearchScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val top = JPanel(FlowLayout(FlowLayout.LEFT, 10, 10)).apply {
             background = Theme.BG_SURFACE
             border = BorderFactory.createEmptyBorder(4, 12, 4, 12)
+            if (onBackToSources != null) {
+                add(
+                    JButton("← Fontes").apply {
+                        font = font.deriveFont(Font.BOLD, 12.5f)
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        addActionListener { onBackToSources() }
+                    },
+                )
+            }
             add(JLabel("Fonte:"))
             add(sourceFilter)
             add(btnPopular)
@@ -122,6 +139,13 @@ class SearchScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         add(top, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
+        loadPopular()
+    }
+
+    fun openSource(sourceName: String) {
+        val idx = (1 until sourceFilter.itemCount).firstOrNull { sourceFilter.getItemAt(it) == sourceName } ?: 0
+        sourceFilter.selectedIndex = idx
+        field.text = ""
         loadPopular()
     }
 
@@ -483,5 +507,268 @@ class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
             border = BorderFactory.createEmptyBorder(10, 14, 10, 14)
         }
         add(footer, BorderLayout.SOUTH)
+    }
+}
+
+/**
+ * Material 3 Sources List Screen matching Mihon Android's Extensoes.jpeg:
+ * - Search bar ("Pesquisar fontes...")
+ * - Section headers ("Última utilizada", "Outras", "Português (Brasil)", "Inglês / Global")
+ * - Source rows with leading icon, title, language subtitle, pill button "Recentes", and pin (📌) toggle.
+ */
+class SourcesListScreen(
+    private val ctx: AppContext,
+    private val onSelectSource: (ExtensionSource) -> Unit,
+    private val onSelectLocalSource: () -> Unit,
+) : JPanel(BorderLayout()) {
+
+    private val pinnedSources = mutableSetOf<String>()
+    private val searchField = JTextField(24).apply {
+        putClientProperty("JTextField.placeholderText", "Pesquisar fontes...")
+    }
+    private val container = JPanel().apply {
+        background = Theme.BG_APP
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(12, 24, 24, 24)
+    }
+
+    init {
+        background = Theme.BG_APP
+
+        val searchBar = JPanel(FlowLayout(FlowLayout.CENTER, 0, 10)).apply {
+            background = Theme.BG_APP
+            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+            searchField.preferredSize = Dimension(420, 36)
+            add(searchField)
+        }
+        add(searchBar, BorderLayout.NORTH)
+
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = rebuildList()
+            override fun removeUpdate(e: DocumentEvent) = rebuildList()
+            override fun changedUpdate(e: DocumentEvent) = rebuildList()
+        })
+
+        val scroll = JScrollPane(container).apply {
+            border = null
+            verticalScrollBar.unitIncrement = 24
+        }
+        add(scroll, BorderLayout.CENTER)
+
+        rebuildList()
+    }
+
+    fun rebuildList() {
+        container.removeAll()
+        val query = searchField.text.trim().lowercase()
+
+        val allSources = ctx.extensions.filter { query.isEmpty() || it.name.lowercase().contains(query) }
+        val pinned = allSources.filter { pinnedSources.contains(it.name) }
+        val unpinned = allSources.filter { !pinnedSources.contains(it.name) }
+
+        if (pinned.isNotEmpty()) {
+            addSectionHeader("Fixadas")
+            pinned.forEach { ext -> addSourceRow(ext, isPinned = true) }
+        }
+
+        // 1. Última utilizada
+        val lastUsed = unpinned.firstOrNull()
+        if (lastUsed != null && query.isEmpty()) {
+            addSectionHeader("Última utilizada")
+            addSourceRow(lastUsed, isPinned = false)
+        }
+
+        // 2. Outras (Fonte local)
+        if (query.isEmpty() || "fonte local".contains(query) || "local".contains(query)) {
+            addSectionHeader("Outras")
+            addLocalSourceRow()
+        }
+
+        // 3. Português (Brasil)
+        val ptSources = unpinned.filter {
+            (it != lastUsed || query.isNotEmpty()) &&
+                (it.language.lowercase().contains("pt") || it.language.lowercase().contains("br"))
+        }
+        if (ptSources.isNotEmpty()) {
+            addSectionHeader("Português (Brasil)")
+            ptSources.forEach { ext -> addSourceRow(ext, isPinned = false) }
+        }
+
+        // 4. Outros idiomas / Global
+        val otherSources = unpinned.filter {
+            (it != lastUsed || query.isNotEmpty()) &&
+                !it.language.lowercase().contains("pt") && !it.language.lowercase().contains("br")
+        }
+        if (otherSources.isNotEmpty()) {
+            addSectionHeader("Inglês / Outras")
+            otherSources.forEach { ext -> addSourceRow(ext, isPinned = false) }
+        }
+
+        container.revalidate()
+        container.repaint()
+    }
+
+    private fun addSectionHeader(title: String) {
+        val lbl = JLabel(title).apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
+            foreground = Theme.TEXT_MUTED
+            border = BorderFactory.createEmptyBorder(16, 8, 8, 8)
+            alignmentX = 0f
+        }
+        container.add(lbl)
+    }
+
+    private fun addLocalSourceRow() {
+        val row = createRowPanel("📁", "Fonte local", "Local", onRecents = onSelectLocalSource, onRowClick = onSelectLocalSource)
+        container.add(row)
+        container.add(Box.createVerticalStrut(6))
+    }
+
+    private fun addSourceRow(ext: ExtensionSource, isPinned: Boolean) {
+        val iconText = ext.name.take(2).uppercase()
+        val row = createRowPanel(
+            iconText = iconText,
+            title = ext.name,
+            subtitle = ext.language.uppercase(),
+            isPinned = isPinned,
+            onTogglePin = {
+                if (pinnedSources.contains(ext.name)) pinnedSources.remove(ext.name) else pinnedSources.add(ext.name)
+                rebuildList()
+            },
+            onRecents = { onSelectSource(ext) },
+            onRowClick = { onSelectSource(ext) },
+        )
+        container.add(row)
+        container.add(Box.createVerticalStrut(6))
+    }
+
+    private fun createRowPanel(
+        iconText: String,
+        title: String,
+        subtitle: String,
+        isPinned: Boolean = false,
+        onTogglePin: (() -> Unit)? = null,
+        onRecents: () -> Unit,
+        onRowClick: () -> Unit,
+    ): JPanel {
+        return object : JPanel(BorderLayout(14, 0)) {
+            private var hovered = false
+
+            init {
+                isOpaque = false
+                alignmentX = 0f
+                maximumSize = Dimension(Int.MAX_VALUE, 58)
+                preferredSize = Dimension(400, 58)
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                border = BorderFactory.createEmptyBorder(6, 12, 6, 12)
+
+                // Leading Icon
+                val iconBox = object : JPanel() {
+                    init {
+                        preferredSize = Dimension(42, 42)
+                        minimumSize = Dimension(42, 42)
+                        maximumSize = Dimension(42, 42)
+                        isOpaque = false
+                    }
+                    override fun paintComponent(g: Graphics) {
+                        super.paintComponent(g)
+                        val g2 = g.create() as Graphics2D
+                        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                        g2.color = Theme.BG_SURFACE
+                        g2.fillRoundRect(0, 0, width, height, 10, 10)
+                        g2.color = Theme.BORDER_SUBTLE
+                        g2.drawRoundRect(0, 0, width - 1, height - 1, 10, 10)
+                        g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
+                        g2.color = Theme.ACCENT
+                        val fm = g2.fontMetrics
+                        val tw = fm.stringWidth(iconText)
+                        val th = fm.ascent
+                        g2.drawString(iconText, (width - tw) / 2, (height + th) / 2 - 2)
+                        g2.dispose()
+                    }
+                }
+                add(iconBox, BorderLayout.WEST)
+
+                // Center Column
+                val center = JPanel().apply {
+                    isOpaque = false
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    add(Box.createVerticalGlue())
+                    add(
+                        JLabel(title).apply {
+                            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14.5f)
+                            foreground = Theme.TEXT_PRIMARY
+                        },
+                    )
+                    add(Box.createVerticalStrut(2))
+                    add(
+                        JLabel(subtitle).apply {
+                            font = font.deriveFont(Font.PLAIN, 11.5f)
+                            foreground = Theme.TEXT_MUTED
+                        },
+                    )
+                    add(Box.createVerticalGlue())
+                }
+                add(center, BorderLayout.CENTER)
+
+                // Trailing actions: "Recentes" pill button + Pin button
+                val rightActions = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 4)).apply {
+                    isOpaque = false
+
+                    val btnRecents = JButton("Recentes").apply {
+                        font = font.deriveFont(Font.BOLD, 11.5f)
+                        foreground = Theme.TEXT_PRIMARY
+                        background = Theme.BG_SURFACE
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        isFocusPainted = false
+                        border = BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                            BorderFactory.createEmptyBorder(4, 12, 4, 12),
+                        )
+                        addActionListener { onRecents() }
+                    }
+                    add(btnRecents)
+
+                    val btnPin = JButton(if (isPinned) "📌" else "📍").apply {
+                        font = font.deriveFont(Font.PLAIN, 15f)
+                        foreground = if (isPinned) Theme.ACCENT else Theme.TEXT_MUTED
+                        isOpaque = false
+                        isContentAreaFilled = false
+                        isBorderPainted = false
+                        isFocusPainted = false
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        toolTipText = if (isPinned) "Desafixar fonte" else "Fixar fonte no topo"
+                        addActionListener { onTogglePin?.invoke() }
+                    }
+                    add(btnPin)
+                }
+                add(rightActions, BorderLayout.EAST)
+
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseEntered(e: MouseEvent) {
+                        hovered = true
+                        repaint()
+                    }
+                    override fun mouseExited(e: MouseEvent) {
+                        hovered = false
+                        repaint()
+                    }
+                    override fun mouseClicked(e: MouseEvent) {
+                        onRowClick()
+                    }
+                })
+            }
+
+            override fun paintComponent(g: Graphics) {
+                if (hovered) {
+                    val g2 = g.create() as Graphics2D
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = Theme.BG_CARD_HOVER
+                    g2.fillRoundRect(0, 0, width, height, 10, 10)
+                    g2.dispose()
+                }
+                super.paintComponent(g)
+            }
+        }
     }
 }

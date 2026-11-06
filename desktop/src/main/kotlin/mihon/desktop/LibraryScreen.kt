@@ -15,15 +15,19 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import javax.swing.BorderFactory
+import javax.swing.ButtonGroup
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.JCheckBoxMenuItem
 import javax.swing.JComboBox
 import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JList
+import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
+import javax.swing.JRadioButtonMenuItem
 import javax.swing.JScrollPane
 import javax.swing.JTextField
 import javax.swing.JToggleButton
@@ -60,24 +64,25 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val cardPrototype = MangaPosterCard()
     private val tabsBar = LibraryTabsBar()
 
-    private val filterField = JTextField(18).apply {
+    private var currentSort: Sort = Sort.TITLE
+    private val filterField = JTextField(20).apply {
         putClientProperty("JTextField.placeholderText", "Pesquisar na biblioteca…")
+        isVisible = false
     }
-    private val sortBox = JComboBox(Sort.entries.map { it.label }.toTypedArray())
-    private val offlineFilterToggle = JToggleButton("Somente offline").apply {
-        toolTipText = "Mihon M3: Filtra e exibe somente itens com capítulos disponíveis offline"
-        addActionListener {
-            onlyDownloadedFilter = isSelected
-            applyFilter()
-        }
-    }
-    private val displayModeBtn = JToggleButton("Compacto").apply {
-        toolTipText = "Alternar entre Grade Confortável (título abaixo) e Grade Compacta (título sobre a capa)"
-        addActionListener {
-            compactMode = isSelected
-            grid.fixedCellHeight = if (compactMode) COVER_H + 22 else CARD_H
-            grid.revalidate()
-            grid.repaint()
+
+    private fun m3HeaderIconButton(iconChar: String, tip: String, onClick: (JButton) -> Unit): JButton {
+        return JButton(iconChar).apply {
+            font = font.deriveFont(Font.PLAIN, 18f)
+            foreground = Theme.TEXT_PRIMARY
+            background = Theme.BG_APP
+            isOpaque = false
+            isContentAreaFilled = false
+            isBorderPainted = false
+            isFocusPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = tip
+            preferredSize = Dimension(38, 38)
+            addActionListener { onClick(this) }
         }
     }
 
@@ -132,38 +137,102 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             override fun removeUpdate(e: DocumentEvent) = applyFilter()
             override fun changedUpdate(e: DocumentEvent) = applyFilter()
         })
-        sortBox.addActionListener { applyFilter() }
 
-        val leftBar = JPanel(FlowLayout(FlowLayout.LEFT, 10, 8)).apply {
-            isOpaque = false
-            add(
-                JButton("+ Arquivo (.cbz/.zip)").apply {
-                    background = Theme.ACCENT
-                    foreground = Color.WHITE
-                    font = font.deriveFont(Font.BOLD, 12.5f)
-                    addActionListener { importLocal(directories = false) }
-                },
-            )
-            add(JButton("+ Pasta").apply { addActionListener { importLocal(directories = true) } })
-            add(JButton("↻ Atualizar Biblioteca").apply { addActionListener { checkUpdatesForAll() } })
+        // Material 3 TopAppBar matching Mihon Android's barra superior.jpeg:
+        // Left: Clean large title "Biblioteca"
+        // Right: 🔍 (Search toggle), ☷ (Filter & Sort popup), ⋮ (Overflow menu)
+        val btnSearch = m3HeaderIconButton("🔍", "Pesquisar") {
+            filterField.isVisible = !filterField.isVisible
+            if (filterField.isVisible) {
+                filterField.requestFocusInWindow()
+            } else {
+                filterField.text = ""
+                applyFilter()
+            }
+            revalidate()
+            repaint()
         }
-        val rightBar = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 8)).apply {
-            isOpaque = false
-            add(filterField)
-            add(offlineFilterToggle)
-            add(JLabel("Ordenar:"))
-            add(sortBox)
-            add(displayModeBtn)
+
+        val btnFilter = m3HeaderIconButton("☷", "Filtros e exibição") { anchor ->
+            val popup = JPopupMenu()
+
+            val offlineItem = JCheckBoxMenuItem("Somente disponíveis offline", onlyDownloadedFilter).apply {
+                addActionListener {
+                    onlyDownloadedFilter = isSelected
+                    applyFilter()
+                }
+            }
+            val compactItem = JCheckBoxMenuItem("Grade compacta (título sobre capa)", compactMode).apply {
+                addActionListener {
+                    compactMode = isSelected
+                    grid.fixedCellHeight = if (compactMode) COVER_H + 22 else CARD_H
+                    grid.revalidate()
+                    grid.repaint()
+                }
+            }
+            popup.add(offlineItem)
+            popup.add(compactItem)
+            popup.addSeparator()
+
+            val sortMenuLabel = JMenuItem("ORDENAR POR:").apply {
+                isEnabled = false
+                font = font.deriveFont(Font.BOLD, 11f)
+            }
+            popup.add(sortMenuLabel)
+
+            val sortGroup = ButtonGroup()
+            Sort.entries.forEach { sort ->
+                val rdo = JRadioButtonMenuItem(sort.label, sort == currentSort).apply {
+                    addActionListener {
+                        currentSort = sort
+                        applyFilter()
+                    }
+                }
+                sortGroup.add(rdo)
+                popup.add(rdo)
+            }
+
+            popup.show(anchor, 0, anchor.height)
         }
-        val toolbar = JPanel(BorderLayout()).apply {
-            background = Theme.BG_SURFACE
-            border = BorderFactory.createEmptyBorder(4, 12, 2, 12)
-            add(leftBar, BorderLayout.WEST)
-            add(rightBar, BorderLayout.EAST)
+
+        val btnOverflow = m3HeaderIconButton("⋮", "Mais opções") { anchor ->
+            val popup = JPopupMenu()
+            popup.add(JMenuItem("↻ Atualizar biblioteca").apply {
+                addActionListener { checkUpdatesForAll() }
+            })
+            popup.addSeparator()
+            popup.add(JMenuItem("📦 Adicionar arquivo (.cbz / .zip)...").apply {
+                addActionListener { importLocal(directories = false) }
+            })
+            popup.add(JMenuItem("📁 Adicionar pasta...").apply {
+                addActionListener { importLocal(directories = true) }
+            })
+            popup.show(anchor, 0, anchor.height)
         }
+
+        val topAppBar = JPanel(BorderLayout()).apply {
+            background = Theme.BG_APP
+            border = BorderFactory.createEmptyBorder(12, 22, 10, 22)
+
+            val titleLabel = JLabel("Biblioteca").apply {
+                font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+                foreground = Theme.TEXT_PRIMARY
+            }
+            add(titleLabel, BorderLayout.WEST)
+
+            val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+                isOpaque = false
+                add(filterField)
+                add(btnSearch)
+                add(btnFilter)
+                add(btnOverflow)
+            }
+            add(actions, BorderLayout.EAST)
+        }
+
         val topHeader = JPanel(BorderLayout()).apply {
-            background = Theme.BG_SURFACE
-            add(toolbar, BorderLayout.NORTH)
+            background = Theme.BG_APP
+            add(topAppBar, BorderLayout.NORTH)
             add(tabsBar, BorderLayout.SOUTH)
         }
 
@@ -228,7 +297,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private fun applyFilter() {
         val query = filterField.text.trim().lowercase()
         val cat = activeCategoryStatus
-        val sort = Sort.entries[sortBox.selectedIndex.coerceAtLeast(0)]
+        val sort = currentSort
         val comparator: Comparator<Manga> = when (sort) {
             Sort.TITLE -> compareBy { it.title.lowercase() }
             Sort.UNREAD -> compareByDescending<Manga> { unreadByManga[it.id] ?: 0 }.thenBy { it.title.lowercase() }

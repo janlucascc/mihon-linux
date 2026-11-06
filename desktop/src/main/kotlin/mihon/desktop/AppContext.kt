@@ -33,32 +33,34 @@ const val COVER_H = 252
 const val COVER_ARC = 10
 
 /**
- * Curated Sumi-Ink Editorial Dark palette (grounded in frontend-design principles):
- * - Sumi Ink (`#0D0D0F`): Deep reading-room obsidian
- * -Charcoal Paper (`#151519`): Elevated Bindery Surface
- * - Graphite (`#1D1E24`): Subtle interactive row/surface
- * - Washi Ivory (`#F2EFE9`): High-contrast warm editorial ink
- * - Hanko Vermilion (`#E04F3E`): Japanese seal stamp primary accent
- * - Matcha Sage (`#2E9E6B`): Offline / archived indicator
+ * Authentic Material 3 AMOLED Dark palette (based on Mihon Android screenshots):
+ * - Pure Black AMOLED Background: `#000000`
+ * - Material 3 Surface & Containers: `#121212`, `#1E1E1E`, `#262626`
+ * - Material 3 Muted Gray Pill Selection: `#4A4A4A` / `#5C5C5C`
+ * - Material 3 Outline Hairlines: `#2C2C2C`
+ * - High-contrast Pure White Text: `#FFFFFF`
+ * - Secondary M3 Text: `#9E9E9E` / `#B0B0B0`
+ * - M3 Clean Sans-serif Font Hierarchy
  */
 object Theme {
-    val BG_APP = Color(0x0D, 0x0D, 0x0F)
-    val BG_SIDEBAR = Color(0x12, 0x12, 0x16)
-    val BG_SURFACE = Color(0x15, 0x15, 0x19)
-    val BG_CARD = Color(0x1A, 0x1A, 0x20)
-    val BG_CARD_HOVER = Color(0x23, 0x24, 0x2C)
-    val BORDER_SUBTLE = Color(242, 239, 233, 24)
-    val ACCENT = Color(0xE0, 0x4F, 0x3E) // Hanko Vermilion
-    val ACCENT_HOVER = Color(0xF0, 0x6A, 0x59)
-    val ACCENT_SOFT = Color(0xE0, 0x4F, 0x3E, 38)
-    val TERTIARY = Color(0x2E, 0x9E, 0x6B) // Matcha Sage
-    val TEXT_PRIMARY = Color(0xF2, 0xEF, 0xE9) // Washi Ivory
-    val TEXT_SECONDARY = Color(0xC8, 0xC4, 0xBC)
-    val TEXT_MUTED = Color(0x8E, 0x8B, 0x82) // Stone Ash
+    val BG_APP = Color(0x00, 0x00, 0x00) // Pure Black AMOLED (Mihon Android)
+    val BG_SIDEBAR = Color(0x08, 0x08, 0x08)
+    val BG_SURFACE = Color(0x12, 0x12, 0x12)
+    val BG_CARD = Color(0x18, 0x18, 0x18)
+    val BG_CARD_HOVER = Color(0x26, 0x26, 0x26)
+    val BG_PILL_ACTIVE = Color(0x4A, 0x4A, 0x4A) // M3 Pill Selection Container
+    val BORDER_SUBTLE = Color(255, 255, 255, 26) // Hairline divider
+    val ACCENT = Color(0xFF, 0xFF, 0xFF) // M3 Primary high-contrast White
+    val ACCENT_HOVER = Color(0xE0, 0xE0, 0xE0)
+    val ACCENT_SOFT = Color(255, 255, 255, 36)
+    val TERTIARY = Color(0x2E, 0x9E, 0x6B) // Offline Matcha
+    val TEXT_PRIMARY = Color(0xFF, 0xFF, 0xFF) // Pure White
+    val TEXT_SECONDARY = Color(0xCC, 0xCC, 0xCC)
+    val TEXT_MUTED = Color(0x9E, 0x9E, 0x9E) // M3 onSurfaceVariant
     val SUCCESS = Color(0x2E, 0x9E, 0x6B)
-    val DANGER = Color(0xD9, 0x38, 0x3A)
+    val DANGER = Color(0xEF, 0x53, 0x50)
 
-    val FONT_DISPLAY = Font("Serif", Font.BOLD, 22)
+    val FONT_DISPLAY = Font("SansSerif", Font.BOLD, 20)
     val FONT_UI = Font("SansSerif", Font.PLAIN, 13)
     val FONT_MONO = Font("Monospaced", Font.PLAIN, 12)
 }
