@@ -40,6 +40,15 @@ class DatabaseManager(val dbPath: File) {
 
     fun getConnection(): Connection = dataSource.connection
 
+    /** Checkpoints and truncates WAL journal, ensuring clean disk state. */
+    fun checkpoint() {
+        runCatching {
+            transaction(database) {
+                exec("PRAGMA wal_checkpoint(TRUNCATE);")
+            }
+        }
+    }
+
     /**
      * Executes a write transaction under a centralized coroutine Mutex lock.
      *
@@ -93,6 +102,23 @@ class DatabaseManager(val dbPath: File) {
     private fun Transaction.deduplicateMangaRows() {
         val rawConn = TransactionManager.current().connection.connection as Connection
         rawConn.createStatement().use { stmt ->
+            // Reassign chapters from duplicates to the preserved manga row (lowest ID)
+            stmt.execute(
+                """
+                UPDATE chapter
+                SET manga_id = (
+                    SELECT MIN(keeper.id)
+                    FROM manga keeper
+                    JOIN manga dup ON dup.source = keeper.source AND dup.url = keeper.url
+                    WHERE dup.id = chapter.manga_id
+                )
+                WHERE manga_id IN (
+                    SELECT id FROM manga
+                    WHERE id NOT IN (SELECT MIN(id) FROM manga GROUP BY source, url)
+                );
+                """.trimIndent(),
+            )
+            // Delete duplicate manga rows now that children have been safely reparented
             stmt.execute(
                 """
                 DELETE FROM manga

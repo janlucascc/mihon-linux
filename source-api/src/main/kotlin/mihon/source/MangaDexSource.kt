@@ -125,35 +125,52 @@ class MangaDexSource(
 
     private fun fetchChapters(mangaId: String, langs: List<String>): List<ChapterResult> {
         val langQuery = langs.joinToString("&") { "translatedLanguage[]=$it" }
-        val feedUrl = "$baseUrl/manga/$mangaId/feed?limit=100&$langQuery&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive"
-        val data = json.parseToJsonElement(get(feedUrl)).jsonObject["data"]?.jsonArray ?: return emptyList()
+        val allChapters = mutableListOf<ChapterResult>()
+        val limit = 100
+        var offset = 0
+        var hasMore = true
 
-        return data.mapNotNull { elem ->
-            val obj = elem.jsonObject
-            val chId = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-            val attrs = obj["attributes"]?.jsonObject ?: return@mapNotNull null
-            // Skip external chapters that have no hosted pages on MangaDex
-            val externalUrl = attrs["externalUrl"]?.jsonPrimitive?.content
-            if (!externalUrl.isNullOrBlank() && externalUrl != "null") return@mapNotNull null
+        while (hasMore) {
+            val feedUrl = "$baseUrl/manga/$mangaId/feed?limit=$limit&offset=$offset&$langQuery&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive"
+            val root = json.parseToJsonElement(get(feedUrl)).jsonObject
+            val data = root["data"]?.jsonArray ?: break
+            if (data.isEmpty()) break
 
-            val chNumStr = attrs["chapter"]?.jsonPrimitive?.content?.takeIf { it != "null" }
-            val volStr = attrs["volume"]?.jsonPrimitive?.content?.takeIf { it != "null" }
-            val chTitle = attrs["title"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
-            val lang = attrs["translatedLanguage"]?.jsonPrimitive?.content.orEmpty()
+            val total = root["total"]?.jsonPrimitive?.content?.toIntOrNull() ?: (offset + data.size)
 
-            val label = buildString {
-                if (volStr != null) append("Vol. $volStr ")
-                if (chNumStr != null) append("Cap. $chNumStr") else append("Oneshot")
-                if (chTitle != null) append(" - $chTitle")
-                if (lang.isNotEmpty()) append(" [$lang]")
+            val parsed = data.mapNotNull { elem ->
+                val obj = elem.jsonObject
+                val chId = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val attrs = obj["attributes"]?.jsonObject ?: return@mapNotNull null
+                // Skip external chapters that have no hosted pages on MangaDex
+                val externalUrl = attrs["externalUrl"]?.jsonPrimitive?.content
+                if (!externalUrl.isNullOrBlank() && externalUrl != "null") return@mapNotNull null
+
+                val chNumStr = attrs["chapter"]?.jsonPrimitive?.content?.takeIf { it != "null" }
+                val volStr = attrs["volume"]?.jsonPrimitive?.content?.takeIf { it != "null" }
+                val chTitle = attrs["title"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" }
+                val lang = attrs["translatedLanguage"]?.jsonPrimitive?.content.orEmpty()
+
+                val label = buildString {
+                    if (volStr != null) append("Vol. $volStr ")
+                    if (chNumStr != null) append("Cap. $chNumStr") else append("Oneshot")
+                    if (chTitle != null) append(" - $chTitle")
+                    if (lang.isNotEmpty()) append(" [$lang]")
+                }
+                ChapterResult(
+                    title = label,
+                    url = chId,
+                    volume = volStr?.toIntOrNull(),
+                    chapter = chNumStr?.toFloatOrNull(),
+                )
             }
-            ChapterResult(
-                title = label,
-                url = chId,
-                volume = volStr?.toIntOrNull(),
-                chapter = chNumStr?.toFloatOrNull(),
-            )
+            allChapters.addAll(parsed)
+            offset += limit
+            if (offset >= total || data.size < limit) {
+                hasMore = false
+            }
         }
+        return allChapters
     }
 
     override fun getChapterImages(url: String): List<String> {

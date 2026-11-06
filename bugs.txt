@@ -1,0 +1,55 @@
+================================================================================
+RELATÓRIO DE BUGS E ERROS DE LÓGICA - MIHON LINUX
+Arquivo cumulativo atualizado automaticamente via comando /analisar
+================================================================================
+
+[ANALISE #1] - 06/11/2026 14:58
+--------------------------------------------------------------------------------
+1. [BUG-001] [CONCORRÊNCIA / BLOQUEIO DE THREAD] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/AppContext.kt
+   Descrição: Uso de `kotlinx.coroutines.runBlocking` dentro de tarefa do `coverPool`.
+   Correção: `CoverCache.load` e `CoverCache.loadUrl` foram convertidas para executar de forma nativa e não-bloqueante no `appScope.launch`, suspendendo funções assíncronas sem travar threads do sistema operacional.
+
+2. [BUG-002] [ENCERRAMENTO ABRUPTO DE PROCESSO] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/Main.kt
+   Descrição: Ação do menu "Arquivo > Sair" invocava `System.exit(0)` diretamente.
+   Correção: Substituído por disparo gracioso do evento `WINDOW_CLOSING` via `dispatchEvent(WindowEvent(this, WINDOW_CLOSING))`, acionando os hooks de dispose e garantindo que o progresso de leitura e streams abertos sejam salvos com segurança.
+
+3. [BUG-003] [DESINCRONIZAÇÃO DE ESTADO DE UI] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/Main.kt e LibraryScreen.kt
+   Descrição: O switch "Somente disponíveis offline" na tela Mais não refletia na Biblioteca.
+   Correção: Criado o estado centralizado reativo `ctx.onlyOfflineFilter` com padrão Observer (`addOfflineFilterListener`), mantendo sincronizadas em tempo real a tela Mais (`MoreScreen`), o popup de filtros e a listagem da Biblioteca (`LibraryScreen`).
+
+4. [BUG-004] [RISCO DE ARQUIVO BLOQUEADO EM RESTAURAÇÃO DE BACKUP] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/Main.kt e DatabaseManager.kt
+   Descrição: Restauração de backup sobrescrevia arquivo .db com conexões WAL ativas.
+   Correção: Implementado `DatabaseManager.checkpoint()` executando `PRAGMA wal_checkpoint(TRUNCATE);` antes da substituição do arquivo SQLite, garantindo integridade dos descritores e prevenindo corrupção ou travamento por lock.
+
+5. [BUG-005] [COOKIES HARDCODED EM REQUISIÇÕES HTTP DE SCRAPERS/DOWNLOAD] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/LibraryService.kt e AppContext.kt
+   Descrição: Cookie residual de site adulto injetado em clientes HTTP globais de capas e capítulos.
+   Correção: Cookies estáticos foram removidos de todos os downloads de capítulos e capas, garantindo requisições HTTP neutras e limpas para todas as fontes.
+--------------------------------------------------------------------------------
+
+[ANALISE #2] - 06/11/2026 15:04
+--------------------------------------------------------------------------------
+6. [BUG-006] [PAGINAÇÃO INCOMPLETA / LIMIT DE 100 CAPÍTULOS] [CORRIGIDO]
+   Arquivo: source-api/src/main/kotlin/mihon/source/MangaDexSource.kt
+   Descrição: Busca de capítulos do MangaDex requisitava apenas limit=100.
+   Correção: Implementado loop de paginação completa via `offset += limit` consumindo o `total` informado pela API do MangaDex, garantindo que mangás longos (One Piece, Naruto, etc.) tenham 100% dos seus capítulos carregados.
+
+7. [BUG-007] [CACHE SEM TRATAMENTO DE CONCORRÊNCIA NA LEITURA] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/ReaderWindow.kt
+   Descrição: O cache de páginas decodificadas era um `LinkedHashMap` sem sincronização em acessos paralelos de prefetch e renderização.
+   Correção: Adicionado monitor de concorrência `cacheLock` e métodos seguros `getCachedImage`, `putCachedImage` e `isPageCached`, eliminando qualquer risco de `ConcurrentModificationException` na rolagem rápida.
+
+8. [BUG-008] [FALHA DE INTEGRIDADE REFERENCIAL NA DEDUPLICAÇÃO DE MANGÁS] [CORRIGIDO]
+   Arquivo: data/src/main/kotlin/mihon/data/database/DatabaseManager.kt
+   Descrição: `DELETE FROM manga` apagava capítulos e históricos de duplicatas em cascata.
+   Correção: Adicionado comando SQL `UPDATE chapter SET manga_id = MIN(keeper.id)` antes do `DELETE`, reatribuindo todos os capítulos e históricos para o registro preservado antes da remoção das linhas duplicadas.
+
+9. [BUG-009] [VAZAMENTO DE MEMÓRIA EM PRÉ-VISUALIZAÇÃO DE CAPÍTULOS REMOTOS] [CORRIGIDO]
+   Arquivo: desktop/src/main/kotlin/mihon/desktop/DetailsScreen.kt e Main.kt
+   Descrição: Capítulos online subsequentes eram baixados silenciosamente sem controle do usuário.
+   Correção: O download automático antecipado agora respeita a preferência `autoPrefetch`, com controle de ativação/desativação adicionado à tela de Configurações, poupando dados e disco por padrão.
+--------------------------------------------------------------------------------

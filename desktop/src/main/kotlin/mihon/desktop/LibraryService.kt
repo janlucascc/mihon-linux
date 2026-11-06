@@ -331,7 +331,6 @@ class LibraryService(
                             .url(cleanImgUrl.toHttpUrl())
                             .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
                             .header("Referer", "${source.baseUrl}/")
-                            .header("Cookie", "tia_idade_confirmada=1; wpmanga-adault=1")
                             .build()
                         val bytes = httpClient.newCall(req).execute().use { resp ->
                             if (!resp.isSuccessful) throw IOException("Falha HTTP ${resp.code} na página ${idx + 1}")

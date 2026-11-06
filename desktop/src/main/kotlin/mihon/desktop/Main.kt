@@ -239,6 +239,11 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             }
         }
 
+        val autoPrefetchCheck = JCheckBox("Pré-baixar próximos capítulos automaticamente ao ler online", readerPrefs.getBoolean("autoPrefetch", false)).apply {
+            toolTipText = "Quando ativado, os 2 próximos capítulos são baixados em segundo plano enquanto você lê"
+            addActionListener { readerPrefs.putBoolean("autoPrefetch", isSelected) }
+        }
+
         val defaultModeBox = JComboBox(ReadMode.entries.map { it.label }.toTypedArray()).apply {
             val saved = runCatching { ReadMode.valueOf(readerPrefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
             selectedIndex = saved.ordinal
@@ -280,6 +285,10 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
 
             incognitoCheck.alignmentX = 0f
             add(incognitoCheck)
+            add(Box.createVerticalStrut(8))
+
+            autoPrefetchCheck.alignmentX = 0f
+            add(autoPrefetchCheck)
             add(Box.createVerticalStrut(16))
 
             add(JLabel("Modo de leitura padrão:").apply { alignmentX = 0f })
@@ -344,6 +353,7 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
         )
         if (ok != JOptionPane.YES_OPTION) return
         runCatching {
+            db.checkpoint()
             BackupManager.restoreDatabase(src, dbFile)
             db.initialize()
             showLibrary()
@@ -359,7 +369,13 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
                 add(JMenuItem("Exportar Backup…").apply { addActionListener { exportBackup() } })
                 add(JMenuItem("Restaurar Backup…").apply { addActionListener { importBackup() } })
                 addSeparator()
-                add(JMenuItem("Sair").apply { addActionListener { System.exit(0) } })
+                add(
+                    JMenuItem("Sair").apply {
+                        addActionListener {
+                            this@MihonApp.dispatchEvent(java.awt.event.WindowEvent(this@MihonApp, java.awt.event.WindowEvent.WINDOW_CLOSING))
+                        }
+                    },
+                )
             },
         )
         add(
@@ -551,10 +567,14 @@ class MoreScreen(
     private val onImportBackup: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
-    private val offlineSwitch = JCheckBox("Somente disponíveis offline", false).apply {
+    private val offlineSwitch = JCheckBox("Somente disponíveis offline", ctx.onlyOfflineFilter).apply {
         font = font.deriveFont(Font.BOLD, 14f)
         foreground = Theme.TEXT_PRIMARY
         toolTipText = "Filtra todos os itens da sua biblioteca para exibir apenas mangás salvos localmente"
+        addActionListener {
+            ctx.setOfflineFilter(isSelected)
+            ctx.setStatus(if (isSelected) "Filtro: Somente disponíveis offline ativado" else "Filtro offline desativado")
+        }
     }
 
     private val incognitoSwitch = JCheckBox("Modo anônimo", ctx.incognitoMode).apply {
@@ -568,6 +588,7 @@ class MoreScreen(
     }
 
     init {
+        ctx.addOfflineFilterListener { offlineSwitch.isSelected = it }
         background = Theme.BG_APP
         val content = JPanel().apply {
             background = Theme.BG_APP

@@ -57,7 +57,9 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var hoveredIndex: Int = -1
     private var activeCategoryStatus: Long = LibraryCategory.ALL
     private var compactMode: Boolean = false
-    private var onlyDownloadedFilter: Boolean = false
+    private var onlyDownloadedFilter: Boolean
+        get() = ctx.onlyOfflineFilter
+        set(v) { ctx.setOfflineFilter(v) }
 
     private val model = DefaultListModel<Manga>()
     private val grid = JList(model)
@@ -87,6 +89,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     init {
+        ctx.addOfflineFilterListener { applyFilter() }
         background = Theme.BG_APP
         grid.background = Theme.BG_APP
         grid.layoutOrientation = JList.HORIZONTAL_WRAP

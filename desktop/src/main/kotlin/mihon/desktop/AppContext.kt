@@ -95,6 +95,19 @@ class AppContext(
 ) {
     lateinit var navigator: Navigator
     var incognitoMode: Boolean = false
+    var onlyOfflineFilter: Boolean = false
+    private val offlineFilterListeners = mutableListOf<(Boolean) -> Unit>()
+
+    fun addOfflineFilterListener(listener: (Boolean) -> Unit) {
+        offlineFilterListeners.add(listener)
+    }
+
+    fun setOfflineFilter(value: Boolean) {
+        if (onlyOfflineFilter != value) {
+            onlyOfflineFilter = value
+            offlineFilterListeners.forEach { it(value) }
+        }
+    }
 
     fun sourceFor(sourceId: Long): ExtensionSource? =
         extensions.firstOrNull { it.id == sourceId }
@@ -112,10 +125,6 @@ class CoverCache(
     private val urlIcons = ConcurrentHashMap<String, ImageIcon>()
     private val placeholders = ConcurrentHashMap<String, ImageIcon>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
-
-    private val coverPool = Executors.newFixedThreadPool(4) { r ->
-        Thread(r, "cover-loader").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 }
-    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -150,11 +159,11 @@ class CoverCache(
         return placeholders.computeIfAbsent(initials) { ImageIcon(createPlaceholder(it)) }
     }
 
-    /** Loads or renders a library manga cover on the bounded cover pool. */
+    /** Loads or renders a library manga cover asynchronously on appScope. */
     fun load(manga: Manga, firstChapterPath: suspend () -> String?, onLoaded: () -> Unit) {
         val key = "manga_${manga.id}"
         if (icons.containsKey(manga.id) || !inFlight.add(key)) return
-        coverPool.submit {
+        appScope.launch {
             try {
                 val cachedFile = File(cacheDir, "${manga.id}.png")
                 val cachedImg = if (cachedFile.exists()) {
@@ -166,7 +175,7 @@ class CoverCache(
                 val icon = if (cachedImg != null) {
                     ImageIcon(cachedImg)
                 } else {
-                    val chPath = kotlinx.coroutines.runBlocking { runCatching { firstChapterPath() }.getOrNull() }
+                    val chPath = runCatching { firstChapterPath() }.getOrNull()
                     renderForManga(manga, chPath)?.also { thumb ->
                         runCatching { ImageIO.write(thumb, "png", cachedFile) }
                     }?.let { ImageIcon(it) }
@@ -181,11 +190,11 @@ class CoverCache(
         }
     }
 
-    /** Downloads and caches a cover by URL on the bounded cover pool. */
+    /** Downloads and caches a cover by URL asynchronously on appScope. */
     fun loadUrl(url: String?, onLoaded: () -> Unit) {
         val cleanUrl = url?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return
         if (urlIcons.containsKey(cleanUrl) || !inFlight.add(cleanUrl)) return
-        coverPool.submit {
+        appScope.launch {
             try {
                 val hash = sha1(cleanUrl)
                 val cachedFile = File(cacheDir, "url_$hash.png")
@@ -234,7 +243,6 @@ class CoverCache(
             .url(parsed)
             .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .header("Referer", "${parsed.scheme}://${parsed.host}/")
-            .header("Cookie", "tia_idade_confirmada=1; wpmanga-adault=1")
             .build()
         httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null

@@ -29,6 +29,7 @@ import javax.swing.JScrollPane
 import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
+import java.util.prefs.Preferences
 
 /**
  * Modern details screen: hero banner with cover & metadata, smart "Continuar Leitura" button,
@@ -351,8 +352,9 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val prevChap = if (idx > 0) chapters[idx - 1] else null
             val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
 
-            // Pre-download upcoming 2 chapters silently in background so switching chapters is instant
-            if (!current.isLocal && idx >= 0) {
+            // Pre-download upcoming 2 chapters in background only if opted-in via settings
+            val autoPrefetch = Preferences.userRoot().node("mihon-linux-reader").getBoolean("autoPrefetch", false)
+            if (!current.isLocal && idx >= 0 && autoPrefetch) {
                 val upcoming = chapters.drop(idx + 1).take(2)
                     .filter { !ctx.service.isChapterDownloaded(current, it) }
                 val source = ctx.sourceFor(current.source)

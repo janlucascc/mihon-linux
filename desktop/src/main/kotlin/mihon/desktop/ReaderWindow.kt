@@ -132,10 +132,15 @@ class ReaderWindow(
     private var togglingFullscreen = false
     private var zoomFactor = 1.0
 
-    /** Shared LRU cache of decoded original images across all modes (EDT only, up to 24 pages). */
+    /** Shared thread-safe LRU cache of decoded original images across all modes (up to 24 pages). */
+    private val cacheLock = Any()
     private val cache = object : LinkedHashMap<Int, BufferedImage>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>) = size > 24
     }
+
+    private fun getCachedImage(index: Int): BufferedImage? = synchronized(cacheLock) { cache[index] }
+    private fun putCachedImage(index: Int, image: BufferedImage) { synchronized(cacheLock) { cache[index] = image } }
+    private fun isPageCached(index: Int): Boolean = synchronized(cacheLock) { cache.containsKey(index) }
     private val prefetching = ConcurrentHashMap.newKeySet<Int>()
 
     private val pageLabel = JLabel(" ")
@@ -415,7 +420,7 @@ class ReaderWindow(
 
         fun finish() {
             if (myGeneration != generation || closed) return
-            val images = indexes.map { cache[it] }
+            val images = indexes.map { getCachedImage(it) }
             if (images.any { it == null }) {
                 paged.setContent(emptyList(), "Não foi possível decodificar a página")
             } else {
@@ -429,7 +434,7 @@ class ReaderWindow(
             }
         }
 
-        val missing = indexes.filter { !cache.containsKey(it) }
+        val missing = indexes.filter { !isPageCached(it) }
         if (missing.isEmpty()) {
             finish()
             return
@@ -441,7 +446,7 @@ class ReaderWindow(
                 if (closed) return@invokeLater
                 loaded.forEach { (index, image) ->
                     if (image != null) {
-                        cache[index] = image
+                        putCachedImage(index, image)
                         if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
                     }
                 }
@@ -451,14 +456,14 @@ class ReaderWindow(
     }
 
     private fun prefetch(index: Int) {
-        if (index !in 0 until pageCount || cache.containsKey(index) || !prefetching.add(index)) return
+        if (index !in 0 until pageCount || isPageCached(index) || !prefetching.add(index)) return
         io.execute {
             try {
                 if (closed) return@execute
                 val image = readPageFromArchive(index) ?: return@execute
                 SwingUtilities.invokeLater {
                     if (!closed) {
-                        cache[index] = image
+                        putCachedImage(index, image)
                         if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
                     }
                 }
@@ -830,7 +835,7 @@ class ReaderWindow(
             val existing = images[i]
             if ((existing != null && existing.width == targetW) || !requested.add(i)) return
             val gen = layoutGeneration
-            val cachedOriginal = cache[i]
+            val cachedOriginal = getCachedImage(i)
             io.execute {
                 val original = cachedOriginal ?: readPageFromArchive(i)
                 val naturalSize = original?.let { Dimension(it.width, it.height) }
@@ -843,8 +848,8 @@ class ReaderWindow(
                         requested.remove(i)
                         return@invokeLater
                     }
-                    if (original != null && !cache.containsKey(i)) {
-                        cache[i] = original
+                    if (original != null && !isPageCached(i)) {
+                        putCachedImage(i, original)
                     }
                     if (result == null) {
                         failed.add(i)
@@ -875,7 +880,7 @@ class ReaderWindow(
             while (i < pageCount && tops[i] < clip.y + clip.height) {
                 val w = pageWidth(i)
                 val x = ((width - w) / 2).coerceAtLeast(0)
-                val image = images[i] ?: cache[i]
+                val image = images[i] ?: getCachedImage(i)
                 if (image != null) {
                     val g2 = g as java.awt.Graphics2D
                     if (image.width != w) {
