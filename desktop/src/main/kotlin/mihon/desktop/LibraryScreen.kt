@@ -365,6 +365,16 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val unread = unreadByManga[manga.id] ?: 0
         val downloaded = downloadedByManga[manga.id] ?: 0
         val srcLabel = if (manga.isLocal) "📁 Local" else (ctx.sourceFor(manga.source)?.language?.uppercase() ?: "WEB")
+        if (!ctx.covers.has(manga.id)) {
+            ctx.covers.load(
+                manga,
+                firstChapterPath = {
+                    val firstCh = ctx.service.chaptersOf(manga.id).firstOrNull() ?: return@load null
+                    ctx.service.chapterCbzFile(manga, firstCh).absolutePath
+                },
+                onLoaded = { grid.repaint() },
+            )
+        }
         return cardPrototype.apply {
             coverIcon = ctx.covers.get(manga.id, manga.title)
             titleText = manga.title

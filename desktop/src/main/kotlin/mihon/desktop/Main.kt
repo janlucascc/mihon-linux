@@ -118,7 +118,35 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
     private val browseHub = BrowseHubScreen(ctx)
     private val historyScreen = HistoryScreen(ctx)
     private val updatesScreen = UpdatesPlaceholderScreen(ctx)
-    private val moreScreen = MoreScreen(ctx, onOpenSettings = { navigate(SETTINGS) }, onExportBackup = { exportBackup() }, onImportBackup = { importBackup() })
+    private val moreScreen = MoreScreen(
+        ctx = ctx,
+        onOpenDownloadsQueue = { DownloadsQueueDialog(this, ctx).isVisible = true },
+        onOpenCategories = {
+            CategoriesDialog(this, ctx, onCategoryFilter = {
+                showLibrary()
+            }).isVisible = true
+        },
+        onOpenStatistics = { StatisticsDialog(this, ctx).isVisible = true },
+        onOpenStorageManager = {
+            StorageManagerDialog(
+                owner = this,
+                ctx = ctx,
+                dbManager = db,
+                onExportBackup = { exportBackup() },
+                onImportBackup = { importBackup() },
+                onCoversCleared = { library.refresh() },
+            ).isVisible = true
+        },
+        onOpenSettings = { navigate(SETTINGS, highlight = MORE) },
+        onOpenAbout = {
+            JOptionPane.showMessageDialog(
+                this,
+                "Mihon Linux v0.3.0\nPort Desktop de Alta Performance (Kotlin + Swing/FlatLaf)",
+                "Sobre",
+                JOptionPane.INFORMATION_MESSAGE,
+            )
+        },
+    )
     private val navButtons = linkedMapOf<String, JToggleButton>()
 
     init {
@@ -273,10 +301,27 @@ class MihonApp : JFrame("Mihon Linux v0.3.0"), Navigator {
             add(btnRestore)
         }
 
+        val topBar = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            alignmentX = 0f
+            val backBtn = JButton("← Voltar").apply {
+                isFocusable = false
+                font = font.deriveFont(Font.BOLD, 13f)
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                toolTipText = "Voltar para o menu Mais"
+                addActionListener {
+                    navigate(MORE)
+                }
+            }
+            add(backBtn)
+            add(Box.createHorizontalStrut(14))
+            add(JLabel("Configurações").apply { font = font.deriveFont(Font.BOLD, 20f); foreground = Theme.TEXT_PRIMARY })
+        }
+
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
-            add(JLabel("Configurações").apply { font = font.deriveFont(Font.BOLD, 20f); alignmentX = 0f })
+            add(topBar)
             add(Box.createVerticalStrut(18))
 
             dark.alignmentX = 0f
@@ -577,9 +622,12 @@ class UpdatesPlaceholderScreen(ctx: AppContext) : JPanel(BorderLayout()) {
  */
 class MoreScreen(
     private val ctx: AppContext,
+    private val onOpenDownloadsQueue: () -> Unit,
+    private val onOpenCategories: () -> Unit,
+    private val onOpenStatistics: () -> Unit,
+    private val onOpenStorageManager: () -> Unit,
     private val onOpenSettings: () -> Unit,
-    private val onExportBackup: () -> Unit,
-    private val onImportBackup: () -> Unit,
+    private val onOpenAbout: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val offlineSwitch = JCheckBox("Somente disponíveis offline", ctx.onlyOfflineFilter).apply {
@@ -670,13 +718,12 @@ class MoreScreen(
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
                         when (title) {
+                            "Fila de downloads" -> onOpenDownloadsQueue()
+                            "Categorias" -> onOpenCategories()
+                            "Estatísticas" -> onOpenStatistics()
+                            "Dados e armazenamento" -> onOpenStorageManager()
                             "Configurações" -> onOpenSettings()
-                            "Dados e armazenamento" -> {
-                                val opts = arrayOf("Exportar Backup (.zip)", "Restaurar Backup (.zip)", "Cancelar")
-                                val chosen = JOptionPane.showOptionDialog(this@MoreScreen, "Gerenciamento de Dados e Backup", "Dados e armazenamento", JOptionPane.DEFAULT_OPTION, JOptionPane.PLAIN_MESSAGE, null, opts, opts[0])
-                                if (chosen == 0) onExportBackup() else if (chosen == 1) onImportBackup()
-                            }
-                            "Sobre" -> JOptionPane.showMessageDialog(this@MoreScreen, "Mihon Linux v0.3.0\nPort Desktop de Alta Performance (Kotlin + Swing/FlatLaf)", "Sobre", JOptionPane.INFORMATION_MESSAGE)
+                            "Sobre" -> onOpenAbout()
                             else -> ctx.setStatus("Opção '$title' selecionada")
                         }
                     }

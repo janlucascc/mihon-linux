@@ -49,6 +49,19 @@ class DatabaseManager(val dbPath: File) {
         }
     }
 
+    /** Optimizes the SQLite database storage by truncating WAL and running VACUUM. */
+    fun vacuum() {
+        checkpoint()
+        runCatching {
+            val rawConn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.absolutePath}")
+            rawConn.use { conn ->
+                conn.createStatement().use { stmt ->
+                    stmt.execute("VACUUM;")
+                }
+            }
+        }
+    }
+
     /**
      * Executes a write transaction under a centralized coroutine Mutex lock.
      *

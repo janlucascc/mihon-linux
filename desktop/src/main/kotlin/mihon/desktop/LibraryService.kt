@@ -72,6 +72,21 @@ class LibraryService(
     private val chapterLocks = ConcurrentHashMap<Long, Any>()
     private val activeDownloads = ConcurrentHashMap.newKeySet<Long>()
 
+    data class DownloadQueueItem(
+        val chapterId: Long,
+        val mangaTitle: String,
+        val chapterName: String,
+        var progress: String = "Iniciando...",
+        var isCompleted: Boolean = false,
+        var hasError: Boolean = false,
+    )
+
+    val downloadQueue = java.util.concurrent.CopyOnWriteArrayList<DownloadQueueItem>()
+
+    fun clearCompletedDownloads() {
+        downloadQueue.removeIf { it.isCompleted || it.hasError }
+    }
+
     fun isChapterDownloading(chapterId: Long): Boolean = chapterId in activeDownloads
 
     suspend fun library(): List<Manga> = mangas.getFavorites().sortedBy { it.title.lowercase() }
@@ -316,6 +331,9 @@ class LibraryService(
             activeDownloads.add(chapter.id)
             target.parentFile?.mkdirs()
 
+            val queueItem = DownloadQueueItem(chapter.id, manga.title, chapter.name, "Conectando...")
+            downloadQueue.add(queueItem)
+
             val imageUrls = source.getChapterImages(chapter.url)
             require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
 
@@ -324,6 +342,7 @@ class LibraryService(
                 ZipOutputStream(partFile.outputStream().buffered()).use { zip ->
                     imageUrls.forEachIndexed { idx, imgUrl ->
                         onProgress(idx + 1, imageUrls.size)
+                        queueItem.progress = "${idx + 1} / ${imageUrls.size} págs"
                         val cleanImgUrl = imgUrl.trim().replace(" ", "%20")
                         val ext = cleanImgUrl.substringBefore('?').substringAfterLast('.', "jpg")
                             .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "gif") } ?: "jpg"
@@ -346,9 +365,13 @@ class LibraryService(
                     partFile.copyTo(target, overwrite = true)
                     partFile.delete()
                 }
+                queueItem.progress = "Concluído"
+                queueItem.isCompleted = true
                 return target
             } catch (e: Exception) {
                 partFile.delete()
+                queueItem.progress = "Falha: ${e.message}"
+                queueItem.hasError = true
                 throw e
             } finally {
                 activeDownloads.remove(chapter.id)
@@ -445,5 +468,34 @@ class LibraryService(
         }.orEmpty()
         if (archives.isEmpty()) return listOf(file)
         return archives.sortedWith { a, b -> NaturalOrderComparator.compare(a.name, b.name) }
+    }
+
+    data class ReadingStats(
+        val totalManga: Int,
+        val totalChaptersRead: Int,
+        val totalChaptersDownloaded: Int,
+        val historyCount: Int,
+        val totalReadingTimeMs: Long,
+    )
+
+    suspend fun getReadingStatistics(): ReadingStats {
+        val favs = mangas.getFavorites()
+        val totalManga = favs.size
+        var readChapters = 0
+        var downloadedChapters = 0
+        for (m in favs) {
+            val chaps = chapters.getChapterByMangaId(m.id)
+            readChapters += chaps.count { it.read }
+            downloadedChapters += chaps.count { isChapterDownloaded(m, it) }
+        }
+        val hist = recentHistory()
+        val totalDuration = hist.sumOf { it.history.readDuration }
+        return ReadingStats(
+            totalManga = totalManga,
+            totalChaptersRead = readChapters,
+            totalChaptersDownloaded = downloadedChapters,
+            historyCount = hist.size,
+            totalReadingTimeMs = totalDuration,
+        )
     }
 }

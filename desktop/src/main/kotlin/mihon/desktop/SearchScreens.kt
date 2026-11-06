@@ -198,6 +198,10 @@ class SearchScreen(
 
     private fun renderHit(hit: Hit, index: Int, selected: Boolean): Component {
         val shortSource = hit.source.name.substringBefore(" (")
+        val url = hit.item.coverUrl
+        if (!url.isNullOrBlank() && !ctx.covers.hasUrl(url)) {
+            ctx.covers.loadUrl(url) { grid.repaint() }
+        }
         return cardPrototype.apply {
             coverIcon = ctx.covers.getByUrl(hit.item.coverUrl, hit.item.title)
             titleText = hit.item.title

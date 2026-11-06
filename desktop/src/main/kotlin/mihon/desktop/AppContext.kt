@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import mihon.core.archive.ArchiveReaderFactory
 import mihon.core.archive.ImageDecoder
 import mihon.source.ExtensionSource
+import okhttp3.Dispatcher
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -127,8 +128,13 @@ class CoverCache(
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .dispatcher(Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 16
+        })
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .followRedirects(true)
         .build()
 
     val placeholder: ImageIcon = placeholderFor("M")
@@ -146,9 +152,29 @@ class CoverCache(
 
     fun has(mangaId: Long): Boolean = icons.containsKey(mangaId)
 
+    fun hasUrl(url: String?): Boolean {
+        val clean = url?.trim() ?: return false
+        return urlIcons.containsKey(clean)
+    }
+
     fun remove(mangaId: Long) {
         icons.remove(mangaId)
         File(cacheDir, "$mangaId.png").delete()
+    }
+
+    fun clearDiskCache(): Long {
+        var totalFreed = 0L
+        cacheDir.listFiles()?.forEach { f ->
+            totalFreed += f.length()
+            f.delete()
+        }
+        icons.clear()
+        urlIcons.clear()
+        return totalFreed
+    }
+
+    fun getCacheSize(): Long {
+        return cacheDir.listFiles()?.sumOf { it.length() } ?: 0L
     }
 
     private fun placeholderFor(title: String): ImageIcon {
@@ -222,29 +248,64 @@ class CoverCache(
     }
 
     private fun renderForManga(manga: Manga, chapterPath: String?): BufferedImage? {
-        val candidatePath = chapterPath ?: manga.url
-        val localFile = File(candidatePath)
-        if (localFile.exists() && ArchiveReaderFactory.isSupported(localFile)) {
-            runCatching {
-                ArchiveReaderFactory.of(localFile).use { reader ->
-                    val first = reader.pages.firstOrNull() ?: return@use null
-                    reader.getPageImage(first)?.let { return scaleAndRound(it) }
+        // Priority 1: Official manga cover URL (thumbnailUrl)
+        val thumbUrl = manga.thumbnailUrl?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        if (thumbUrl != null) {
+            val downloaded = downloadCover(thumbUrl)
+            if (downloaded != null) return scaleAndRound(downloaded)
+        }
+
+        // Priority 2: Dedicated local cover image in the manga's directory (cover.jpg, folder.png, etc.)
+        val mangaFile = File(manga.url)
+        val candidateDir = when {
+            mangaFile.isDirectory -> mangaFile
+            mangaFile.isFile -> mangaFile.parentFile
+            else -> null
+        }
+        if (candidateDir != null && candidateDir.isDirectory) {
+            val names = listOf("cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png", "poster.jpg")
+            for (name in names) {
+                val f = File(candidateDir, name)
+                if (f.exists() && f.isFile) {
+                    val img = runCatching { ImageIO.read(f) }.getOrNull()
+                    if (img != null) return scaleAndRound(img)
                 }
             }
         }
-        val thumbUrl = manga.thumbnailUrl?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-            ?: return null
-        return downloadCover(thumbUrl)?.let { scaleAndRound(it) }
+
+        // Priority 3: Fallback only for local archives without dedicated cover (extract page 1)
+        val candidatePath = manga.url.takeIf { File(it).exists() } ?: chapterPath
+        if (candidatePath != null) {
+            val localFile = File(candidatePath)
+            if (localFile.exists() && ArchiveReaderFactory.isSupported(localFile)) {
+                runCatching {
+                    ArchiveReaderFactory.of(localFile).use { reader ->
+                        val first = reader.pages.firstOrNull() ?: return@use null
+                        reader.getPageImage(first)?.let { return scaleAndRound(it) }
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun downloadCover(url: String): BufferedImage? = runCatching {
-        val parsed = url.trim().replace(" ", "%20").toHttpUrl()
-        val req = Request.Builder()
+        val clean = url.trim().replace(" ", "%20")
+        val parsed = clean.toHttpUrl()
+        val reqBuilder = Request.Builder()
             .url(parsed)
             .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            .header("Referer", "${parsed.scheme}://${parsed.host}/")
-            .build()
-        httpClient.newCall(req).execute().use { resp ->
+            .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+
+        // Specialized referer headers:
+        // MangaDex blocks CDN subdomains like 'uploads.mangadex.org' with 302 challenges, but accepts 'https://mangadex.org/'
+        if (parsed.host.contains("mangadex.org")) {
+            reqBuilder.header("Referer", "https://mangadex.org/")
+        } else if (!parsed.host.startsWith("uploads.") && !parsed.host.startsWith("cdn.")) {
+            reqBuilder.header("Referer", "${parsed.scheme}://${parsed.host}/")
+        }
+
+        httpClient.newCall(reqBuilder.build()).execute().use { resp ->
             if (!resp.isSuccessful) return null
             val bytes = resp.body?.bytes() ?: return null
             ImageDecoder.decode(bytes)
