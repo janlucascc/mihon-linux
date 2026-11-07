@@ -105,8 +105,7 @@ class SearchScreen(
             addActionListener { loadPopular() }
         }
         val btnSearch = JButton("Buscar").apply {
-            background = Theme.ACCENT
-            foreground = Theme.TEXT_PRIMARY
+            putClientProperty("JButton.buttonType", "roundRect")
             font = font.deriveFont(Font.BOLD, 12.5f)
             addActionListener { search() }
         }

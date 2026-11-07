@@ -638,8 +638,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
         // Botão para abrir o Menu Teste comparativo
         val btnOpenTestLab = JButton("🔬 Abrir Menu Teste Comparativo (Pág. 2 • Cap. 1)").apply {
             font = font.deriveFont(Font.BOLD, 13f)
-            background = Theme.ACCENT
-            foreground = Theme.TEXT_PRIMARY
+            putClientProperty("JButton.buttonType", "roundRect")
             alignmentX = 0f
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
             toolTipText = "Abre o laboratório visual de teste comparando a página 2 do capítulo 1 entre todas as versões de upscale"

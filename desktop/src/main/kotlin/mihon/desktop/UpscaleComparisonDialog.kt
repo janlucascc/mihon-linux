@@ -162,8 +162,7 @@ class UpscaleComparisonDialog(
                 }
                 val btnRun = JButton("⚡ Recalcular").apply {
                     font = font.deriveFont(Font.BOLD, 12.5f)
-                    background = Theme.ACCENT
-                    foreground = Theme.TEXT_PRIMARY
+                    putClientProperty("JButton.buttonType", "roundRect")
                     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     addActionListener {
                         val selected = mangaSelector.selectedItem as? SampleOption
