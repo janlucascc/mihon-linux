@@ -435,39 +435,28 @@ class MihonApp : JFrame("Mihon"), Navigator {
             addActionListener { readerPrefs.put("fit", FitMode.entries[selectedIndex].name) }
         }
         val defaultQualityBox = JComboBox(MangaImageEnhancer.QualityMode.entries.map { it.label }.toTypedArray()).apply {
-            val saved = runCatching { MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("quality", "HD_64BIT")) }
-                .getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
+            val saved = runCatching {
+                val qStr = readerPrefs.get("quality", "ULTRA_HD")
+                if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.ULTRA_HD
+            }.getOrDefault(MangaImageEnhancer.QualityMode.ULTRA_HD)
             selectedIndex = saved.ordinal
             maximumSize = Dimension(380, 32)
             alignmentX = 0f
             addActionListener { readerPrefs.put("quality", MangaImageEnhancer.QualityMode.entries[selectedIndex].name) }
         }
 
-        // --- Gráficos & Instalação (Pré-processamento de Upscaling 2x, 3x, 5x nos downloads .cbz) ---
-        val installFactorBox = JComboBox(MangaImageEnhancer.InstallUpscaleFactor.entries.map { it.label }.toTypedArray()).apply {
+        // --- Gráficos & Instalação (Melhoria visual padrão nos downloads .cbz) ---
+        val installEnhanceBox = JComboBox(MangaImageEnhancer.InstallEnhanceMode.entries.map { it.label }.toTypedArray()).apply {
             val saved = runCatching {
-                MangaImageEnhancer.InstallUpscaleFactor.valueOf(readerPrefs.get("installUpscaleFactor", "OFF"))
-            }.getOrDefault(MangaImageEnhancer.InstallUpscaleFactor.OFF)
+                MangaImageEnhancer.InstallEnhanceMode.valueOf(readerPrefs.get("installEnhanceMode", "OFF"))
+            }.getOrDefault(MangaImageEnhancer.InstallEnhanceMode.OFF)
             selectedIndex = saved.ordinal
             maximumSize = Dimension(460, 32)
             alignmentX = 0f
             addActionListener {
-                val chosen = MangaImageEnhancer.InstallUpscaleFactor.entries[selectedIndex]
-                readerPrefs.put("installUpscaleFactor", chosen.name)
-                ctx.setStatus("Upscaling na instalação configurado para: ${chosen.label}")
-            }
-        }
-
-        val installQualityBox = JComboBox(MangaImageEnhancer.QualityMode.entries.map { it.label }.toTypedArray()).apply {
-            val saved = runCatching {
-                MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("installUpscaleQuality", "HD_64BIT"))
-            }.getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
-            selectedIndex = saved.ordinal
-            maximumSize = Dimension(460, 32)
-            alignmentX = 0f
-            addActionListener {
-                val chosen = MangaImageEnhancer.QualityMode.entries[selectedIndex]
-                readerPrefs.put("installUpscaleQuality", chosen.name)
+                val chosen = MangaImageEnhancer.InstallEnhanceMode.entries[selectedIndex]
+                readerPrefs.put("installEnhanceMode", chosen.name)
+                ctx.setStatus("Melhoria visual nos downloads: ${chosen.label}")
             }
         }
 
@@ -481,20 +470,6 @@ class MihonApp : JFrame("Mihon"), Navigator {
             addActionListener {
                 val chosen = MangaImageEnhancer.InstallOutputFormat.entries[selectedIndex]
                 readerPrefs.put("installOutputFormat", chosen.name)
-            }
-        }
-
-        val installThresholdBox = JComboBox(MangaImageEnhancer.InstallThresholdMode.entries.map { it.label }.toTypedArray()).apply {
-            val saved = runCatching {
-                MangaImageEnhancer.InstallThresholdMode.valueOf(readerPrefs.get("installThresholdMode", "SMART_1600"))
-            }.getOrDefault(MangaImageEnhancer.InstallThresholdMode.SMART_1600)
-            selectedIndex = saved.ordinal
-            maximumSize = Dimension(460, 32)
-            alignmentX = 0f
-            addActionListener {
-                val chosen = MangaImageEnhancer.InstallThresholdMode.entries[selectedIndex]
-                readerPrefs.put("installThresholdMode", chosen.name)
-                ctx.setStatus("Filtro inteligente configurado: ${chosen.label}")
             }
         }
 
@@ -619,16 +594,15 @@ class MihonApp : JFrame("Mihon"), Navigator {
             add(Box.createVerticalGlue())
         }
 
-        // --- Aba 2: Gráficos (Pré-processamento de Instalação & Leitor) ---
-        val lblGraphicsHero = JLabel("Motor Gráfico & Super-Resolução na Instalação").apply {
+        // --- Aba 2: Gráficos (Qualidade Visual & Motor de Imagem) ---
+        val lblGraphicsHero = JLabel("Qualidade de Imagem & Motor Visual").apply {
             font = font.deriveFont(Font.BOLD, 16f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
         val lblGraphicsDesc = JLabel(
-            "<html><div style='width:580px'>Aplica algoritmos avançados de reconstrução de traço vetorial e cores vivas " +
-                "<b>diretamente durante o download/instalação do capítulo (.cbz)</b>. " +
-                "Assim, quando você abrir um mangá baixado, ele já estará aprimorado em 2x, 3x ou 5x sem gastar CPU ou memória em tempo real!</div></html>",
+            "<html><div style='width:580px'>Aprimoramento de traço nítido de nanquim e cores vivas " +
+                "<b>mantendo a resolução original</b> da obra, sem distorção nem consumo excessivo de memória.</div></html>",
         ).apply {
             font = font.deriveFont(Font.PLAIN, 12.5f)
             foreground = Theme.TEXT_SECONDARY
@@ -641,40 +615,30 @@ class MihonApp : JFrame("Mihon"), Navigator {
             putClientProperty("JButton.buttonType", "roundRect")
             alignmentX = 0f
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-            toolTipText = "Abre o laboratório visual de teste comparando a página 2 do capítulo 1 entre todas as versões de upscale"
+            toolTipText = "Compara a qualidade da imagem padrão (Original vs Ultra HD vs Bilinear)"
             addActionListener {
                 UpscaleComparisonDialog(this@MihonApp, ctx).isVisible = true
             }
         }
 
-        val lblInstallFactor = JLabel("Fator de Melhoria Visual na Instalação (Exclusivo para Mangás Baixados):").apply {
+        val lblInstallEnhance = JLabel("Melhoria Visual na Instalação (Capítulos Baixados .cbz):").apply {
             font = font.deriveFont(Font.BOLD, 13f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
-        val lblInstallThreshold = JLabel("Filtro Condicional Inteligente (Economia de CPU e Armazenamento):").apply {
-            font = font.deriveFont(Font.BOLD, 13f)
-            foreground = Theme.TEXT_PRIMARY
-            alignmentX = 0f
-        }
-        val lblInstallAlgo = JLabel("Algoritmo de Upscaling e Reconstrução de Imagem na Instalação:").apply {
-            font = font.deriveFont(Font.BOLD, 13f)
-            foreground = Theme.TEXT_PRIMARY
-            alignmentX = 0f
-        }
-        val lblInstallFormat = JLabel("Formato de Compressão das Páginas Aprimoradas no .cbz:").apply {
+        val lblInstallFormat = JLabel("Formato de Compressão no .cbz:").apply {
             font = font.deriveFont(Font.BOLD, 13f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
         val lblGraphicsNote = JLabel(
-            "<html><div style='width:580px'>💡 <b>Modo Inteligente Ativado:</b> Se a scan original já tiver resolução de alta definição (>= 1600px de altura), o aplicativo preserva a imagem original automaticamente, economizando espaço em disco e acelerando os downloads.</div></html>",
+            "<html><div style='width:580px'>💡 <b>Modo Ultra HD:</b> Refina as linhas escuras de nanquim e melhora o contraste e claridade da imagem padrão, eliminando a pixelização e a sujeira de compressão JPEG sem esticar a imagem.</div></html>",
         ).apply {
             font = font.deriveFont(Font.PLAIN, 11.5f)
             foreground = Theme.TEXT_MUTED
             alignmentX = 0f
         }
-        val lblRealtimeSection = JLabel("Renderização em Tempo Real (Zoom no Leitor):").apply {
+        val lblRealtimeSection = JLabel("Renderização do Leitor:").apply {
             font = font.deriveFont(Font.BOLD, 14f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
@@ -692,19 +656,9 @@ class MihonApp : JFrame("Mihon"), Navigator {
             add(btnOpenTestLab)
             add(Box.createVerticalStrut(20))
 
-            add(lblInstallFactor)
+            add(lblInstallEnhance)
             add(Box.createVerticalStrut(6))
-            add(installFactorBox)
-            add(Box.createVerticalStrut(14))
-
-            add(lblInstallThreshold)
-            add(Box.createVerticalStrut(6))
-            add(installThresholdBox)
-            add(Box.createVerticalStrut(14))
-
-            add(lblInstallAlgo)
-            add(Box.createVerticalStrut(6))
-            add(installQualityBox)
+            add(installEnhanceBox)
             add(Box.createVerticalStrut(14))
 
             add(lblInstallFormat)
@@ -766,8 +720,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
             lblAppActionsTitle.foreground = Theme.TEXT_PRIMARY
             lblGraphicsHero.foreground = Theme.TEXT_PRIMARY
             lblGraphicsDesc.foreground = Theme.TEXT_SECONDARY
-            lblInstallFactor.foreground = Theme.TEXT_PRIMARY
-            lblInstallAlgo.foreground = Theme.TEXT_PRIMARY
+            lblInstallEnhance.foreground = Theme.TEXT_PRIMARY
             lblInstallFormat.foreground = Theme.TEXT_PRIMARY
             lblGraphicsNote.foreground = Theme.TEXT_MUTED
             lblRealtimeSection.foreground = Theme.TEXT_PRIMARY

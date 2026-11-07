@@ -36,15 +36,14 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Menu de Teste & Laboratório Visual de Upscaling:
- * Permite selecionar qualquer mangá baixado na biblioteca, inspecionar a Página 2 do Capítulo 1
- * e comparar em abas organizadas o resultado de cada tecnologia (AMD FSR 1.0, 64-bit Ultra HD,
- * Lanczos-3 e Zoom convencional), com diagnóstico inteligente de resolução.
+ * Menu de Teste & Laboratório Visual:
+ * Compara a qualidade da imagem padrão (Original vs Ultra HD vs Bilinear)
+ * na Página 2 do Capítulo 1 dos mangás da biblioteca sem upscaling forçado.
  */
 class UpscaleComparisonDialog(
     owner: JFrame,
     private val ctx: AppContext,
-) : JDialog(owner, "Laboratório Visual de Upscaling — Menu de Teste", true) {
+) : JDialog(owner, "Laboratório Visual de Qualidade — Menu de Teste", true) {
 
     private val progressBar = JProgressBar().apply {
         isIndeterminate = true
@@ -52,7 +51,7 @@ class UpscaleComparisonDialog(
         preferredSize = Dimension(180, 18)
     }
 
-    private val statusLabel = JLabel("Carregando obras da biblioteca...").apply {
+    private val statusLabel = JLabel("Carregando capítulos da biblioteca...").apply {
         foreground = Theme.TEXT_MUTED
         font = font.deriveFont(12f)
     }
@@ -63,11 +62,10 @@ class UpscaleComparisonDialog(
         maximumSize = Dimension(400, 32)
     }
 
-    // Painel de diagnóstico com métricas da scan
     private val lblMetaManga = JLabel("—").apply { font = font.deriveFont(Font.BOLD, 12.5f); foreground = Theme.TEXT_PRIMARY }
     private val lblMetaRes = JLabel("—").apply { font = font.deriveFont(Font.BOLD, 12.5f); foreground = Theme.TEXT_PRIMARY }
     private val lblMetaSize = JLabel("—").apply { font = font.deriveFont(Font.BOLD, 12.5f); foreground = Theme.TEXT_PRIMARY }
-    private val lblMetaSmart = JLabel("—").apply { font = font.deriveFont(Font.BOLD, 12.5f); foreground = Theme.ACCENT }
+    private val lblMetaStatus = JLabel("—").apply { font = font.deriveFont(Font.BOLD, 12.5f); foreground = Theme.ACCENT_HOVER }
 
     private val diagnosticCard = JPanel(GridLayout(1, 4, 12, 0)).apply {
         background = Theme.BG_CARD
@@ -91,16 +89,14 @@ class UpscaleComparisonDialog(
         }
 
         add(createMetaCol("MANGÁ SELECIONADO", lblMetaManga))
-        add(createMetaCol("RESOLUÇÃO ORIGINAL", lblMetaRes))
-        add(createMetaCol("PESO DA PÁGINA", lblMetaSize))
-        add(createMetaCol("DIAGNÓSTICO INTELIGENTE", lblMetaSmart))
+        add(createMetaCol("RESOLUÇÃO NATIVA", lblMetaRes))
+        add(createMetaCol("TAMANHO DO ARQUIVO", lblMetaSize))
+        add(createMetaCol("STATUS DE QUALIDADE", lblMetaStatus))
     }
 
     private val tabs = JTabbedPane().apply {
         font = font.deriveFont(Font.BOLD, 12.5f)
     }
-
-    private var availableSamples: List<SampleOption> = emptyList()
 
     data class SampleOption(
         val mangaTitle: String,
@@ -116,15 +112,12 @@ class UpscaleComparisonDialog(
         val pageName: String,
         val originalBytes: ByteArray,
         val originalImg: BufferedImage,
-        val bilinear2x: BufferedImage,
-        val fsr2x: BufferedImage,
-        val hd64_2x: BufferedImage,
-        val hd64_3x: BufferedImage,
-        val sharp2x: BufferedImage,
+        val ultraHdImg: BufferedImage,
+        val bilinearImg: BufferedImage,
     )
 
     init {
-        setSize(1140, 820)
+        setSize(1140, 800)
         setLocationRelativeTo(owner)
         layout = BorderLayout()
 
@@ -139,14 +132,14 @@ class UpscaleComparisonDialog(
                 isOpaque = false
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 add(
-                    JLabel("Laboratório Gráfico & Teste Comparativo").apply {
+                    JLabel("Laboratório de Qualidade de Imagem").apply {
                         font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 17f)
                         foreground = Theme.TEXT_PRIMARY
                     },
                 )
                 add(Box.createVerticalStrut(3))
                 add(
-                    JLabel("Avalie em tempo real o anti-aliasing AMD FSR 1.0, o traço vetorial e o modo inteligente de download").apply {
+                    JLabel("Avalie a melhoria de traço e contraste (Ultra HD) comparado à scan bruta original").apply {
                         font = font.deriveFont(12.5f)
                         foreground = Theme.TEXT_MUTED
                     },
@@ -156,7 +149,7 @@ class UpscaleComparisonDialog(
             val rightBox = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 0)).apply {
                 isOpaque = false
 
-                val lblSelect = JLabel("Mangá de teste:").apply {
+                val lblSelect = JLabel("Mangá:").apply {
                     font = font.deriveFont(Font.BOLD, 12f)
                     foreground = Theme.TEXT_SECONDARY
                 }
@@ -208,7 +201,6 @@ class UpscaleComparisonDialog(
         add(centerPanel, BorderLayout.CENTER)
         add(bottomStatus, BorderLayout.SOUTH)
 
-        // Inicialização assíncrona
         SwingUtilities.invokeLater { initAvailableMangaSamples() }
     }
 
@@ -231,7 +223,6 @@ class UpscaleComparisonDialog(
         }) { result ->
             progressBar.isVisible = false
             result.onSuccess { samples ->
-                availableSamples = samples
                 mangaSelector.removeAllItems()
                 if (samples.isEmpty()) {
                     statusLabel.text = "Nenhum capítulo baixado encontrado em ~/.mihon/downloads."
@@ -245,7 +236,6 @@ class UpscaleComparisonDialog(
                 }
 
                 samples.forEach { mangaSelector.addItem(it) }
-                // Seleciona o primeiro
                 runComparison(samples.first())
             }.onFailure {
                 statusLabel.text = "Erro ao localizar arquivos: ${it.message}"
@@ -264,39 +254,20 @@ class UpscaleComparisonDialog(
 
             val orig = raw.originalImg
 
-            // 1. Zoom Convencional (Bilinear 2x)
-            val bilinear2x = scaleImageFast(orig, orig.width * 2, orig.height * 2)
-
-            // 2. AMD FSR 1.0 (EASU 12-tap + RCAS Anti-Aliasing de Bordas)
-            val fsr2x = MangaImageEnhancer.scale(
+            // 1. Ultra HD (Restauração de traço de nanquim e cores na resolução padrão)
+            val ultraHd = MangaImageEnhancer.scale(
                 src = orig,
-                targetW = orig.width * 2,
-                targetH = orig.height * 2,
-                quality = MangaImageEnhancer.QualityMode.FSR_EASU,
+                targetW = orig.width,
+                targetH = orig.height,
+                quality = MangaImageEnhancer.QualityMode.ULTRA_HD,
             )
 
-            // 3. 2x Super HD 64-bit (FSR EASU + Anime4K + Vibrance + Dynamic Contrast)
-            val hd64_2x = MangaImageEnhancer.scale(
+            // 2. Bilinear Convencional
+            val bilinear = MangaImageEnhancer.scale(
                 src = orig,
-                targetW = orig.width * 2,
-                targetH = orig.height * 2,
-                quality = MangaImageEnhancer.QualityMode.HD_64BIT,
-            )
-
-            // 4. 3x Full HD Ultra
-            val hd64_3x = MangaImageEnhancer.scale(
-                src = orig,
-                targetW = orig.width * 3,
-                targetH = orig.height * 3,
-                quality = MangaImageEnhancer.QualityMode.HD_64BIT,
-            )
-
-            // 5. 2x Nítido (Lanczos-3 Puro + CAS)
-            val sharp2x = MangaImageEnhancer.scale(
-                src = orig,
-                targetW = orig.width * 2,
-                targetH = orig.height * 2,
-                quality = MangaImageEnhancer.QualityMode.SHARP,
+                targetW = orig.width,
+                targetH = orig.height,
+                quality = MangaImageEnhancer.QualityMode.BILINEAR,
             )
 
             ProcessedData(
@@ -305,18 +276,15 @@ class UpscaleComparisonDialog(
                 pageName = raw.pageName,
                 originalBytes = raw.originalBytes,
                 originalImg = orig,
-                bilinear2x = bilinear2x,
-                fsr2x = fsr2x,
-                hd64_2x = hd64_2x,
-                hd64_3x = hd64_3x,
-                sharp2x = sharp2x,
+                ultraHdImg = ultraHd,
+                bilinearImg = bilinear,
             )
         }) { result ->
             progressBar.isVisible = false
             result.onSuccess { data ->
                 populateTabsAndDiagnostics(data)
             }.onFailure {
-                statusLabel.text = "Falha ao gerar comparativo: ${it.message}"
+                statusLabel.text = "Falha ao processar: ${it.message}"
                 JOptionPane.showMessageDialog(this, "Erro: ${it.message}", "Erro", JOptionPane.ERROR_MESSAGE)
             }
         }
@@ -355,236 +323,134 @@ class UpscaleComparisonDialog(
     private fun populateTabsAndDiagnostics(data: ProcessedData) {
         val orig = data.originalImg
 
-        // Atualiza os metadados no banner de diagnóstico
         lblMetaManga.text = "${data.mangaTitle} • ${data.chapterName}"
         lblMetaRes.text = "${orig.width} × ${orig.height} px"
         val kbSize = data.originalBytes.size / 1024
         lblMetaSize.text = "$kbSize KB (${data.pageName})"
-
-        if (orig.height >= 1600) {
-            lblMetaSmart.text = "Alta Resolução (Economizar CPU/Disco)"
-            lblMetaSmart.foreground = Color(76, 175, 80) // Verde
-        } else {
-            lblMetaSmart.text = "Baixa Resolução (FSR Recomendado)"
-            lblMetaSmart.foreground = Color(255, 179, 0) // Âmbar
-        }
+        lblMetaStatus.text = "Ultra HD Pronto"
 
         tabs.removeAll()
 
-        // 1. Aba Split Interativo (Recorte com zoom 200%)
-        val cropW = min(380, orig.width)
-        val cropH = min(380, orig.height)
+        // 1. Aba Split Interativo (Recorte central com zoom 200% para evidenciar o traço)
+        val cropW = min(400, orig.width)
+        val cropH = min(400, orig.height)
         val cropX = (orig.width - cropW) / 2
         val cropY = (orig.height - cropH) / 2
 
-        val cropOrig1x = orig.getSubimage(cropX, cropY, cropW, cropH)
-        val cropOrigBilinear = data.bilinear2x.getSubimage(cropX * 2, cropY * 2, cropW * 2, cropH * 2)
-        val cropFsr = data.fsr2x.getSubimage(cropX * 2, cropY * 2, cropW * 2, cropH * 2)
-        val cropHd64 = data.hd64_2x.getSubimage(cropX * 2, cropY * 2, cropW * 2, cropH * 2)
+        val cropOrig = orig.getSubimage(cropX, cropY, cropW, cropH)
+        val cropHd = data.ultraHdImg.getSubimage(cropX, cropY, cropW, cropH)
 
-        tabs.addTab("🔍 Comparador Split (Lado a Lado)", createInteractiveSplitPanel(cropOrig1x, cropOrigBilinear, cropFsr, cropHd64))
+        // Escala o crop em 2x bilinearmente apenas para exibição confortável na tela
+        val zoomCropOrig = scaleImageFast(cropOrig, cropW * 2, cropH * 2)
+        val zoomCropHd = scaleImageFast(cropHd, cropW * 2, cropH * 2)
 
-        // 2. AMD FSR 1.0
+        tabs.addTab("🔍 Comparador Split (Lado a Lado)", createSplitPanel(zoomCropOrig, zoomCropHd))
+
+        // 2. Ultra HD (Página Completa)
         tabs.addTab(
-            "⚡ AMD FSR 1.0 (Anti-Aliasing)",
+            "✨ Ultra HD (Traço Nítido)",
             createImageViewer(
-                data.fsr2x,
-                "AMD FSR 1.0 (EASU 12-Tap Direcional + RCAS) — ${data.fsr2x.width}x${data.fsr2x.height} px  |  Elimina degraus de escada e serrilhados diagonais",
+                data.ultraHdImg,
+                "Ultra HD (Linhas de nanquim reconstruídas + Contraste dinâmico) — ${data.ultraHdImg.width}x${data.ultraHdImg.height} px",
             ),
         )
 
-        // 3. 2x Super HD 64-bit
+        // 3. Original (Scanlator Bruta)
         tabs.addTab(
-            "🎨 2x Super HD 64-bit",
-            createImageViewer(
-                data.hd64_2x,
-                "Mihon Super HD 64-bit (FSR + Reconstrução Vetorial Anime4K + Cores Vivas) — ${data.hd64_2x.width}x${data.hd64_2x.height} px",
-            ),
-        )
-
-        // 4. 3x Full HD Ultra
-        tabs.addTab(
-            "📜 3x Full HD Ultra 4K",
-            createImageViewer(
-                data.hd64_3x,
-                "3x Full HD Ultra (Alta Densidade de Pixels para Telas 4K) — ${data.hd64_3x.width}x${data.hd64_3x.height} px",
-            ),
-        )
-
-        // 5. 2x Lanczos-3 Nítido
-        tabs.addTab(
-            "📐 2x Lanczos-3 Nítido",
-            createImageViewer(
-                data.sharp2x,
-                "2x Lanczos-3 Fiel Nítido (Interpolação Clássica Sinc + CAS) — ${data.sharp2x.width}x${data.sharp2x.height} px",
-            ),
-        )
-
-        // 6. Original vs Bilinear
-        tabs.addTab(
-            "🖼️ Original 1x (Scan Bruta)",
+            "🖼️ Original (Scan Bruta)",
             createImageViewer(
                 orig,
                 "Original da Scanlator (1x) — ${orig.width}x${orig.height} px (${data.originalBytes.size / 1024} KB)",
             ),
         )
 
-        // 7. Tabela Comparativa & Diagnóstico
-        tabs.addTab("📊 Guia Técnico & Comparativo", createBenchmarkTablePanel(data))
+        // 4. Guia Técnico
+        tabs.addTab("📊 Resumo Técnico", createBenchmarkPanel(data))
 
-        statusLabel.text = "Exibindo '${data.mangaTitle}' — ${data.chapterName} (${data.pageName}) | Concluído com sucesso"
+        statusLabel.text = "Exibindo '${data.mangaTitle}' — ${data.chapterName} (${data.pageName})"
     }
 
-    private fun createInteractiveSplitPanel(
-        cropOrig1x: BufferedImage,
-        cropBilinear: BufferedImage,
-        cropFsr: BufferedImage,
-        cropHd64: BufferedImage,
-    ): JPanel {
+    private fun createSplitPanel(leftCrop: BufferedImage, rightCrop: BufferedImage): JPanel {
         return JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
 
-            val leftPanelHolder = JPanel(BorderLayout())
-            val rightPanelHolder = JPanel(BorderLayout())
-
-            val split = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanelHolder, rightPanelHolder).apply {
-                resizeWeight = 0.5
-                dividerSize = 8
-                border = null
-            }
-
-            fun updateViews(modeIndex: Int) {
-                leftPanelHolder.removeAll()
-                rightPanelHolder.removeAll()
-
-                when (modeIndex) {
-                    0 -> {
-                        // Bilinear vs AMD FSR 1.0
-                        leftPanelHolder.add(createImageViewer(cropBilinear, "⬅ Esquerda: Zoom Convencional (Bilinear — Linhas borradas e serrilhadas)"))
-                        rightPanelHolder.add(createImageViewer(cropFsr, "Direita: AMD FSR 1.0 (EASU 12-Tap — Bordas suaves sem serrilhado) ➡"))
-                    }
-                    1 -> {
-                        // Original 1x vs AMD FSR 1.0
-                        leftPanelHolder.add(createImageViewer(cropOrig1x, "⬅ Esquerda: Scan Original (1x — Resolução nativa da distribuição)"))
-                        rightPanelHolder.add(createImageViewer(cropFsr, "Direita: AMD FSR 1.0 (2x Super Resolução com Anti-Aliasing) ➡"))
-                    }
-                    2 -> {
-                        // Bilinear vs Super HD 64-bit
-                        leftPanelHolder.add(createImageViewer(cropBilinear, "⬅ Esquerda: Zoom Convencional (Bilinear)"))
-                        rightPanelHolder.add(createImageViewer(cropHd64, "Direita: Mihon Ultra HD 64-bit (Vetor Anime4K + Cores Vivas) ➡"))
-                    }
-                    else -> {
-                        // AMD FSR vs Super HD 64-bit
-                        leftPanelHolder.add(createImageViewer(cropFsr, "⬅ Esquerda: AMD FSR 1.0 (Fiel e Limpo sem serrilhado)"))
-                        rightPanelHolder.add(createImageViewer(cropHd64, "Direita: Ultra HD 64-bit (Estilo Anime / Traço Marcado) ➡"))
-                    }
-                }
-                leftPanelHolder.revalidate()
-                leftPanelHolder.repaint()
-                rightPanelHolder.revalidate()
-                rightPanelHolder.repaint()
-            }
-
-            val modeSelector = JComboBox(
-                arrayOf(
-                    "Comparar: Zoom Convencional (Bilinear)  VS  AMD FSR 1.0 (EASU)",
-                    "Comparar: Original (1x)  VS  AMD FSR 1.0 (EASU 2x)",
-                    "Comparar: Zoom Convencional  VS  Ultra HD 64-bit (Anime4K)",
-                    "Comparar: AMD FSR 1.0  VS  Ultra HD 64-bit",
-                ),
-            ).apply {
-                font = font.deriveFont(Font.BOLD, 12f)
-                addActionListener { updateViews(selectedIndex) }
-            }
-
-            val banner = JPanel(BorderLayout(12, 0)).apply {
+            val banner = JPanel(BorderLayout()).apply {
                 background = Theme.BG_SURFACE
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
                     BorderFactory.createEmptyBorder(8, 16, 8, 16),
                 )
-                val left = JLabel("🔍 Inspeção de Detalhes Finos (Zoom 200% Central)").apply {
+                val left = JLabel("🔍 Comparação de Traços e Nitidez (Recorte com Zoom de Inspeção)").apply {
                     font = font.deriveFont(Font.BOLD, 12.5f)
                     foreground = Theme.TEXT_PRIMARY
                 }
+                val right = JLabel("⬅ Esquerda: Original da Scanlator  │  Direita: Ultra HD ➡").apply {
+                    font = font.deriveFont(Font.BOLD, 12f)
+                    foreground = Theme.ACCENT_HOVER
+                }
                 add(left, BorderLayout.WEST)
-                add(modeSelector, BorderLayout.EAST)
+                add(right, BorderLayout.EAST)
+            }
+
+            val split = JSplitPane(
+                JSplitPane.HORIZONTAL_SPLIT,
+                createImageViewer(leftCrop, "Original (Scanlator com ruído JPEG e serrilhado)"),
+                createImageViewer(rightCrop, "Ultra HD (Traço limpo e preto profundo sem esticar)"),
+            ).apply {
+                resizeWeight = 0.5
+                dividerSize = 8
+                border = null
             }
 
             add(banner, BorderLayout.NORTH)
             add(split, BorderLayout.CENTER)
-
-            updateViews(0)
         }
     }
 
-    private fun createBenchmarkTablePanel(data: ProcessedData): JPanel {
+    private fun createBenchmarkPanel(data: ProcessedData): JPanel {
         return JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
             border = BorderFactory.createEmptyBorder(20, 24, 24, 24)
 
-            val origH = data.originalImg.height
-            val isHighRes = origH >= 1600
-
             val explanation = JLabel(
                 "<html><div style='width:800px; line-height: 1.4;'>" +
-                    "<h3 style='color:#E0E0E0; margin-bottom: 6px;'>Diretrizes do Motor Gráfico & Modo Inteligente</h3>" +
+                    "<h3 style='color:#E0E0E0; margin-bottom: 6px;'>Motor de Melhoria de Imagem Padrão (Sem Upscaling)</h3>" +
                     "<p style='color:#A0A0A0;'>" +
-                    "O recurso de <b>Threshold Inteligente</b> impede que scans modernas oficiais (como as de 1600px a 2400px de altura) " +
-                    "sejam infladas desnecessariamente durante o download. Isso economiza <b>até 75% de espaço em disco</b> " +
-                    "e torna o download muito mais rápido, aplicando o super-upscaling apenas quando o mangá realmente precisa de melhoria de traço." +
+                    "Ao contrário de algoritmos de upscaling que inflam o tamanho em pixels e aumentam o peso dos arquivos, " +
+                    "o modo <b>Ultra HD</b> opera na resolução original da obra. Ele limpa artefatos de compressão JPEG, " +
+                    "reconstrói linhas finas de nanquim e calibra o contraste para telas modernas sem consumir memória RAM adicional." +
                     "</p></div></html>",
             )
 
             val columnNames = arrayOf(
-                "Perfil de Renderização",
+                "Modo",
                 "Resolução",
-                "Tratamento de Bordas",
-                "Espaço em Disco (.cbz)",
-                "Custo de Download",
-                "Indicação",
+                "Reconstrução de Linhas",
+                "Consumo de Disco",
+                "Descrição",
             )
 
             val rowData = arrayOf(
                 arrayOf(
-                    "Original (1x)",
+                    "Ultra HD",
+                    "${data.ultraHdImg.width}x${data.ultraHdImg.height}",
+                    "Ativado (Traço Nítido + Cores Vivas)",
+                    "Idêntico ao original (~${data.originalBytes.size / 1024} KB)",
+                    "Melhoria visual direta mantendo a fidelidade da obra",
+                ),
+                arrayOf(
+                    "Bilinear",
+                    "${data.bilinearImg.width}x${data.bilinearImg.height}",
+                    "Nenhum (Padrão simples)",
+                    "Idêntico ao original (~${data.originalBytes.size / 1024} KB)",
+                    "Exibição convencional sem pós-processamento",
+                ),
+                arrayOf(
+                    "Original",
                     "${data.originalImg.width}x${data.originalImg.height}",
-                    "Nenhum (Scan nativa)",
-                    "~${data.originalBytes.size / 1024} KB / pág",
-                    "Instantâneo (0s)",
-                    if (isHighRes) "★ Recomendado para este mangá" else "Normal",
-                ),
-                arrayOf(
-                    "AMD FSR 1.0 (EASU + RCAS)",
-                    "${data.fsr2x.width}x${data.fsr2x.height}",
-                    "12-Tap Anisotrópico (Anti-Serrilhado)",
-                    "~${(data.originalBytes.size * 1.5).toInt() / 1024} KB / pág",
-                    "Baixo (~80ms)",
-                    if (!isHighRes) "★ Altamente Recomendado" else "Opcional",
-                ),
-                arrayOf(
-                    "Ultra HD 64-bit",
-                    "${data.hd64_2x.width}x${data.hd64_2x.height}",
-                    "Vetor Anime4K + Cores Vivas",
-                    "~${(data.originalBytes.size * 1.8).toInt() / 1024} KB / pág",
-                    "Médio (~140ms)",
-                    "Ideal para capas e mangás coloridos",
-                ),
-                arrayOf(
-                    "3x Full HD Ultra",
-                    "${data.hd64_3x.width}x${data.hd64_3x.height}",
-                    "FSR EASU 3x + RCAS",
-                    "~${(data.originalBytes.size * 2.8).toInt() / 1024} KB / pág",
-                    "Alto (~280ms)",
-                    "Apenas para monitores 4K ou zoom extremo",
-                ),
-                arrayOf(
-                    "Zoom Convencional (Bilinear)",
-                    "${data.bilinear2x.width}x${data.bilinear2x.height}",
-                    "Pixelado / Linhas Borradas",
-                    "Não aplicável (Apenas tela)",
-                    "Zero",
-                    "Padrão legado de leitores comuns",
+                    "Nenhum (Scan bruta)",
+                    "~${data.originalBytes.size / 1024} KB",
+                    "Imagem exatamente como foi escaneada e comprimida",
                 ),
             )
 
@@ -603,18 +469,16 @@ class UpscaleComparisonDialog(
                 gridColor = Theme.BORDER_SUBTLE
                 setShowGrid(true)
 
-                // Alinhamento central para resoluções e status
                 val centerRenderer = DefaultTableCellRenderer().apply {
                     horizontalAlignment = SwingConstants.CENTER
                 }
                 columnModel.getColumn(1).cellRenderer = centerRenderer
                 columnModel.getColumn(3).cellRenderer = centerRenderer
-                columnModel.getColumn(4).cellRenderer = centerRenderer
             }
 
             val scrollTable = JScrollPane(table).apply {
                 border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE)
-                preferredSize = Dimension(800, 220)
+                preferredSize = Dimension(800, 160)
             }
 
             val topBox = JPanel(BorderLayout()).apply {

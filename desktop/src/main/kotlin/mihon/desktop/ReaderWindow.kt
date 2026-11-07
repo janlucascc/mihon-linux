@@ -84,7 +84,7 @@ internal fun scaleImage(
     src: BufferedImage,
     targetW: Int,
     targetH: Int,
-    quality: MangaImageEnhancer.QualityMode = MangaImageEnhancer.QualityMode.ULTRA,
+    quality: MangaImageEnhancer.QualityMode = MangaImageEnhancer.QualityMode.ULTRA_HD,
 ): BufferedImage = MangaImageEnhancer.scale(src, targetW, targetH, quality)
 
 /**
@@ -118,8 +118,10 @@ class ReaderWindow(
 
     private var mode = runCatching { ReadMode.valueOf(prefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
     private var fit = runCatching { FitMode.valueOf(prefs.get("fit", "WINDOW")) }.getOrDefault(FitMode.WINDOW)
-    private var quality = runCatching { MangaImageEnhancer.QualityMode.valueOf(prefs.get("quality", "HD_64BIT")) }
-        .getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
+    private var quality = runCatching {
+        val qStr = prefs.get("quality", "ULTRA_HD")
+        if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.ULTRA_HD
+    }.getOrDefault(MangaImageEnhancer.QualityMode.ULTRA_HD)
 
     /** Natural size of each page; filled in the background (webtoon layout and wide-page detection). */
     private val sizes = arrayOfNulls<Dimension>(pageCount)
@@ -613,7 +615,7 @@ class ReaderWindow(
             val totalH = (n.height * s).toInt()
             val key = images.joinToString(",") { System.identityHashCode(it).toString() } + "@$s@${quality.name}"
             if (key != scaledKey && key != pendingKey) {
-                if (quality == MangaImageEnhancer.QualityMode.FAST) {
+                if (quality == MangaImageEnhancer.QualityMode.BILINEAR) {
                     scaled = images.map { img ->
                         val w = (img.width * s).toInt().coerceAtLeast(1)
                         val h = (img.height * s).toInt().coerceAtLeast(1)

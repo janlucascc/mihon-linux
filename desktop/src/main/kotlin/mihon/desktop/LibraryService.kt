@@ -376,26 +376,20 @@ class LibraryService(
             require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
 
             val readerPrefs = java.util.prefs.Preferences.userRoot().node("mihon-linux-reader")
-            val installFactor = runCatching {
-                MangaImageEnhancer.InstallUpscaleFactor.valueOf(readerPrefs.get("installUpscaleFactor", "OFF"))
-            }.getOrDefault(MangaImageEnhancer.InstallUpscaleFactor.OFF)
-            val installQuality = runCatching {
-                MangaImageEnhancer.QualityMode.valueOf(readerPrefs.get("installUpscaleQuality", "HD_64BIT"))
-            }.getOrDefault(MangaImageEnhancer.QualityMode.HD_64BIT)
+            val installEnhance = runCatching {
+                MangaImageEnhancer.InstallEnhanceMode.valueOf(readerPrefs.get("installEnhanceMode", "OFF"))
+            }.getOrDefault(MangaImageEnhancer.InstallEnhanceMode.OFF)
             val installFormat = runCatching {
                 MangaImageEnhancer.InstallOutputFormat.valueOf(readerPrefs.get("installOutputFormat", "JPEG_HQ"))
             }.getOrDefault(MangaImageEnhancer.InstallOutputFormat.JPEG_HQ)
-            val installThreshold = runCatching {
-                MangaImageEnhancer.InstallThresholdMode.valueOf(readerPrefs.get("installThresholdMode", "SMART_1600"))
-            }.getOrDefault(MangaImageEnhancer.InstallThresholdMode.SMART_1600)
 
             val partFile = File(target.parentFile, "${target.name}.part")
             try {
                 ZipOutputStream(partFile.outputStream().buffered()).use { zip ->
                     imageUrls.forEachIndexed { idx, imgUrl ->
                         onProgress(idx + 1, imageUrls.size)
-                        queueItem.progress = if (installFactor != MangaImageEnhancer.InstallUpscaleFactor.OFF) {
-                            "${idx + 1} / ${imageUrls.size} págs (Upscale ${installFactor.factor}x)"
+                        queueItem.progress = if (installEnhance != MangaImageEnhancer.InstallEnhanceMode.OFF) {
+                            "${idx + 1} / ${imageUrls.size} págs (Ultra HD)"
                         } else {
                             "${idx + 1} / ${imageUrls.size} págs"
                         }
@@ -424,10 +418,8 @@ class LibraryService(
                         val (finalBytes, finalExt) = MangaImageEnhancer.enhanceForInstall(
                             rawBytes = rawBytes,
                             originalExt = ext,
-                            factor = installFactor,
-                            quality = installQuality,
+                            mode = installEnhance,
                             outputFormat = installFormat,
-                            thresholdMode = installThreshold,
                         )
                         zip.putNextEntry(ZipEntry("%04d.%s".format(idx + 1, finalExt)))
                         zip.write(finalBytes)

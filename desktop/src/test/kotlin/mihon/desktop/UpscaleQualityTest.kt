@@ -18,62 +18,31 @@ class UpscaleQualityTest {
         println("=== INÍCIO DO TESTE DE QUALIDADE DE IMAGEM ===")
         println("Dimensões Originais: ${origImg.width} x ${origImg.height} (${rawBytes.size / 1024} KB)")
 
-        // 1. Process 2x com HD_64BIT
+        // 1. Process Ultra HD mantendo a resolução padrão (sem upscaling forçado)
         val t0 = System.currentTimeMillis()
-        val (bytes2x, ext2x) = MangaImageEnhancer.enhanceForInstall(
+        val (bytesUltraHd, extUltraHd) = MangaImageEnhancer.enhanceForInstall(
             rawBytes = rawBytes,
             originalExt = "jpg",
-            factor = MangaImageEnhancer.InstallUpscaleFactor.X2,
-            quality = MangaImageEnhancer.QualityMode.HD_64BIT,
+            mode = MangaImageEnhancer.InstallEnhanceMode.ULTRA_HD,
             outputFormat = MangaImageEnhancer.InstallOutputFormat.JPEG_HQ,
         )
-        val t2x = System.currentTimeMillis() - t0
-        val file2x = File(scratchDir, "upscale_2x_hd64.$ext2x").apply { writeBytes(bytes2x) }
-        val img2x = ImageIO.read(file2x)
-        println("Resultado 2x HD 64-bit: ${img2x.width} x ${img2x.height} (${bytes2x.size / 1024} KB) em ${t2x}ms")
+        val tUltraHd = System.currentTimeMillis() - t0
+        val fileUltraHd = File(scratchDir, "sample_ultrahd.$extUltraHd").apply { writeBytes(bytesUltraHd) }
+        val imgUltraHd = ImageIO.read(fileUltraHd)
+        println("Resultado Ultra HD: ${imgUltraHd.width} x ${imgUltraHd.height} (${bytesUltraHd.size / 1024} KB) em ${tUltraHd}ms")
 
-        // 2. Process 3x com HD_64BIT
-        val t1 = System.currentTimeMillis()
-        val (bytes3x, ext3x) = MangaImageEnhancer.enhanceForInstall(
+        // 2. Validação: resolução nativa mantida intacta
+        assertTrue(imgUltraHd.width == origImg.width, "Largura deve ser mantida na resolução padrão")
+        assertTrue(imgUltraHd.height == origImg.height, "Altura deve ser mantida na resolução padrão")
+
+        // 3. Teste do modo Desativado (OFF): deve retornar exatamente os mesmos bytes originais
+        val (bytesOff, extOff) = MangaImageEnhancer.enhanceForInstall(
             rawBytes = rawBytes,
             originalExt = "jpg",
-            factor = MangaImageEnhancer.InstallUpscaleFactor.X3,
-            quality = MangaImageEnhancer.QualityMode.HD_64BIT,
-            outputFormat = MangaImageEnhancer.InstallOutputFormat.JPEG_HQ,
+            mode = MangaImageEnhancer.InstallEnhanceMode.OFF,
         )
-        val t3x = System.currentTimeMillis() - t1
-        val file3x = File(scratchDir, "upscale_3x_hd64.$ext3x").apply { writeBytes(bytes3x) }
-        val img3x = ImageIO.read(file3x)
-        println("Resultado 3x HD 64-bit: ${img3x.width} x ${img3x.height} (${bytes3x.size / 1024} KB) em ${t3x}ms")
-
-        // 3. Process 2x com Lanczos-3 ULTRA (Anime4K)
-        val (bytesUltra, extUltra) = MangaImageEnhancer.enhanceForInstall(
-            rawBytes = rawBytes,
-            originalExt = "jpg",
-            factor = MangaImageEnhancer.InstallUpscaleFactor.X2,
-            quality = MangaImageEnhancer.QualityMode.ULTRA,
-            outputFormat = MangaImageEnhancer.InstallOutputFormat.JPEG_HQ,
-        )
-        val fileUltra = File(scratchDir, "upscale_2x_ultra.$extUltra").apply { writeBytes(bytesUltra) }
-
-        // Validações
-        assertTrue(img2x.width == origImg.width * 2)
-        assertTrue(img2x.height == origImg.height * 2)
-        assertTrue(img3x.width == origImg.width * 3)
-        assertTrue(img3x.height == origImg.height * 3)
-
-        // 4. Teste do Threshold Inteligente (SMART_1600): deve poupar processamento se altura >= 1600px
-        if (origImg.height >= 1600) {
-            val (smartBytes, _) = MangaImageEnhancer.enhanceForInstall(
-                rawBytes = rawBytes,
-                originalExt = "jpg",
-                factor = MangaImageEnhancer.InstallUpscaleFactor.X2,
-                quality = MangaImageEnhancer.QualityMode.HD_64BIT,
-                outputFormat = MangaImageEnhancer.InstallOutputFormat.JPEG_HQ,
-                thresholdMode = MangaImageEnhancer.InstallThresholdMode.SMART_1600,
-            )
-            assertTrue(smartBytes.size == rawBytes.size, "Modo Inteligente deve manter original para scan >= 1600px")
-        }
+        assertTrue(bytesOff.size == rawBytes.size, "Modo OFF deve manter o arquivo idêntico")
+        assertTrue(extOff == "jpg")
 
         println("=== TESTES CONCLUÍDOS COM SUCESSO ===")
     }
