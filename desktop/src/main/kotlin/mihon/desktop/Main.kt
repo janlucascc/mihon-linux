@@ -621,6 +621,19 @@ class MihonApp : JFrame("Mihon"), Navigator {
             alignmentX = 0f
         }
 
+        // Botão para abrir o Menu Teste comparativo
+        val btnOpenTestLab = JButton("🔬 Abrir Menu Teste Comparativo (Pág. 2 • Cap. 1)").apply {
+            font = font.deriveFont(Font.BOLD, 13f)
+            background = Theme.ACCENT
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            toolTipText = "Abre o laboratório visual de teste comparando a página 2 do capítulo 1 entre todas as versões de upscale"
+            addActionListener {
+                UpscaleComparisonDialog(this@MihonApp, ctx).isVisible = true
+            }
+        }
+
         val lblInstallFactor = JLabel("Fator de Melhoria Visual na Instalação (Exclusivo para Mangás Baixados):").apply {
             font = font.deriveFont(Font.BOLD, 13f)
             foreground = Theme.TEXT_PRIMARY
@@ -658,7 +671,9 @@ class MihonApp : JFrame("Mihon"), Navigator {
             add(lblGraphicsHero)
             add(Box.createVerticalStrut(6))
             add(lblGraphicsDesc)
-            add(Box.createVerticalStrut(18))
+            add(Box.createVerticalStrut(14))
+            add(btnOpenTestLab)
+            add(Box.createVerticalStrut(20))
 
             add(lblInstallFactor)
             add(Box.createVerticalStrut(6))
