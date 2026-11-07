@@ -385,6 +385,9 @@ class LibraryService(
             val installFormat = runCatching {
                 MangaImageEnhancer.InstallOutputFormat.valueOf(readerPrefs.get("installOutputFormat", "JPEG_HQ"))
             }.getOrDefault(MangaImageEnhancer.InstallOutputFormat.JPEG_HQ)
+            val installThreshold = runCatching {
+                MangaImageEnhancer.InstallThresholdMode.valueOf(readerPrefs.get("installThresholdMode", "SMART_1600"))
+            }.getOrDefault(MangaImageEnhancer.InstallThresholdMode.SMART_1600)
 
             val partFile = File(target.parentFile, "${target.name}.part")
             try {
@@ -424,6 +427,7 @@ class LibraryService(
                             factor = installFactor,
                             quality = installQuality,
                             outputFormat = installFormat,
+                            thresholdMode = installThreshold,
                         )
                         zip.putNextEntry(ZipEntry("%04d.%s".format(idx + 1, finalExt)))
                         zip.write(finalBytes)

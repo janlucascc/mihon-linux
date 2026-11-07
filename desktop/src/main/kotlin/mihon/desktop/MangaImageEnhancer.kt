@@ -45,6 +45,12 @@ object MangaImageEnhancer {
         X5(5, "5x Master 4K/8K (Máxima densidade — Requer mais espaço)"),
     }
 
+    enum class InstallThresholdMode(val minHeight: Int, val label: String) {
+        SMART_1600(1600, "Inteligente: Apenas se altura for < 1600px (Recomendado — Economiza CPU e Disco)"),
+        SMART_2000(2000, "Inteligente: Apenas se altura for < 2000px (Ideal para telas 2K/4K)"),
+        ALWAYS(0, "Forçar Sempre: Aplica em todas as páginas (Ignora resolução original)"),
+    }
+
     enum class InstallOutputFormat(val ext: String, val label: String) {
         JPEG_HQ("jpg", "JPEG Alta Qualidade (92% — Menor espaço em disco)"),
         PNG_LOSSLESS("png", "PNG Sem Perdas (100% — Fidelidade absoluta de estúdio)"),
@@ -54,6 +60,9 @@ object MangaImageEnhancer {
      * Pre-processes raw downloaded page bytes during chapter installation (.cbz creation).
      * Applies [factor]x upscaling (2x, 3x, 5x) and [quality] algorithm, returning the encoded bytes and extension.
      * Safeguards against OOM by capping any single dimension to 7680px (8K).
+     *
+     * If [thresholdMode] is active and the decoded image is already >= [InstallThresholdMode.minHeight],
+     * upscaling is skipped to preserve disk space and CPU.
      */
     fun enhanceForInstall(
         rawBytes: ByteArray,
@@ -61,11 +70,19 @@ object MangaImageEnhancer {
         factor: InstallUpscaleFactor,
         quality: QualityMode,
         outputFormat: InstallOutputFormat,
+        thresholdMode: InstallThresholdMode = InstallThresholdMode.ALWAYS,
     ): Pair<ByteArray, String> {
         if (factor == InstallUpscaleFactor.OFF || factor.factor <= 1) {
             return rawBytes to originalExt
         }
         val decoded = mihon.core.archive.ImageDecoder.decode(rawBytes) ?: return rawBytes to originalExt
+
+        // Threshold Inteligente: não inflar imagens que já estão em alta definição
+        if (thresholdMode != InstallThresholdMode.ALWAYS && decoded.height >= thresholdMode.minHeight) {
+            decoded.flush()
+            return rawBytes to originalExt
+        }
+
         try {
             val maxDim = 7680 // Cap at 8K to prevent excessive heap allocation on long webtoon strips
             val rawTargetW = decoded.width.toLong() * factor.factor

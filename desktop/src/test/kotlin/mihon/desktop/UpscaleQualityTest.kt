@@ -61,6 +61,20 @@ class UpscaleQualityTest {
         assertTrue(img2x.height == origImg.height * 2)
         assertTrue(img3x.width == origImg.width * 3)
         assertTrue(img3x.height == origImg.height * 3)
+
+        // 4. Teste do Threshold Inteligente (SMART_1600): deve poupar processamento se altura >= 1600px
+        if (origImg.height >= 1600) {
+            val (smartBytes, _) = MangaImageEnhancer.enhanceForInstall(
+                rawBytes = rawBytes,
+                originalExt = "jpg",
+                factor = MangaImageEnhancer.InstallUpscaleFactor.X2,
+                quality = MangaImageEnhancer.QualityMode.HD_64BIT,
+                outputFormat = MangaImageEnhancer.InstallOutputFormat.JPEG_HQ,
+                thresholdMode = MangaImageEnhancer.InstallThresholdMode.SMART_1600,
+            )
+            assertTrue(smartBytes.size == rawBytes.size, "Modo Inteligente deve manter original para scan >= 1600px")
+        }
+
         println("=== TESTES CONCLUÍDOS COM SUCESSO ===")
     }
 }

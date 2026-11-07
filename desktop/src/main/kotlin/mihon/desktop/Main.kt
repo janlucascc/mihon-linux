@@ -484,6 +484,20 @@ class MihonApp : JFrame("Mihon"), Navigator {
             }
         }
 
+        val installThresholdBox = JComboBox(MangaImageEnhancer.InstallThresholdMode.entries.map { it.label }.toTypedArray()).apply {
+            val saved = runCatching {
+                MangaImageEnhancer.InstallThresholdMode.valueOf(readerPrefs.get("installThresholdMode", "SMART_1600"))
+            }.getOrDefault(MangaImageEnhancer.InstallThresholdMode.SMART_1600)
+            selectedIndex = saved.ordinal
+            maximumSize = Dimension(460, 32)
+            alignmentX = 0f
+            addActionListener {
+                val chosen = MangaImageEnhancer.InstallThresholdMode.entries[selectedIndex]
+                readerPrefs.put("installThresholdMode", chosen.name)
+                ctx.setStatus("Filtro inteligente configurado: ${chosen.label}")
+            }
+        }
+
         val btnBackup = JButton("Exportar Backup (.zip)").apply { addActionListener { exportBackup() } }
         val btnRestore = JButton("Restaurar Backup (.zip)").apply { addActionListener { importBackup() } }
         val backupRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
@@ -639,6 +653,11 @@ class MihonApp : JFrame("Mihon"), Navigator {
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
+        val lblInstallThreshold = JLabel("Filtro Condicional Inteligente (Economia de CPU e Armazenamento):").apply {
+            font = font.deriveFont(Font.BOLD, 13f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
         val lblInstallAlgo = JLabel("Algoritmo de Upscaling e Reconstrução de Imagem na Instalação:").apply {
             font = font.deriveFont(Font.BOLD, 13f)
             foreground = Theme.TEXT_PRIMARY
@@ -650,8 +669,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
             alignmentX = 0f
         }
         val lblGraphicsNote = JLabel(
-            "<html><div style='width:580px'>💡 <b>Nota:</b> Escalas maiores (3x e 5x) produzem nitidez cristalina para zoom extremo e monitores 4K, " +
-                "mas aumentam o tempo de instalação do capítulo e o espaço ocupado em disco. Capítulos lidos via streaming online não sofrem pré-processamento de disco.</div></html>",
+            "<html><div style='width:580px'>💡 <b>Modo Inteligente Ativado:</b> Se a scan original já tiver resolução de alta definição (>= 1600px de altura), o aplicativo preserva a imagem original automaticamente, economizando espaço em disco e acelerando os downloads.</div></html>",
         ).apply {
             font = font.deriveFont(Font.PLAIN, 11.5f)
             foreground = Theme.TEXT_MUTED
@@ -678,6 +696,11 @@ class MihonApp : JFrame("Mihon"), Navigator {
             add(lblInstallFactor)
             add(Box.createVerticalStrut(6))
             add(installFactorBox)
+            add(Box.createVerticalStrut(14))
+
+            add(lblInstallThreshold)
+            add(Box.createVerticalStrut(6))
+            add(installThresholdBox)
             add(Box.createVerticalStrut(14))
 
             add(lblInstallAlgo)
