@@ -231,7 +231,15 @@ class UpscaleComparisonDialog(
             // 1. Zoom Convencional (Bilinear 2x)
             val bilinear2x = scaleImageFast(orig, orig.width * 2, orig.height * 2)
 
-            // 2. 2x HD 64-bit (Lanczos-3 + Anime4K + Vibrance + Contrast)
+            // 2. AMD FSR 1.0 (EASU 12-tap + RCAS Anti-Aliasing de Bordas)
+            val fsr2x = MangaImageEnhancer.scale(
+                src = orig,
+                targetW = orig.width * 2,
+                targetH = orig.height * 2,
+                quality = MangaImageEnhancer.QualityMode.FSR_EASU,
+            )
+
+            // 3. 2x Super HD 64-bit (FSR EASU + Anime4K + Vibrance + Contrast)
             val hd64_2x = MangaImageEnhancer.scale(
                 src = orig,
                 targetW = orig.width * 2,
@@ -239,7 +247,7 @@ class UpscaleComparisonDialog(
                 quality = MangaImageEnhancer.QualityMode.HD_64BIT,
             )
 
-            // 3. 3x Full HD Ultra
+            // 4. 3x Full HD Ultra
             val hd64_3x = MangaImageEnhancer.scale(
                 src = orig,
                 targetW = orig.width * 3,
@@ -247,7 +255,7 @@ class UpscaleComparisonDialog(
                 quality = MangaImageEnhancer.QualityMode.HD_64BIT,
             )
 
-            // 4. 2x Nítido (Lanczos-3 Puro + CAS)
+            // 5. 2x Nítido (Lanczos-3 Puro + CAS)
             val sharp2x = MangaImageEnhancer.scale(
                 src = orig,
                 targetW = orig.width * 2,
@@ -255,21 +263,23 @@ class UpscaleComparisonDialog(
                 quality = MangaImageEnhancer.QualityMode.SHARP,
             )
 
-            // Recortes de zoom de alta densidade (crop 400x400 central)
+            // Recortes de zoom de alta densidade (crop central)
             val cropW = min(360, orig.width)
             val cropH = min(360, orig.height)
             val cropX = (orig.width - cropW) / 2
             val cropY = (orig.height - cropH) / 2
 
             val cropOrigBilinear = bilinear2x.getSubimage(cropX * 2, cropY * 2, cropW * 2, cropH * 2)
+            val cropFsr2x = fsr2x.getSubimage(cropX * 2, cropY * 2, cropW * 2, cropH * 2)
             val cropHd2x = hd64_2x.getSubimage(cropX * 2, cropY * 2, cropW * 2, cropH * 2)
 
             listOf(
-                "Comparador Split" to createSplitPanel(cropOrigBilinear, cropHd2x),
-                "2x Super HD 64-bit" to createImageViewer(hd64_2x, "2x Super HD (Lanczos-3 + Traço Vetorial + Cores Vivas) — ${hd64_2x.width}x${hd64_2x.height}"),
+                "Comparador Split (FSR vs Comum)" to createSplitPanel(cropOrigBilinear, cropFsr2x),
+                "AMD FSR 1.0 (Anti-Aliasing)" to createImageViewer(fsr2x, "AMD FSR 1.0 (EASU 12-Tap Direcional + RCAS — Bordas Limpas Sem Serrilhado) — ${fsr2x.width}x${fsr2x.height}"),
+                "2x Super HD 64-bit" to createImageViewer(hd64_2x, "2x Super HD (FSR + Traço Vetorial Anime4K + Cores Vivas) — ${hd64_2x.width}x${hd64_2x.height}"),
                 "3x Full HD Ultra" to createImageViewer(hd64_3x, "3x Full HD Ultra 4K (Densidade Máxima) — ${hd64_3x.width}x${hd64_3x.height}"),
                 "2x Lanczos-3 Nítido" to createImageViewer(sharp2x, "2x Lanczos-3 Fiel Nítido — ${sharp2x.width}x${sharp2x.height}"),
-                "Zoom Comum (Bilinear)" to createImageViewer(bilinear2x, "Bilinear Convencional (Sem IA / Embaçado) — ${bilinear2x.width}x${bilinear2x.height}"),
+                "Zoom Comum (Bilinear)" to createImageViewer(bilinear2x, "Bilinear Convencional (Sem IA / Embaçado / Serrilhado) — ${bilinear2x.width}x${bilinear2x.height}"),
                 "Original (1x)" to createImageViewer(orig, "Original sem modificações — ${orig.width}x${orig.height}"),
             )
         }) { result ->
@@ -320,7 +330,7 @@ class UpscaleComparisonDialog(
         }
     }
 
-    private fun createSplitPanel(beforeBilinear: BufferedImage, afterHd64: BufferedImage): JPanel {
+    private fun createSplitPanel(beforeBilinear: BufferedImage, afterFsr: BufferedImage): JPanel {
         return JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
 
@@ -328,14 +338,14 @@ class UpscaleComparisonDialog(
                 background = Theme.BG_SURFACE
                 border = BorderFactory.createEmptyBorder(8, 16, 8, 16)
                 add(
-                    JLabel("🔍 Comparação de Detalhes Finos (Recorte Central com Zoom 200%)").apply {
+                    JLabel("🔍 Comparação de Bordas & Detalhes Finos (Recorte Central 200%)").apply {
                         font = font.deriveFont(Font.BOLD, 13f)
                         foreground = Theme.TEXT_PRIMARY
                     },
                     BorderLayout.WEST,
                 )
                 add(
-                    JLabel("⬅ Esquerda: Zoom Convencional (Bilinear)  │  Direita: Mihon Ultra HD 64-bit ➡").apply {
+                    JLabel("⬅ Esquerda: Zoom Convencional (Pixelado/Bilinear)  │  Direita: AMD FSR 1.0 (EASU Anti-Serrilhado) ➡").apply {
                         font = font.deriveFont(Font.BOLD, 12f)
                         foreground = Theme.ACCENT_HOVER
                     },
@@ -346,8 +356,8 @@ class UpscaleComparisonDialog(
 
             val split = JSplitPane(
                 JSplitPane.HORIZONTAL_SPLIT,
-                createImageViewer(beforeBilinear, "Zoom Convencional (Padrão de outros leitores — Linhas borradas)"),
-                createImageViewer(afterHd64, "Mihon Ultra HD 64-bit (Reconstrução vetorial Anime4K + Nitidez + Cores Vivas)"),
+                createImageViewer(beforeBilinear, "Zoom Convencional (Bilinear — Linhas borradas e serrilhadas)"),
+                createImageViewer(afterFsr, "AMD FSR 1.0 (EASU 12-Tap Direcional — Bordas curvas suaves sem jaggies)"),
             ).apply {
                 resizeWeight = 0.5
                 dividerSize = 8

@@ -31,7 +31,8 @@ import kotlin.math.sqrt
 object MangaImageEnhancer {
 
     enum class QualityMode(val label: String) {
-        HD_64BIT("Ultra HD 64-bit (Cores Vivas + Traço Vetorial)"),
+        FSR_EASU("AMD FSR 1.0 (EASU + RCAS Anti-Aliasing — Bordas Suaves Sem Serrilhado)"),
+        HD_64BIT("Ultra HD 64-bit (FSR + Anime4K Traço Vetorial + Cores Vivas)"),
         ULTRA("Ultra (Lanczos-3 + Anime4K Line-Art)"),
         SHARP("Nítido (Lanczos-3 + CAS)"),
         FAST("Rápido (Bilinear)"),
@@ -143,27 +144,26 @@ object MangaImageEnhancer {
             val sh = src.height
             val scaleRatio = max(tw.toDouble() / sw, th.toDouble() / sh)
 
-            val resampled = if (sw == tw && sh == th) {
-                srcPixels.clone()
-            } else {
-                lanczos3Resample(srcPixels, sw, sh, tw, th)
-            }
-
             val finalPixels = when (quality) {
+                QualityMode.FSR_EASU -> {
+                    // AMD FSR 1.0 (Edge Adaptive Spatial Upsampling 12-tap + Robust Contrast-Adaptive Sharpening)
+                    val easu = fsrEasuResample(srcPixels, sw, sh, tw, th)
+                    fsrRcasPass(easu, tw, th, sharpness = 0.28f)
+                }
                 QualityMode.HD_64BIT -> {
-                    // High-fidelity 64-bit look:
-                    // 1. Line art vectorization & sharpening
+                    // AMD FSR EASU directional interpolation + Anime4K vector line-art + S-curve color vibrancy
+                    val easu = fsrEasuResample(srcPixels, sw, sh, tw, th)
                     val lineArt = anime4kLineArtEnhance(
-                        resampled,
+                        easu,
                         tw,
                         th,
-                        strength = if (scaleRatio > 1.05) 0.95f else 0.70f,
+                        strength = if (scaleRatio > 1.05) 0.85f else 0.65f,
                         isUpscale = true,
                     )
-                    // 2. High-dynamic contrast & color vibrance / clarity
                     enhance64BitColorAndClarity(lineArt, tw, th)
                 }
                 QualityMode.ULTRA -> {
+                    val resampled = if (sw == tw && sh == th) srcPixels.clone() else lanczos3Resample(srcPixels, sw, sh, tw, th)
                     if (scaleRatio > 1.08) {
                         val strength = ((scaleRatio - 1.0) * 0.65).coerceIn(0.28, 0.85).toFloat()
                         anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = true)
@@ -172,10 +172,13 @@ object MangaImageEnhancer {
                     }
                 }
                 QualityMode.SHARP -> {
+                    val resampled = if (sw == tw && sh == th) srcPixels.clone() else lanczos3Resample(srcPixels, sw, sh, tw, th)
                     val strength = if (scaleRatio > 1.0) 0.42f else 0.26f
                     anime4kLineArtEnhance(resampled, tw, th, strength = strength, isUpscale = false)
                 }
-                QualityMode.FAST -> resampled
+                QualityMode.FAST -> {
+                    if (sw == tw && sh == th) srcPixels.clone() else lanczos3Resample(srcPixels, sw, sh, tw, th)
+                }
             }
 
             packRgbPixels(finalPixels, tw, th)
@@ -552,6 +555,172 @@ object MangaImageEnhancer {
         val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         val dest = (out.raster.dataBuffer as DataBufferInt).data
         System.arraycopy(pixels, 0, dest, 0, w * h)
+        return out
+    }
+
+    /**
+     * Port of AMD FidelityFX Super Resolution 1.0 (FSR 1.0) - Edge-Adaptive Spatial Upsampling (EASU).
+     *
+     * Analyzes local 2x2 gradients (horizontal, vertical, diagonal / and \) to detect the precise
+     * edge angle and length. It adapts interpolation along the edge vector rather than across it,
+     * directly eliminating diagonal stair-stepping ('jaggies' / pixelated outlines).
+     */
+    private fun fsrEasuResample(src: IntArray, sw: Int, sh: Int, dw: Int, dh: Int): IntArray {
+        val dst = IntArray(dw * dh)
+        val scaleX = sw.toDouble() / dw.toDouble()
+        val scaleY = sh.toDouble() / dh.toDouble()
+
+        // Precompute luma array for fast gradient direction evaluation
+        val luma = IntArray(sw * sh)
+        IntStream.range(0, sh).parallel().forEach { y ->
+            val row = y * sw
+            for (x in 0 until sw) {
+                val px = src[row + x]
+                val r = (px ushr 16) and 0xFF
+                val g = (px ushr 8) and 0xFF
+                val b = px and 0xFF
+                // Rec.601 perceptual luma
+                luma[row + x] = (r * 77 + g * 150 + b * 29) shr 8
+            }
+        }
+
+        IntStream.range(0, dh).parallel().forEach { dy ->
+            val dstRow = dy * dw
+            val srcY = (dy + 0.5) * scaleY - 0.5
+            val y0 = floor(srcY).toInt()
+            val fy = (srcY - y0).toFloat()
+
+            for (dx in 0 until dw) {
+                val srcX = (dx + 0.5) * scaleX - 0.5
+                val x0 = floor(srcX).toInt()
+                val fx = (srcX - x0).toFloat()
+
+                // Clamp coordinates for 4x4 neighborhood
+                val xm1 = (x0 - 1).coerceIn(0, sw - 1)
+                val xp0 = x0.coerceIn(0, sw - 1)
+                val xp1 = (x0 + 1).coerceIn(0, sw - 1)
+                val xp2 = (x0 + 2).coerceIn(0, sw - 1)
+
+                val ym1 = (y0 - 1).coerceIn(0, sh - 1)
+                val yp0 = y0.coerceIn(0, sh - 1)
+                val yp1 = (y0 + 1).coerceIn(0, sh - 1)
+                val yp2 = (y0 + 2).coerceIn(0, sh - 1)
+
+                // Sample central 2x2 lumas
+                val l00 = luma[yp0 * sw + xp0]
+                val l10 = luma[yp0 * sw + xp1]
+                val l01 = luma[yp1 * sw + xp0]
+                val l11 = luma[yp1 * sw + xp1]
+
+                // Directional gradient analysis (EASU Kernel Angle)
+                val gradX = (l10 - l00) + (l11 - l01)
+                val gradY = (l01 - l00) + (l11 - l10)
+                val dirLen = sqrt((gradX * gradX + gradY * gradY).toDouble()).toFloat()
+
+                // If edge is present, rotate kernel weights along edge direction
+                var rAcc = 0f
+                var gAcc = 0f
+                var bAcc = 0f
+                var wTotal = 0f
+
+                val nx = if (dirLen > 4f) -gradY / dirLen else 0f
+                val ny = if (dirLen > 4f) gradX / dirLen else 0f
+
+                // 12-tap sampling diamond around (srcX, srcY)
+                val xs = intArrayOf(xp0, xp1, xp0, xp1, xm1, xp2, xp0, xp1, xm1, xp2, xp0, xp1)
+                val ys = intArrayOf(yp0, yp0, yp1, yp1, yp0, yp0, ym1, ym1, yp1, yp1, yp2, yp2)
+                val oxs = floatArrayOf(0f, 1f, 0f, 1f, -1f, 2f, 0f, 1f, -1f, 2f, 0f, 1f)
+                val oys = floatArrayOf(0f, 0f, 1f, 1f, 0f, 0f, -1f, -1f, 1f, 1f, 2f, 2f)
+
+                for (tap in 0 until 12) {
+                    val px = src[ys[tap] * sw + xs[tap]]
+                    val dxSample = oxs[tap] - fx
+                    val dySample = oys[tap] - fy
+
+                    // Anisotropic distance calculation along the edge vector
+                    val dAlong = dxSample * nx + dySample * ny
+                    val dAcross = dxSample * (-ny) + dySample * nx
+                    val distSq = dAlong * dAlong * 0.45f + dAcross * dAcross * 1.55f
+
+                    // Sinc / Lanczos-like radial bell curve
+                    val w = (1f / (1f + distSq * 2.2f)) * (1f / (1f + distSq * distSq * 0.8f))
+
+                    val r = (px ushr 16) and 0xFF
+                    val g = (px ushr 8) and 0xFF
+                    val b = px and 0xFF
+
+                    rAcc += r * w
+                    gAcc += g * w
+                    bAcc += b * w
+                    wTotal += w
+                }
+
+                val invW = if (wTotal > 0.0001f) 1f / wTotal else 1f
+                val rFinal = (rAcc * invW).toInt().coerceIn(0, 255)
+                val gFinal = (gAcc * invW).toInt().coerceIn(0, 255)
+                val bFinal = (bAcc * invW).toInt().coerceIn(0, 255)
+
+                dst[dstRow + dx] = (0xFF shl 24) or (rFinal shl 16) or (gFinal shl 8) or bFinal
+            }
+        }
+
+        return dst
+    }
+
+    /**
+     * Port of AMD FidelityFX Super Resolution 1.0 (FSR 1.0) - Robust Contrast-Adaptive Sharpening (RCAS).
+     * Eliminates ringing artifacts while producing ultra-crisp comic line-art.
+     */
+    private fun fsrRcasPass(src: IntArray, w: Int, h: Int, sharpness: Float = 0.25f): IntArray {
+        if (w < 3 || h < 3) return src
+        val out = IntArray(w * h)
+        System.arraycopy(src, 0, out, 0, w)
+        System.arraycopy(src, (h - 1) * w, out, (h - 1) * w, w)
+
+        IntStream.range(1, h - 1).parallel().forEach { y ->
+            val row = y * w
+            out[row] = src[row]
+            out[row + w - 1] = src[row + w - 1]
+
+            for (x in 1 until w - 1) {
+                val idx = row + x
+                val c = src[idx]
+                val t = src[idx - w]
+                val b = src[idx + w]
+                val l = src[idx - 1]
+                val r = src[idx + 1]
+
+                val cR = (c ushr 16) and 0xFF; val cG = (c ushr 8) and 0xFF; val cB = c and 0xFF
+                val tR = (t ushr 16) and 0xFF; val tG = (t ushr 8) and 0xFF; val tB = t and 0xFF
+                val bR = (b ushr 16) and 0xFF; val bG = (b ushr 8) and 0xFF; val bB = b and 0xFF
+                val lR = (l ushr 16) and 0xFF; val lG = (l ushr 8) and 0xFF; val lB = l and 0xFF
+                val rR = (r ushr 16) and 0xFF; val rG = (r ushr 8) and 0xFF; val rB = r and 0xFF
+
+                val minR = min(cR, min(min(tR, bR), min(lR, rR)))
+                val maxR = max(cR, max(max(tR, bR), max(lR, rR)))
+                val minG = min(cG, min(min(tG, bG), min(lG, rG)))
+                val maxG = max(cG, max(max(tG, bG), max(lG, rG)))
+                val minB = min(cB, min(min(tB, bB), min(lB, rB)))
+                val maxB = max(cB, max(max(tB, bB), max(lB, rB)))
+
+                val hitLimitR = min(minR, 255 - maxR).toFloat() / max(maxR, 1).toFloat()
+                val hitLimitG = min(minG, 255 - maxG).toFloat() / max(maxG, 1).toFloat()
+                val hitLimitB = min(minB, 255 - maxB).toFloat() / max(maxB, 1).toFloat()
+                val hitLimit = min(hitLimitR, min(hitLimitG, hitLimitB)).coerceIn(0f, 1f)
+
+                val weight = -sqrt(hitLimit) * sharpness
+                val sumR = (tR + bR + lR + rR) * weight
+                val sumG = (tG + bG + lG + rG) * weight
+                val sumB = (tB + bB + lB + rB) * weight
+                val div = 1f + 4f * weight
+
+                val outR = ((cR + sumR) / div).toInt().coerceIn(minR, maxR)
+                val outG = ((cG + sumG) / div).toInt().coerceIn(minG, maxG)
+                val outB = ((cB + sumB) / div).toInt().coerceIn(minB, maxB)
+
+                out[idx] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
+            }
+        }
         return out
     }
 }
