@@ -607,19 +607,36 @@ class ReaderWindow(
 
     private val sessionStartNano = System.nanoTime()
     private var lastRecordedNano = sessionStartNano
+    private var lastInteractionNano = sessionStartNano
+
+    private fun markUserInteraction() {
+        lastInteractionNano = System.nanoTime()
+    }
 
     /**
-     * Calculates elapsed time since last recording and flushes it via [onProgress].
-     * Guarantees exact, non-duplicated session durations.
+     * Calculates elapsed active reading time since last recording and flushes it via [onProgress].
+     * Guarantees exact, non-duplicated session durations and pauses accumulation when idle or unfocused.
      */
     private fun flushProgress(page: Int) {
         val now = System.nanoTime()
-        val deltaMillis = ((now - lastRecordedNano) / 1_000_000L).coerceAtLeast(0L)
+        val rawDeltaMs = ((now - lastRecordedNano) / 1_000_000L).coerceAtLeast(0L)
         lastRecordedNano = now
-        onProgress(page, pageCount, deltaMillis)
+        val idleMs = ((now - lastInteractionNano) / 1_000_000L).coerceAtLeast(0L)
+        val isActivelyReading = isFocused || autoScroll.state == AutoScrollState.RUNNING || idleMs < 60_000L
+        val activeDeltaMs = if (isActivelyReading && idleMs < 90_000L) {
+            rawDeltaMs.coerceAtMost(15_000L)
+        } else {
+            0L
+        }
+        onProgress(page, pageCount, activeDeltaMs)
     }
 
     private val progressTimer = Timer(2500) { flushProgress(reportedPage) }.apply { isRepeats = false }
+    private val activeReadingHeartbeatTimer = Timer(5000) {
+        if (!closed && isDisplayable) {
+            flushProgress(reportedPage)
+        }
+    }.apply { isRepeats = true; start() }
 
     private fun syncPageUi(pageIdx: Int, labelText: String) {
         pageLabel.text = labelText
@@ -814,6 +831,7 @@ class ReaderWindow(
 
         val hoverMotion = object : MouseAdapter() {
             override fun mouseMoved(e: MouseEvent) {
+                markUserInteraction()
                 if (autoScroll.pauseOnHover) {
                     if (autoScroll.state == AutoScrollState.RUNNING) {
                         autoScroll.pauseHover()
@@ -829,6 +847,7 @@ class ReaderWindow(
         webtoon.addMouseMotionListener(hoverMotion)
 
         scroll.addMouseWheelListener { e ->
+            markUserInteraction()
             if (e.isControlDown) {
                 e.consume()
                 adjustZoom(if (e.wheelRotation < 0) 1.12 else 0.89)
@@ -839,6 +858,7 @@ class ReaderWindow(
 
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
+                markUserInteraction()
                 when (e.keyCode) {
                     KeyEvent.VK_A -> {
                         if (!isWebtoon) {
@@ -918,7 +938,10 @@ class ReaderWindow(
                 }
             }
         })
-        scroll.verticalScrollBar.addAdjustmentListener { if (isWebtoon) webtoon.scheduleUpdateVisible() }
+        scroll.verticalScrollBar.addAdjustmentListener {
+            markUserInteraction()
+            if (isWebtoon) webtoon.scheduleUpdateVisible()
+        }
         addWindowListener(object : WindowAdapter() {
             override fun windowClosed(e: WindowEvent) {
                 if (togglingFullscreen) return
@@ -926,6 +949,7 @@ class ReaderWindow(
                 autoScroll.stop()
                 hoverResumeTimer.stop()
                 progressTimer.stop()
+                activeReadingHeartbeatTimer.stop()
                 flushProgress(reportedPage)
                 inFlightTasks.values.forEach { runCatching { it.cancel(true) } }
                 inFlightTasks.clear()
@@ -973,6 +997,9 @@ class ReaderWindow(
         hoverResumeTimer.stop()
         progressTimer.stop()
         flushProgress(reportedPage)
+        val nowNano = System.nanoTime()
+        lastRecordedNano = nowNano
+        lastInteractionNano = nowNano
 
         inFlightTasks.values.forEach { runCatching { it.cancel(true) } }
         inFlightTasks.clear()
@@ -1105,6 +1132,7 @@ class ReaderWindow(
     }
 
     private fun reportProgress(page: Int) {
+        markUserInteraction()
         reportedPage = page
         progressTimer.restart()
     }

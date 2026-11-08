@@ -352,6 +352,43 @@ class CoverCache(
     fun get(mangaId: Long, title: String = ""): ImageIcon =
         synchronized(iconsLock) { icons[mangaId] } ?: placeholderFor(title)
 
+    /**
+     * Synchronously resolves a cover from memory or disk cache (`manga_<id>_*.png` or `url_<sha1>.png`)
+     * before falling back to the initials placeholder.
+     */
+    fun getOrReadDisk(manga: Manga): ImageIcon {
+        synchronized(iconsLock) { icons[manga.id] }?.let { return it }
+        val thumbUrl = manga.thumbnailUrl?.trim()
+        val hasRemoteThumb = !thumbUrl.isNullOrBlank() &&
+            (thumbUrl.startsWith("http://") || thumbUrl.startsWith("https://"))
+        if (hasRemoteThumb) {
+            synchronized(urlIconsLock) { urlIcons[thumbUrl] }?.let { icon ->
+                synchronized(iconsLock) { icons[manga.id] = icon }
+                return icon
+            }
+        }
+        val candidates = buildList {
+            if (hasRemoteThumb) {
+                add(File(cacheDir, "manga_${manga.id}_${sha1(thumbUrl!!)}.png"))
+                add(File(cacheDir, "url_${sha1(thumbUrl)}.png"))
+            }
+            add(File(cacheDir, "manga_${manga.id}.png"))
+            cacheDir.listFiles { _, name -> name.startsWith("manga_${manga.id}_") && name.endsWith(".png") }
+                ?.forEach { add(it) }
+        }
+        for (file in candidates) {
+            if (file.exists() && file.isFile) {
+                val img = runCatching { ImageIO.read(file) }.getOrNull()
+                if (img != null && img.width > 0 && img.height > 0) {
+                    val icon = ImageIcon(img)
+                    synchronized(iconsLock) { icons[manga.id] = icon }
+                    return icon
+                }
+            }
+        }
+        return placeholderFor(manga.title)
+    }
+
     fun getByUrl(url: String?, title: String = ""): ImageIcon {
         val clean = url?.trim()
         if (!clean.isNullOrEmpty()) {
@@ -451,10 +488,19 @@ class CoverCache(
         return placeholders.computeIfAbsent(initials) { ImageIcon(createPlaceholder(it)) }
     }
 
+    private val onLoadedCallbacks = ConcurrentHashMap<String, MutableList<() -> Unit>>()
+
     /** Loads or renders a library manga cover asynchronously on appScope. */
     fun load(manga: Manga, firstChapterPath: suspend () -> String?, onLoaded: () -> Unit) {
+        if (has(manga.id)) {
+            SwingUtilities.invokeLater(onLoaded)
+            return
+        }
         val key = "manga_${manga.id}"
-        if (has(manga.id) || !inFlight.add(key)) return
+        synchronized(onLoadedCallbacks) {
+            onLoadedCallbacks.getOrPut(key) { mutableListOf() }.add(onLoaded)
+        }
+        if (!inFlight.add(key)) return
         appScope.launch {
             try {
                 val thumbUrl = manga.thumbnailUrl
@@ -462,12 +508,14 @@ class CoverCache(
                     (thumbUrl.startsWith("http://") || thumbUrl.startsWith("https://"))
                 val cacheKey = if (hasRemoteThumb) "manga_${manga.id}_" + sha1(thumbUrl) else "manga_${manga.id}"
                 val cachedFile = File(cacheDir, "$cacheKey.png")
+                val urlCachedFile = if (hasRemoteThumb) File(cacheDir, "url_" + sha1(thumbUrl!!)) else null
 
-                val cachedImg = if (cachedFile.exists()) {
-                    runCatching { ImageIO.read(cachedFile) }.getOrNull()
+                val cachedImg = when {
+                    cachedFile.exists() -> runCatching { ImageIO.read(cachedFile) }.getOrNull()
                         ?.takeIf { it.width == COVER_W && it.height == COVER_H }
-                } else {
-                    null
+                    urlCachedFile != null && urlCachedFile.exists() -> runCatching { ImageIO.read(urlCachedFile) }.getOrNull()
+                        ?.takeIf { it.width == COVER_W && it.height == COVER_H }
+                    else -> null
                 }
                 val icon = if (cachedImg != null) {
                     ImageIcon(cachedImg)
@@ -479,9 +527,11 @@ class CoverCache(
                 }
                 if (icon != null) {
                     synchronized(iconsLock) { icons[manga.id] = icon }
-                    SwingUtilities.invokeLater(onLoaded)
+                    val callbacks = synchronized(onLoadedCallbacks) { onLoadedCallbacks.remove(key).orEmpty() }
+                    SwingUtilities.invokeLater { callbacks.forEach { it.invoke() } }
                 }
             } finally {
+                synchronized(onLoadedCallbacks) { onLoadedCallbacks.remove(key) }
                 inFlight.remove(key)
             }
         }

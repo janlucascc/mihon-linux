@@ -405,15 +405,29 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
             alignmentX = 0f
         }
 
+        fun formatReadingDuration(ms: Long): String {
+            if (ms <= 0L) return "0m"
+            val totalSeconds = (ms / 1000L).coerceAtLeast(1L)
+            if (totalSeconds < 60L) return "${totalSeconds}s"
+            val totalMinutes = Math.round(totalSeconds / 60.0).toLong().coerceAtLeast(1L)
+            return if (totalMinutes >= 60L) {
+                "${totalMinutes / 60L}h ${totalMinutes % 60L}m"
+            } else {
+                "${totalMinutes} min"
+            }
+        }
+
         background({
             val stats = ctx.service.getReadingStatistics()
+            stats.topMangas.forEach { item ->
+                ctx.covers.getOrReadDisk(item.manga)
+            }
             val cacheMb = ctx.covers.getCacheSize() / (1024 * 1024)
             stats to cacheMb
         }) { res ->
             res.onSuccess { (stats, cacheMb) ->
                 grid.removeAll()
-                val minutes = stats.totalReadingTimeMs / 1000 / 60
-                val timeStr = if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
+                val timeStr = formatReadingDuration(stats.totalReadingTimeMs)
 
                 grid.add(statCard("📚", "Mangás na Biblioteca", "${stats.totalManga}"))
                 grid.add(statCard("📖", "Capítulos Lidos", "${stats.totalChaptersRead}"))
@@ -460,9 +474,49 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                     add(topBadge, BorderLayout.NORTH)
 
                     if (topManga != null) {
-                        val coverLbl = JLabel(ctx.covers.get(topManga.manga.id, topManga.manga.title)).apply {
-                            preferredSize = Dimension(90, 130)
+                        var currentCoverIcon = ctx.covers.getOrReadDisk(topManga.manga)
+                        val coverPanel = object : JPanel() {
+                            init {
+                                isOpaque = false
+                                preferredSize = Dimension(96, 138)
+                                minimumSize = Dimension(96, 138)
+                                maximumSize = Dimension(96, 138)
+                            }
+
+                            override fun paintComponent(g: java.awt.Graphics) {
+                                super.paintComponent(g)
+                                val g2 = g.create() as java.awt.Graphics2D
+                                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                                g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+                                g2.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY)
+                                val w = width
+                                val h = height
+                                val arc = 12f
+                                g2.clip = java.awt.geom.RoundRectangle2D.Float(0f, 0f, w.toFloat(), h.toFloat(), arc, arc)
+                                val img = currentCoverIcon.image
+                                if (img != null) {
+                                    g2.drawImage(img, 0, 0, w, h, null)
+                                } else {
+                                    g2.color = Color(36, 38, 48)
+                                    g2.fillRect(0, 0, w, h)
+                                }
+                                g2.clip = null
+                                g2.color = Color(255, 255, 255, 45)
+                                g2.drawRoundRect(0, 0, w - 1, h - 1, arc.toInt(), arc.toInt())
+                                g2.dispose()
+                            }
                         }
+
+                        if (!ctx.covers.has(topManga.manga.id)) {
+                            ctx.covers.load(
+                                topManga.manga,
+                                firstChapterPath = { null },
+                            ) {
+                                currentCoverIcon = ctx.covers.get(topManga.manga.id, topManga.manga.title)
+                                coverPanel.repaint()
+                            }
+                        }
+
                         val infoPanel = JPanel().apply {
                             isOpaque = false
                             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -474,14 +528,16 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                                 font = font.deriveFont(Font.PLAIN, 12f)
                                 foreground = Color(180, 180, 190)
                             }
-                            val mins = topManga.totalReadingTimeMs / 1000 / 60
                             val chapsLbl = JLabel("${topManga.chaptersRead} capítulo(s) lido(s)").apply {
                                 font = font.deriveFont(Font.BOLD, 13f)
-                                foreground = Theme.ACCENT
+                                foreground = Color(110, 175, 255)
                             }
-                            val timeLbl = JLabel(if (mins > 0) "~$mins min dedicados" else "Em leitura ativa").apply {
+                            val mangaTimeStr = formatReadingDuration(topManga.totalReadingTimeMs)
+                            val timeLbl = JLabel(
+                                if (topManga.totalReadingTimeMs > 0L) "$mangaTimeStr dedicados" else "Em leitura ativa",
+                            ).apply {
                                 font = font.deriveFont(Font.PLAIN, 11.5f)
-                                foreground = Color(160, 160, 170)
+                                foreground = Color(200, 205, 215)
                             }
                             add(titleLbl)
                             add(Box.createVerticalStrut(4))
@@ -491,9 +547,9 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                             add(Box.createVerticalStrut(4))
                             add(timeLbl)
                         }
-                        val centerBox = JPanel(BorderLayout(12, 0)).apply {
+                        val centerBox = JPanel(BorderLayout(14, 0)).apply {
                             isOpaque = false
-                            add(coverLbl, BorderLayout.WEST)
+                            add(coverPanel, BorderLayout.WEST)
                             add(infoPanel, BorderLayout.CENTER)
                         }
                         add(centerBox, BorderLayout.CENTER)
@@ -537,7 +593,7 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                                     font = font.deriveFont(Font.BOLD, 12f)
                                     foreground = Theme.TEXT_PRIMARY
                                 }
-                                val count = JLabel("${item.chaptersRead} cap.").apply {
+                                val count = JLabel("${item.chaptersRead} cap. • ${formatReadingDuration(item.totalReadingTimeMs)}").apply {
                                     font = font.deriveFont(11f)
                                     foreground = Theme.TEXT_MUTED
                                 }

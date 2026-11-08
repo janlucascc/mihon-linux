@@ -628,7 +628,26 @@ class LibraryService(
         val mostActiveDay: String? = null,
     )
 
+    private val statsPrefs = java.util.prefs.Preferences.userRoot().node("mihon-linux-stats")
+
+    private suspend fun sanitizeLegacyInflatedDurationsIfNeeded() {
+        if (statsPrefs.getBoolean("duration_migration_v2", false)) return
+        val allHist = history.getAllHistory()
+        for (h in allHist) {
+            if (h.readDuration > 180_000L) {
+                val ch = chapters.getChapterById(h.chapterId)
+                val pagesRead = (ch?.lastPageRead ?: 1).coerceAtLeast(1)
+                // Quadratic sum formula from old bug: sum(1..N) = N*(N+1)/2, so N+1 divisor restores true duration
+                val divisor = (pagesRead + 1).coerceIn(4, 25)
+                val corrected = (h.readDuration / divisor).coerceIn(5_000L, 180_000L)
+                history.upsert(h.copy(readDuration = corrected))
+            }
+        }
+        statsPrefs.putBoolean("duration_migration_v2", true)
+    }
+
     suspend fun getReadingStatistics(): ReadingStats {
+        sanitizeLegacyInflatedDurationsIfNeeded()
         val favs = mangas.getFavorites()
         val totalManga = favs.size
         var readChapters = 0
