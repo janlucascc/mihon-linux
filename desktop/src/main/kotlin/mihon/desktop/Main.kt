@@ -327,7 +327,10 @@ class MihonApp : JFrame("Mihon"), Navigator {
         val width = (210f + (64f - 210f) * p).toInt()
         val padH = (12f + (8f - 12f) * p).toInt()
         sidePanel.preferredSize = Dimension(width, 0)
-        sidePanel.border = BorderFactory.createEmptyBorder(16, padH, 16, padH)
+        sidePanel.border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
+            BorderFactory.createEmptyBorder(16, padH, 16, padH),
+        )
 
         val showBrand = p < 0.45f
         if (brandLabel.isVisible != showBrand) {
@@ -388,7 +391,10 @@ class MihonApp : JFrame("Mihon"), Navigator {
         sidePanel = JPanel().apply {
             background = Theme.BG_SIDEBAR
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(16, if (sidebarCollapsed) 8 else 12, 16, if (sidebarCollapsed) 8 else 12)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(16, if (sidebarCollapsed) 8 else 12, 16, if (sidebarCollapsed) 8 else 12),
+            )
             preferredSize = Dimension(if (sidebarCollapsed) 64 else 210, 0)
         }
         brandLabel = JLabel("Mihon", AppIcon.getIcon(26), SwingConstants.LEFT).apply {
