@@ -596,9 +596,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 startPage = if (chapter.read) 0 else chapter.lastPageRead,
                 onPrevChapter = prevChap?.let { { openChapter(current, it) } },
                 onNextChapter = nextChap?.let { { openChapter(current, it) } },
-            ) { page, count ->
-                val elapsed = System.currentTimeMillis() - started
-                background({ ctx.service.saveProgress(chapter, page, count, elapsed, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
+            ) { page, count, deltaMillis ->
+                background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
             }
         } catch (e: Exception) {
             JOptionPane.showMessageDialog(this, "Não foi possível abrir o leitor: ${e.message}", "Erro", JOptionPane.ERROR_MESSAGE)
@@ -639,9 +638,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 startPage = if (chapter.read) 0 else chapter.lastPageRead,
                 onPrevChapter = prevChap?.let { { openChapter(current, it) } },
                 onNextChapter = nextChap?.let { { openChapter(current, it) } },
-            ) { page, count ->
-                val elapsed = System.currentTimeMillis() - started
-                background({ ctx.service.saveProgress(chapter, page, count, elapsed, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
+            ) { page, count, deltaMillis ->
+                background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
             }
         } catch (e: Exception) {
             if (!current.isLocal && canRetryDownload && file.exists()) {

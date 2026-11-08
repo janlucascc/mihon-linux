@@ -473,7 +473,7 @@ class ReaderWindow(
     startPage: Int = 0,
     private val onPrevChapter: (() -> Unit)? = null,
     private val onNextChapter: (() -> Unit)? = null,
-    private val onProgress: (page: Int, pageCount: Int) -> Unit = { _, _ -> },
+    private val onProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
 ) : JFrame("Mihon Linux - $title") {
 
     private val reader: ArchiveReader = when (source) {
@@ -595,7 +595,21 @@ class ReaderWindow(
         }
     }.apply { isRepeats = false }
 
-    private val progressTimer = Timer(700) { onProgress(reportedPage, pageCount) }.apply { isRepeats = false }
+    private val sessionStartNano = System.nanoTime()
+    private var lastRecordedNano = sessionStartNano
+
+    /**
+     * Calculates elapsed time since last recording and flushes it via [onProgress].
+     * Guarantees exact, non-duplicated session durations.
+     */
+    private fun flushProgress(page: Int) {
+        val now = System.nanoTime()
+        val deltaMillis = ((now - lastRecordedNano) / 1_000_000L).coerceAtLeast(0L)
+        lastRecordedNano = now
+        onProgress(page, pageCount, deltaMillis)
+    }
+
+    private val progressTimer = Timer(2500) { flushProgress(reportedPage) }.apply { isRepeats = false }
 
     private fun syncPageUi(pageIdx: Int, labelText: String) {
         pageLabel.text = labelText
@@ -907,7 +921,7 @@ class ReaderWindow(
                 autoScroll.stop()
                 hoverResumeTimer.stop()
                 progressTimer.stop()
-                onProgress(reportedPage, pageCount)
+                flushProgress(reportedPage)
                 inFlightTasks.values.forEach { runCatching { it.cancel(true) } }
                 inFlightTasks.clear()
                 io.shutdownNow()
