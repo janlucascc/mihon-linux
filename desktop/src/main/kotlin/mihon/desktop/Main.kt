@@ -754,18 +754,21 @@ class MihonApp : JFrame("Mihon"), Navigator {
             addTab("✨ Gráficos", scrollGraphics)
         }
 
+        val headerWrap = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            background = Theme.BG_APP
+            border = BorderFactory.createEmptyBorder(16, 24, 8, 24)
+            add(topBar, BorderLayout.WEST)
+        }
+
         val root = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
-            val headerWrap = JPanel(BorderLayout()).apply {
-                background = Theme.BG_APP
-                border = BorderFactory.createEmptyBorder(16, 24, 8, 24)
-                add(topBar, BorderLayout.WEST)
-            }
             add(headerWrap, BorderLayout.NORTH)
             add(tabs, BorderLayout.CENTER)
         }
 
         ctx.addThemeListener {
+            headerWrap.background = Theme.BG_APP
             titleLbl.foreground = Theme.TEXT_PRIMARY
             lblThemeTitle.foreground = Theme.TEXT_PRIMARY
             lblMode.foreground = Theme.TEXT_PRIMARY
@@ -1382,9 +1385,12 @@ class MoreScreen(
                 alignmentX = 0f
                 maximumSize = Dimension(Int.MAX_VALUE, 38)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
+                val left = JPanel().apply {
                     isOpaque = false
+                    layout = BoxLayout(this, BoxLayout.X_AXIS)
+                    border = BorderFactory.createEmptyBorder(0, 5, 0, 0)
                     add(iconLbl)
+                    add(Box.createHorizontalStrut(5))
                     add(
                         JPanel().apply {
                             isOpaque = false
@@ -1422,7 +1428,7 @@ class MoreScreen(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(8, 14, 8, 14),
+                BorderFactory.createEmptyBorder(8, 0, 8, 14),
             )
             alignmentX = 0f
             maximumSize = Dimension(Int.MAX_VALUE, 96)
@@ -1456,15 +1462,18 @@ class MoreScreen(
                 background = Theme.BG_SURFACE
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(8, 14, 8, 14),
+                    BorderFactory.createEmptyBorder(8, 0, 8, 14),
                 )
                 alignmentX = 0f
                 maximumSize = Dimension(Int.MAX_VALUE, 48)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
 
-                val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
+                val left = JPanel().apply {
                     isOpaque = false
+                    layout = BoxLayout(this, BoxLayout.X_AXIS)
+                    border = BorderFactory.createEmptyBorder(0, 5, 0, 0)
                     add(JLabel(icon))
+                    add(Box.createHorizontalStrut(5))
                     add(
                         JPanel().apply {
                             isOpaque = false
@@ -1536,7 +1545,7 @@ class MoreScreen(
             switchGroup.background = Theme.BG_SURFACE
             switchGroup.border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(8, 14, 8, 14),
+                BorderFactory.createEmptyBorder(8, 0, 8, 14),
             )
             offlineSwitch.repaint()
             incognitoSwitch.repaint()
@@ -1544,7 +1553,7 @@ class MoreScreen(
                 row.background = Theme.BG_SURFACE
                 row.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(8, 14, 8, 14),
+                    BorderFactory.createEmptyBorder(8, 0, 8, 14),
                 )
                 titleLbl.foreground = Theme.TEXT_PRIMARY
                 descLbl.foreground = Theme.TEXT_MUTED

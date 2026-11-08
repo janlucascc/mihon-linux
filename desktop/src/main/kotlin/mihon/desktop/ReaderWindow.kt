@@ -7,7 +7,9 @@ import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.Font
 import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.GraphicsEnvironment
 import java.awt.Rectangle
 import java.awt.RenderingHints
@@ -26,10 +28,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.prefs.Preferences
 import javax.swing.BorderFactory
+import javax.swing.Box
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JFrame
 import javax.swing.JLabel
+import javax.swing.JLayeredPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSlider
@@ -242,6 +246,215 @@ object ReaderEngine {
     }
 }
 
+enum class AutoScrollState {
+    STOPPED,
+    RUNNING,
+    PAUSED_HOVER,
+    PAUSED_MANUAL,
+}
+
+class AutoScrollController(
+    private val scroll: JScrollPane,
+    var onStateChanged: (AutoScrollState, Int) -> Unit = { _, _ -> },
+    var onReachedEnd: () -> Unit = {},
+) {
+    companion object {
+        const val FRICTION_DAMPING: Double = 0.88
+        const val MIN_SPEED_LEVEL: Int = 1
+        const val MAX_SPEED_LEVEL: Int = 10
+        const val DEFAULT_SPEED_LEVEL: Int = 3
+
+        /** Calculates base pixels/second: v_base(L) = 14.0 * L^1.15 */
+        fun calculateBaseSpeed(level: Int): Double {
+            val clamped = level.coerceIn(MIN_SPEED_LEVEL, MAX_SPEED_LEVEL)
+            return 14.0 * Math.pow(clamped.toDouble(), 1.15)
+        }
+    }
+
+    var state: AutoScrollState = AutoScrollState.STOPPED
+        internal set
+
+    var speedLevel: Int = DEFAULT_SPEED_LEVEL
+        internal set
+
+    var subPixelAccumulator: Double = 0.0
+        internal set
+
+    var kineticVelocity: Double = 0.0
+        internal set
+
+    var pauseOnHover: Boolean = true
+    var timerEnabled: Boolean = true
+
+    private val timer = Timer(16) {
+        tick(1.0 / 60.0)
+    }
+
+    fun tick(dt: Double = 1.0 / 60.0) {
+        if (state != AutoScrollState.RUNNING) return
+        val basePxPerSec = calculateBaseSpeed(speedLevel)
+        val frameVelocity = (basePxPerSec * dt) + kineticVelocity
+        kineticVelocity *= FRICTION_DAMPING
+        if (kotlin.math.abs(kineticVelocity) < 0.05) kineticVelocity = 0.0
+
+        subPixelAccumulator += frameVelocity
+        val step = subPixelAccumulator.toInt()
+        if (step != 0) {
+            subPixelAccumulator -= step
+            val bar = scroll.verticalScrollBar
+            val viewportH = if (scroll.viewport.height > 0) scroll.viewport.height else scroll.height
+            val maxVal = if (bar.maximum > viewportH) bar.maximum - viewportH else bar.maximum
+            if (maxVal <= 0) return
+
+            val nextVal = bar.value + step
+            if (nextVal >= maxVal && step > 0) {
+                bar.value = maxVal
+                stop()
+                onReachedEnd()
+            } else {
+                bar.value = nextVal.coerceIn(0, maxVal)
+            }
+        }
+    }
+
+    fun toggle() {
+        when (state) {
+            AutoScrollState.RUNNING -> pause(manual = true)
+            AutoScrollState.PAUSED_MANUAL, AutoScrollState.PAUSED_HOVER, AutoScrollState.STOPPED -> start()
+        }
+    }
+
+    fun start() {
+        state = AutoScrollState.RUNNING
+        if (timerEnabled && !timer.isRunning) timer.start()
+        onStateChanged(state, speedLevel)
+    }
+
+    fun pause(manual: Boolean = true) {
+        state = if (manual) AutoScrollState.PAUSED_MANUAL else AutoScrollState.PAUSED_HOVER
+        timer.stop()
+        onStateChanged(state, speedLevel)
+    }
+
+    fun pauseHover() {
+        if (state == AutoScrollState.RUNNING) {
+            pause(manual = false)
+        }
+    }
+
+    fun resumeHover() {
+        if (state == AutoScrollState.PAUSED_HOVER) {
+            start()
+        }
+    }
+
+    fun stop() {
+        state = AutoScrollState.STOPPED
+        timer.stop()
+        kineticVelocity = 0.0
+        subPixelAccumulator = 0.0
+        onStateChanged(state, speedLevel)
+    }
+
+    fun adjustSpeed(delta: Int) {
+        speedLevel = (speedLevel + delta).coerceIn(MIN_SPEED_LEVEL, MAX_SPEED_LEVEL)
+        onStateChanged(state, speedLevel)
+    }
+
+    fun setSpeed(level: Int) {
+        speedLevel = level.coerceIn(MIN_SPEED_LEVEL, MAX_SPEED_LEVEL)
+        onStateChanged(state, speedLevel)
+    }
+
+    fun addImpulse(deltaY: Double) {
+        kineticVelocity += deltaY
+    }
+}
+
+/**
+ * Floating HUD Speed Pill widget displaying speed indicator, pause/play toggle,
+ * speed up/down buttons, and hotkey hints.
+ */
+class FloatingSpeedPill(
+    private val controller: AutoScrollController,
+) : JPanel() {
+    private val playPauseBtn = JButton("⏸").apply {
+        isFocusable = false
+        font = font.deriveFont(Font.BOLD, 12f)
+        toolTipText = "Pausar / Retomar rolagem automática (Espaço / A)"
+        addActionListener { controller.toggle() }
+    }
+    private val minusBtn = JButton("−").apply {
+        isFocusable = false
+        font = font.deriveFont(Font.BOLD, 12f)
+        toolTipText = "Diminuir velocidade ([ ou ↑)"
+        addActionListener { controller.adjustSpeed(-1) }
+    }
+    private val speedLbl = JLabel(" ").apply {
+        font = font.deriveFont(Font.BOLD, 12f)
+        foreground = Color(245, 245, 245)
+    }
+    private val plusBtn = JButton("+").apply {
+        isFocusable = false
+        font = font.deriveFont(Font.BOLD, 12f)
+        toolTipText = "Aumentar velocidade (] ou ↓)"
+        addActionListener { controller.adjustSpeed(1) }
+    }
+    private val hintLbl = JLabel("[Espaço] Pausar • [↑/↓] Vel • [Esc] Parar").apply {
+        font = font.deriveFont(Font.PLAIN, 11f)
+        foreground = Color(175, 180, 190)
+    }
+    private val stopBtn = JButton("✕").apply {
+        isFocusable = false
+        font = font.deriveFont(Font.BOLD, 11f)
+        toolTipText = "Parar rolagem automática (Esc)"
+        addActionListener { controller.stop() }
+    }
+
+    init {
+        isOpaque = false
+        layout = FlowLayout(FlowLayout.CENTER, 8, 4)
+        border = BorderFactory.createEmptyBorder(2, 8, 2, 8)
+        add(playPauseBtn)
+        add(minusBtn)
+        add(speedLbl)
+        add(plusBtn)
+        add(Box.createHorizontalStrut(6))
+        add(hintLbl)
+        add(Box.createHorizontalStrut(4))
+        add(stopBtn)
+
+        updateUi(controller.state, controller.speedLevel)
+    }
+
+    fun updateUi(state: AutoScrollState, speedLevel: Int) {
+        val pxPerSec = AutoScrollController.calculateBaseSpeed(speedLevel).toInt()
+        val isRunning = state == AutoScrollState.RUNNING
+        playPauseBtn.text = if (isRunning) "⏸" else "▶"
+        val statePrefix = when (state) {
+            AutoScrollState.RUNNING -> "Rolando"
+            AutoScrollState.PAUSED_HOVER -> "Pausado (Cursor)"
+            AutoScrollState.PAUSED_MANUAL -> "Pausado"
+            AutoScrollState.STOPPED -> "Parado"
+        }
+        speedLbl.text = "$statePrefix: ${speedLevel}x (~$pxPerSec px/s)"
+        isVisible = (state != AutoScrollState.STOPPED)
+        revalidate()
+        repaint()
+    }
+
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g2.color = Color(20, 22, 28, 230)
+        g2.fillRoundRect(0, 0, width, height, 22, 22)
+        g2.color = Theme.BORDER_SUBTLE
+        g2.drawRoundRect(0, 0, width - 1, height - 1, 22, 22)
+        g2.dispose()
+        super.paintComponent(g)
+    }
+}
+
 /**
  * Reads a .cbz/.zip file or an image folder.
  *
@@ -354,6 +567,32 @@ class ReaderWindow(
     private val webtoon = WebtoonView()
     private val scroll = JScrollPane(paged)
 
+    private val autoScrollBtn: JButton = JButton("Auto-Scroll (A)").apply {
+        isFocusable = false
+        toolTipText = "Rolagem suave contínua mãos-livres (Espaço ou A)"
+    }
+    private val autoScroll: AutoScrollController = AutoScrollController(
+        scroll = scroll,
+        onStateChanged = { state, speed ->
+            speedPill.updateUi(state, speed)
+            autoScrollBtn.text = if (state == AutoScrollState.RUNNING) "Auto-Scroll: ${speed}x" else "Auto-Scroll (A)"
+        },
+        onReachedEnd = {
+            if (onNextChapter != null) {
+                val timer = Timer(1200) {
+                    dispose()
+                    onNextChapter.invoke()
+                }.apply { isRepeats = false; start() }
+            }
+        },
+    )
+    private val speedPill: FloatingSpeedPill = FloatingSpeedPill(autoScroll)
+    private val hoverResumeTimer: Timer = Timer(1200) {
+        if (autoScroll.state == AutoScrollState.PAUSED_HOVER) {
+            autoScroll.resumeHover()
+        }
+    }.apply { isRepeats = false }
+
     private val progressTimer = Timer(700) { onProgress(reportedPage, pageCount) }.apply { isRepeats = false }
 
     private fun syncPageUi(pageIdx: Int, labelText: String) {
@@ -437,11 +676,26 @@ class ReaderWindow(
                 if (!isWebtoon) showSpread()
             }
         }
+        autoScrollBtn.addActionListener {
+            if (!isWebtoon) {
+                mode = ReadMode.WEBTOON
+                modeBox.selectedIndex = mode.ordinal
+                prefs.put("mode", mode.name)
+                marginBtn.isVisible = isWebtoon
+                splitBtn.isVisible = !isWebtoon
+                applyView()
+            }
+            autoScroll.toggle()
+        }
+
         modeBox.addActionListener {
             mode = ReadMode.entries[modeBox.selectedIndex]
             prefs.put("mode", mode.name)
             marginBtn.isVisible = isWebtoon
             splitBtn.isVisible = !isWebtoon
+            if (!isWebtoon && autoScroll.state != AutoScrollState.STOPPED) {
+                autoScroll.stop()
+            }
             applyView()
         }
         fitBox.addActionListener {
@@ -471,6 +725,7 @@ class ReaderWindow(
             add(filterBox)
             add(marginBtn)
             add(splitBtn)
+            add(autoScrollBtn)
             add(button("−") { adjustZoom(0.85) })
             add(button("100%") { resetZoom() })
             add(button("+") { adjustZoom(1.18) })
@@ -505,34 +760,124 @@ class ReaderWindow(
             add(rightNav, BorderLayout.EAST)
         }
 
+        val centerLayered = JLayeredPane().apply {
+            add(scroll, JLayeredPane.DEFAULT_LAYER)
+            add(speedPill, JLayeredPane.POPUP_LAYER)
+        }
+        centerLayered.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) {
+                val w = centerLayered.width
+                val h = centerLayered.height
+                scroll.setBounds(0, 0, w, h)
+                val pillW = speedPill.preferredSize.width.coerceAtLeast(360)
+                val pillH = speedPill.preferredSize.height.coerceAtLeast(36)
+                speedPill.setBounds(
+                    (w - pillW) / 2,
+                    (h - pillH - 18).coerceAtLeast(10),
+                    pillW,
+                    pillH,
+                )
+            }
+        })
+
         contentPane.add(topHud, BorderLayout.NORTH)
-        contentPane.add(scroll, BorderLayout.CENTER)
+        contentPane.add(centerLayered, BorderLayout.CENTER)
         contentPane.add(bottomHud, BorderLayout.SOUTH)
+
+        val hoverMotion = object : MouseAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                if (autoScroll.pauseOnHover) {
+                    if (autoScroll.state == AutoScrollState.RUNNING) {
+                        autoScroll.pauseHover()
+                    }
+                    if (autoScroll.state == AutoScrollState.PAUSED_HOVER) {
+                        hoverResumeTimer.restart()
+                    }
+                }
+            }
+        }
+        scroll.viewport.addMouseMotionListener(hoverMotion)
+        paged.addMouseMotionListener(hoverMotion)
+        webtoon.addMouseMotionListener(hoverMotion)
 
         scroll.addMouseWheelListener { e ->
             if (e.isControlDown) {
                 e.consume()
                 adjustZoom(if (e.wheelRotation < 0) 1.12 else 0.89)
+            } else if (autoScroll.state != AutoScrollState.STOPPED) {
+                autoScroll.addImpulse(e.preciseWheelRotation * 18.0)
             }
         }
 
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 when (e.keyCode) {
-                    KeyEvent.VK_RIGHT, KeyEvent.VK_PAGE_DOWN, KeyEvent.VK_SPACE -> next()
+                    KeyEvent.VK_A -> {
+                        if (!isWebtoon) {
+                            mode = ReadMode.WEBTOON
+                            modeBox.selectedIndex = mode.ordinal
+                            prefs.put("mode", mode.name)
+                            marginBtn.isVisible = isWebtoon
+                            splitBtn.isVisible = !isWebtoon
+                            applyView()
+                        }
+                        autoScroll.toggle()
+                    }
+                    KeyEvent.VK_SPACE -> {
+                        if (isWebtoon || autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.toggle()
+                        } else {
+                            next()
+                        }
+                    }
+                    KeyEvent.VK_RIGHT, KeyEvent.VK_PAGE_DOWN -> next()
                     KeyEvent.VK_LEFT, KeyEvent.VK_PAGE_UP -> prev()
-                    KeyEvent.VK_DOWN -> scrollBy(64)
-                    KeyEvent.VK_UP -> scrollBy(-64)
+                    KeyEvent.VK_DOWN -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(1)
+                        } else {
+                            scrollBy(64)
+                        }
+                    }
+                    KeyEvent.VK_UP -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(-1)
+                        } else {
+                            scrollBy(-64)
+                        }
+                    }
                     KeyEvent.VK_HOME -> goTo(0)
                     KeyEvent.VK_END -> goTo(pageCount - 1)
                     KeyEvent.VK_H, KeyEvent.VK_M -> toggleHud()
                     KeyEvent.VK_PLUS, KeyEvent.VK_EQUALS, KeyEvent.VK_ADD -> if (e.isControlDown) adjustZoom(1.15)
                     KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> if (e.isControlDown) adjustZoom(0.87)
                     KeyEvent.VK_0 -> if (e.isControlDown) resetZoom()
-                    KeyEvent.VK_OPEN_BRACKET -> if (onPrevChapter != null) { dispose(); onPrevChapter.invoke() }
-                    KeyEvent.VK_CLOSE_BRACKET -> if (onNextChapter != null) { dispose(); onNextChapter.invoke() }
+                    KeyEvent.VK_OPEN_BRACKET -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(-1)
+                        } else if (onPrevChapter != null) {
+                            dispose()
+                            onPrevChapter.invoke()
+                        }
+                    }
+                    KeyEvent.VK_CLOSE_BRACKET -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(1)
+                        } else if (onNextChapter != null) {
+                            dispose()
+                            onNextChapter.invoke()
+                        }
+                    }
                     KeyEvent.VK_F11 -> toggleFullscreen()
-                    KeyEvent.VK_ESCAPE -> if (fullscreen) toggleFullscreen() else dispose()
+                    KeyEvent.VK_ESCAPE -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.stop()
+                        } else if (fullscreen) {
+                            toggleFullscreen()
+                        } else {
+                            dispose()
+                        }
+                    }
                 }
             }
         })
@@ -552,6 +897,8 @@ class ReaderWindow(
             override fun windowClosed(e: WindowEvent) {
                 if (togglingFullscreen) return
                 closed = true
+                autoScroll.stop()
+                hoverResumeTimer.stop()
                 progressTimer.stop()
                 onProgress(reportedPage, pageCount)
                 inFlightTasks.values.forEach { runCatching { it.cancel(true) } }
@@ -781,11 +1128,14 @@ class ReaderWindow(
                 if (closed) return@execute
                 if (sizes[i] != null) continue
                 found[i] = runCatching {
-                    synchronized(readerLock) {
-                        reader.getPageStream(reader.pages[i]).use { stream ->
-                            ImageDecoder.readDimensions(stream)
+                    val stream = if (reader is OnlineStreamArchiveReader) {
+                        reader.getPageStream(reader.pages[i])
+                    } else {
+                        synchronized(readerLock) {
+                            reader.getPageStream(reader.pages[i])
                         }
                     }
+                    stream.use { ImageDecoder.readDimensions(it) }
                 }.getOrNull()
             }
             SwingUtilities.invokeLater {
@@ -820,7 +1170,9 @@ class ReaderWindow(
             device.fullScreenWindow = if (fullscreen) this else null
             isVisible = true
         } finally {
-            togglingFullscreen = false
+            SwingUtilities.invokeLater {
+                togglingFullscreen = false
+            }
         }
         requestFocus()
     }

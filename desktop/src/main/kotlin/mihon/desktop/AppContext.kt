@@ -353,7 +353,8 @@ class CoverCache(
 
     fun remove(mangaId: Long) {
         synchronized(iconsLock) { icons.remove(mangaId) }
-        File(cacheDir, "$mangaId.png").delete()
+        val prefix = "manga_${mangaId}"
+        cacheDir.listFiles { _, name -> name.startsWith(prefix) }?.forEach { it.delete() }
     }
 
     fun clearDiskCache(): Long {
