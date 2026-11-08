@@ -487,6 +487,60 @@ object ModernIcons {
             }
         }
 
+    fun edit(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val pencil = Path2D.Float().apply {
+                    moveTo(4.0f, 20.0f)
+                    lineTo(8.0f, 20.0f)
+                    lineTo(20.0f, 8.0f)
+                    lineTo(16.0f, 4.0f)
+                    lineTo(4.0f, 16.0f)
+                    closePath()
+                }
+                g2.draw(pencil)
+                g2.drawLine(13, 7, 17, 11)
+            }
+        }
+
+    fun tag(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val p = Path2D.Float().apply {
+                    moveTo(4.5f, 11.5f)
+                    lineTo(4.5f, 5.5f)
+                    lineTo(10.5f, 5.5f)
+                    lineTo(19.5f, 14.5f)
+                    lineTo(14.5f, 19.5f)
+                    closePath()
+                }
+                g2.draw(p)
+                g2.draw(Ellipse2D.Float(7.0f, 7.0f, 2.5f, 2.5f))
+            }
+        }
+
+    fun arrowUp(size: Int = 14, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawLine(12, 18, 12, 6)
+                g2.drawLine(12, 6, 7, 11)
+                g2.drawLine(12, 6, 17, 11)
+            }
+        }
+
+    fun arrowDown(size: Int = 14, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawLine(12, 6, 12, 18)
+                g2.drawLine(12, 18, 7, 13)
+                g2.drawLine(12, 18, 17, 13)
+            }
+        }
+
     fun close(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
         object : BaseVectorIcon(size, color) {
             override fun paintVector(g2: Graphics2D, color: Color) {

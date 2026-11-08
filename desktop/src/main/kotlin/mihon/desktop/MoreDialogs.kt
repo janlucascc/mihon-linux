@@ -143,6 +143,22 @@ class CategoriesDialog(
     private val ctx: AppContext,
     private val onCategoryFilter: (Long) -> Unit,
 ) : JDialog(owner, "Personalizar Categorias", true) {
+
+    private fun createIconButton(icon: javax.swing.Icon, tip: String, onClick: () -> Unit): JButton {
+        return JButton(icon).apply {
+            isFocusable = false
+            toolTipText = tip
+            isContentAreaFilled = false
+            isBorderPainted = false
+            isOpaque = false
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            preferredSize = Dimension(28, 28)
+            minimumSize = Dimension(28, 28)
+            maximumSize = Dimension(28, 28)
+            border = BorderFactory.createEmptyBorder(2, 2, 2, 2)
+            addActionListener { onClick() }
+        }
+    }
     init {
         setSize(520, 500)
         setLocationRelativeTo(owner)
@@ -167,27 +183,27 @@ class CategoriesDialog(
                     listPanel.removeAll()
                     val entries = LibraryCategory.entries
 
-                    entries.forEach { (catId, title) ->
+                    entries.forEachIndexed { idx, (catId, title) ->
                         val count = if (catId == LibraryCategory.ALL) total else (counts[catId] ?: 0)
                         val icon = when (catId) {
-                            LibraryCategory.ALL -> "📁"
-                            LibraryCategory.READING -> "📖"
-                            LibraryCategory.COMPLETED -> "✅"
-                            LibraryCategory.PLAN_TO_READ -> "🔖"
-                            else -> "🏷️"
+                            LibraryCategory.ALL -> ModernIcons.library(18) { Theme.TEXT_PRIMARY }
+                            LibraryCategory.READING -> ModernIcons.play(15) { Theme.ACCENT }
+                            LibraryCategory.COMPLETED -> ModernIcons.check(17) { Theme.SUCCESS }
+                            LibraryCategory.PLAN_TO_READ -> ModernIcons.tag(18) { Theme.TEXT_MUTED }
+                            else -> ModernIcons.tag(18) { Theme.TEXT_PRIMARY }
                         }
 
                         val row = JPanel(BorderLayout(12, 0)).apply {
                             background = Theme.BG_CARD
                             border = BorderFactory.createCompoundBorder(
                                 BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                                BorderFactory.createEmptyBorder(10, 16, 10, 16),
+                                BorderFactory.createEmptyBorder(8, 16, 8, 16),
                             )
-                            maximumSize = Dimension(Int.MAX_VALUE, 54)
+                            maximumSize = Dimension(Int.MAX_VALUE, 52)
 
                             val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
                                 isOpaque = false
-                                add(JLabel(icon).apply { font = font.deriveFont(16f) })
+                                add(JLabel(icon))
                                 add(JLabel(title).apply {
                                     font = font.deriveFont(Font.BOLD, 13.5f)
                                     foreground = Theme.TEXT_PRIMARY
@@ -201,52 +217,54 @@ class CategoriesDialog(
                                 })
                             }
 
-                            val right = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                            val right = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
                                 isOpaque = false
                                 add(JLabel("$count mangá(s)").apply {
                                     font = font.deriveFont(12f)
                                     foreground = Theme.TEXT_MUTED
+                                    border = BorderFactory.createEmptyBorder(0, 0, 0, 8)
                                 })
 
+                                // Move buttons (Up/Down in list)
                                 if (catId != LibraryCategory.ALL) {
-                                    val btnEdit = JButton("✏️").apply {
-                                        isFocusable = false
-                                        toolTipText = "Renomear categoria"
-                                        font = font.deriveFont(11f)
-                                        addActionListener {
-                                            val newName = JOptionPane.showInputDialog(
-                                                this@CategoriesDialog,
-                                                "Novo nome para a categoria '$title':",
-                                                title,
-                                            )?.trim()
-                                            if (!newName.isNullOrBlank() && newName != title) {
-                                                LibraryCategory.updateCategory(catId, newName)
-                                                refreshList()
-                                            }
-                                        }
+                                    if (idx > 1) {
+                                        add(createIconButton(ModernIcons.arrowUp(14) { Theme.TEXT_SECONDARY }, "Mover para cima") {
+                                            LibraryCategory.moveCategory(catId, -1)
+                                            refreshList()
+                                        })
                                     }
-                                    add(btnEdit)
+                                    if (idx < entries.size - 1) {
+                                        add(createIconButton(ModernIcons.arrowDown(14) { Theme.TEXT_SECONDARY }, "Mover para baixo") {
+                                            LibraryCategory.moveCategory(catId, 1)
+                                            refreshList()
+                                        })
+                                    }
+                                    add(createIconButton(ModernIcons.edit(15) { Theme.TEXT_SECONDARY }, "Renomear categoria") {
+                                        val newName = JOptionPane.showInputDialog(
+                                            this@CategoriesDialog,
+                                            "Novo nome para a categoria '$title':",
+                                            title,
+                                        )?.trim()
+                                        if (!newName.isNullOrBlank() && newName != title) {
+                                            LibraryCategory.updateCategory(catId, newName)
+                                            refreshList()
+                                        }
+                                    })
                                 }
 
                                 if (catId != LibraryCategory.ALL && catId != LibraryCategory.READING && catId != LibraryCategory.COMPLETED && catId != LibraryCategory.PLAN_TO_READ) {
-                                    val btnDel = JButton("🗑️").apply {
-                                        isFocusable = false
-                                        toolTipText = "Excluir categoria personalizada"
-                                        font = font.deriveFont(11f)
-                                        addActionListener {
-                                            val confirm = JOptionPane.showConfirmDialog(
-                                                this@CategoriesDialog,
-                                                "Excluir a categoria '$title'?\n(Os mangás não serão excluídos, voltarão para 'Lendo')",
-                                                "Excluir Categoria",
-                                                JOptionPane.YES_NO_OPTION,
-                                            )
-                                            if (confirm == JOptionPane.YES_OPTION) {
-                                                LibraryCategory.removeCategory(catId)
-                                                refreshList()
-                                            }
+                                    add(createIconButton(ModernIcons.trash(15) { Theme.DANGER }, "Excluir categoria") {
+                                        val confirm = JOptionPane.showConfirmDialog(
+                                            this@CategoriesDialog,
+                                            "Excluir a categoria '$title'?\n(Os mangás não serão excluídos, voltarão para 'Lendo')",
+                                            "Excluir Categoria",
+                                            JOptionPane.YES_NO_OPTION,
+                                        )
+                                        if (confirm == JOptionPane.YES_OPTION) {
+                                            LibraryCategory.removeCategory(catId)
+                                            refreshList()
                                         }
-                                    }
-                                    add(btnDel)
+                                    })
                                 }
                             }
 

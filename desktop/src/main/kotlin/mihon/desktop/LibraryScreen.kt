@@ -492,6 +492,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
                 override fun mouseClicked(e: MouseEvent) {
                     val hit = tabBounds.firstOrNull { it.second.contains(e.point) } ?: return
+                    if (SwingUtilities.isRightMouseButton(e)) {
+                        showCategoryGooeyMenu(hit.first, e.x, e.y)
+                        return
+                    }
                     if (activeCategoryStatus != hit.first) {
                         activeCategoryStatus = hit.first
                         repaint()
@@ -499,6 +503,83 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     }
                 }
             })
+        }
+
+        private fun showCategoryGooeyMenu(catId: Long, x: Int, y: Int) {
+            val entries = LibraryCategory.entries
+            val currentIdx = entries.indexOfFirst { it.first == catId }
+            if (currentIdx < 0) return
+            val catTitle = entries[currentIdx].second
+
+            val items = mutableListOf<GooeyContextMenu.GooeyMenuItem>()
+
+            if (catId != LibraryCategory.ALL) {
+                if (currentIdx > 1) { // can move left
+                    items.add(
+                        GooeyContextMenu.GooeyMenuItem(
+                            id = "move_left",
+                            label = "Mover para Esquerda",
+                            iconType = GooeyContextMenu.IconType.MOVE_LEFT,
+                        ) {
+                            LibraryCategory.moveCategory(catId, -1)
+                        }
+                    )
+                }
+                if (currentIdx < entries.size - 1) { // can move right
+                    items.add(
+                        GooeyContextMenu.GooeyMenuItem(
+                            id = "move_right",
+                            label = "Mover para Direita",
+                            iconType = GooeyContextMenu.IconType.MOVE_RIGHT,
+                        ) {
+                            LibraryCategory.moveCategory(catId, 1)
+                        }
+                    )
+                }
+                items.add(
+                    GooeyContextMenu.GooeyMenuItem(
+                        id = "rename",
+                        label = "Renomear '$catTitle'",
+                        iconType = GooeyContextMenu.IconType.EDIT,
+                    ) {
+                        val newName = JOptionPane.showInputDialog(
+                            this@LibraryScreen,
+                            "Novo nome para a categoria '$catTitle':",
+                            catTitle,
+                        )?.trim()
+                        if (!newName.isNullOrBlank() && newName != catTitle) {
+                            LibraryCategory.updateCategory(catId, newName)
+                        }
+                    }
+                )
+                if (catId != LibraryCategory.READING && catId != LibraryCategory.COMPLETED && catId != LibraryCategory.PLAN_TO_READ) {
+                    items.add(
+                        GooeyContextMenu.GooeyMenuItem(
+                            id = "remove",
+                            label = "Excluir Categoria",
+                            iconType = GooeyContextMenu.IconType.REMOVE,
+                            isDanger = true,
+                        ) {
+                            val confirm = JOptionPane.showConfirmDialog(
+                                this@LibraryScreen,
+                                "Deseja excluir a categoria '$catTitle'?",
+                                "Excluir Categoria",
+                                JOptionPane.YES_NO_OPTION,
+                            )
+                            if (confirm == JOptionPane.YES_OPTION) {
+                                if (activeCategoryStatus == catId) {
+                                    activeCategoryStatus = LibraryCategory.ALL
+                                }
+                                LibraryCategory.removeCategory(catId)
+                            }
+                        }
+                    )
+                }
+            }
+
+            if (items.isNotEmpty()) {
+                GooeyContextMenu(items).showAt(this, x, y)
+            }
         }
 
         override fun paintComponent(g: Graphics) {

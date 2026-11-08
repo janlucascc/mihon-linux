@@ -94,6 +94,17 @@ object LibraryCategory {
         saveCategories(updated)
     }
 
+    fun moveCategory(id: Long, direction: Int) {
+        val current = entries.toMutableList()
+        val index = current.indexOfFirst { it.first == id }
+        if (index <= 0) return // Cannot move 'Todos' or not found
+        val targetIndex = (index + direction).coerceIn(1, current.size - 1)
+        if (index == targetIndex) return
+        val item = current.removeAt(index)
+        current.add(targetIndex, item)
+        saveCategories(current)
+    }
+
     fun removeCategory(id: Long) {
         if (id == ALL || id == READING) return
         val current = entries

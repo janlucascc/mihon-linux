@@ -65,6 +65,9 @@ class GooeyContextMenu(
         REMOVE,
         DOWNLOAD,
         UNREAD,
+        MOVE_LEFT,
+        MOVE_RIGHT,
+        EDIT,
     }
 
     private class SpringValue(
@@ -723,6 +726,33 @@ class GooeyContextMenu(
                 // Circle / Eye-off / mark unread outline icon
                 g.drawOval(-6, -6, 12, 12)
                 g.drawLine(-4, -4, 4, 4)
+            }
+            IconType.MOVE_LEFT -> {
+                g.drawLine(5, 0, -5, 0)
+                val arrow = Path2D.Float()
+                arrow.moveTo(0f, -5f)
+                arrow.lineTo(-5f, 0f)
+                arrow.lineTo(0f, 5f)
+                g.draw(arrow)
+            }
+            IconType.MOVE_RIGHT -> {
+                g.drawLine(-5, 0, 5, 0)
+                val arrow = Path2D.Float()
+                arrow.moveTo(0f, -5f)
+                arrow.lineTo(5f, 0f)
+                arrow.lineTo(0f, 5f)
+                g.draw(arrow)
+            }
+            IconType.EDIT -> {
+                val pencil = Path2D.Float()
+                pencil.moveTo(-5f, 5f)
+                pencil.lineTo(-2f, 5f)
+                pencil.lineTo(5f, -2f)
+                pencil.lineTo(2f, -5f)
+                pencil.lineTo(-5f, 2f)
+                pencil.closePath()
+                g.draw(pencil)
+                g.drawLine(0, -3, 3, 0)
             }
         }
         g.dispose()
