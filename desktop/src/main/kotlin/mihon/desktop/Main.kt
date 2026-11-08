@@ -1035,22 +1035,48 @@ class MihonApp : JFrame("Mihon"), Navigator {
 
 /**
  * Material 3 Switch Component matching Android Mihon:
- * Sleek stadium pill track with round thumb, smooth hover effect, and on/off state.
+ * Sleek stadium pill track with animated thumb sliding, size morphing (14px -> 22px),
+ * smooth color interpolation, and ease-out motion.
  */
 class M3Switch(
     initialState: Boolean = false,
     private val onToggle: (Boolean) -> Unit = {},
 ) : JComponent() {
+    private var animProgress: Float = if (initialState) 1f else 0f
+    private var animTimer: javax.swing.Timer? = null
+
     var isSelected: Boolean = initialState
         set(value) {
             if (field != value) {
                 field = value
-                repaint()
+                animateTo(if (value) 1f else 0f)
                 onToggle(value)
             }
         }
 
     private var isHovered: Boolean = false
+
+    private fun animateTo(target: Float) {
+        animTimer?.stop()
+        val start = animProgress
+        val durationMs = 180L
+        val startTime = System.currentTimeMillis()
+
+        animTimer = javax.swing.Timer(12) { e ->
+            val elapsed = System.currentTimeMillis() - startTime
+            val rawT = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+            // Ease-out cubic for crisp, fluid responsiveness
+            val inv = 1f - rawT
+            val eased = 1f - (inv * inv * inv)
+            animProgress = (start + (target - start) * eased).coerceIn(0f, 1f)
+            repaint()
+            if (rawT >= 1f) {
+                (e.source as? javax.swing.Timer)?.stop()
+                animProgress = target
+                repaint()
+            }
+        }.also { it.start() }
+    }
 
     init {
         isOpaque = false
@@ -1074,6 +1100,16 @@ class M3Switch(
         })
     }
 
+    private fun blendColor(c1: Color, c2: Color, ratio: Float): Color {
+        val r = ratio.coerceIn(0f, 1f)
+        val inv = 1f - r
+        val red = (c1.red * inv + c2.red * r).toInt().coerceIn(0, 255)
+        val green = (c1.green * inv + c2.green * r).toInt().coerceIn(0, 255)
+        val blue = (c1.blue * inv + c2.blue * r).toInt().coerceIn(0, 255)
+        val alpha = (c1.alpha * inv + c2.alpha * r).toInt().coerceIn(0, 255)
+        return Color(red, green, blue, alpha)
+    }
+
     override fun paintComponent(g: java.awt.Graphics) {
         val g2 = g.create() as java.awt.Graphics2D
         g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
@@ -1084,36 +1120,48 @@ class M3Switch(
         val trackY = (height - trackH) / 2
         val arc = trackH
 
-        if (isSelected) {
-            // Active / Checked Track: filled stadium pill
-            g2.color = if (Theme.isDark) Color(0xFF, 0xFF, 0xFF) else Color(0x1C, 0x1D, 0x1F)
-            g2.fillRoundRect(trackX, trackY, trackW, trackH, arc, arc)
+        val p = animProgress // 0f (off) -> 1f (on)
 
-            // Thumb: inside active track (contrast color)
-            val thumbD = 22
-            val thumbX = trackX + trackW - thumbD - 3
-            val thumbY = trackY + (trackH - thumbD) / 2
-            g2.color = if (Theme.isDark) Color(0x00, 0x00, 0x00) else Color(0xFF, 0xFF, 0xFF)
-            g2.fillOval(thumbX, thumbY, thumbD, thumbD)
-        } else {
-            // Inactive Track: outlined stadium pill with transparent/surface background
-            g2.color = if (isHovered) (if (Theme.isDark) Color(0x28, 0x28, 0x28) else Color(0xEE, 0xF0, 0xF4))
-                       else (if (Theme.isDark) Color(0x12, 0x12, 0x12) else Color(0xFA, 0xFA, 0xFA))
-            g2.fillRoundRect(trackX, trackY, trackW, trackH, arc, arc)
+        // Track fill color blending
+        val inactiveBg = if (isHovered) (if (Theme.isDark) Color(0x28, 0x28, 0x28) else Color(0xEE, 0xF0, 0xF4))
+                         else (if (Theme.isDark) Color(0x12, 0x12, 0x12) else Color(0xFA, 0xFA, 0xFA))
+        val activeBg = if (Theme.isDark) Color(0xFF, 0xFF, 0xFF) else Color(0x1C, 0x1D, 0x1F)
+        val currentTrackBg = blendColor(inactiveBg, activeBg, p)
 
-            // Pill outline (thick crisp border)
+        g2.color = currentTrackBg
+        g2.fillRoundRect(trackX, trackY, trackW, trackH, arc, arc)
+
+        // Border outline fading out as switch reaches on state
+        val borderAlpha = ((1f - p) * (if (isHovered) (if (Theme.isDark) 180 else 160) else (if (Theme.isDark) 120 else 100))).toInt().coerceIn(0, 255)
+        if (borderAlpha > 0) {
             g2.stroke = java.awt.BasicStroke(2f)
-            g2.color = if (isHovered) (if (Theme.isDark) Color(255, 255, 255, 180) else Color(0, 0, 0, 160))
-                       else (if (Theme.isDark) Color(255, 255, 255, 120) else Color(0, 0, 0, 100))
+            val borderColor = if (Theme.isDark) Color(255, 255, 255, borderAlpha) else Color(0, 0, 0, borderAlpha)
+            g2.color = borderColor
             g2.drawRoundRect(trackX + 1, trackY + 1, trackW - 2, trackH - 2, arc - 2, arc - 2)
-
-            // Thumb: small circle inside inactive track
-            val thumbD = 14
-            val thumbX = trackX + 6
-            val thumbY = trackY + (trackH - thumbD) / 2
-            g2.color = if (Theme.isDark) Color(255, 255, 255, 200) else Color(0, 0, 0, 160)
-            g2.fillOval(thumbX, thumbY, thumbD, thumbD)
         }
+
+        // Thumb metrics interpolation:
+        // Off: diameter 14px, starts at trackX + 6
+        // On: diameter 22px, ends at trackX + trackW - 22 - 3 (which is trackX + 25)
+        val startThumbD = 14f
+        val endThumbD = 22f
+        val thumbD = startThumbD + (endThumbD - startThumbD) * p
+
+        val startThumbX = trackX + 6f
+        val endThumbX = (trackX + trackW - endThumbD - 3)
+        val thumbX = startThumbX + (endThumbX - startThumbX) * p
+        val thumbY = trackY + (trackH - thumbD) / 2f
+
+        // Thumb color interpolation:
+        // Off: Light translucent (dark theme) / Dark translucent (light theme)
+        // On: Contrast against active track (Black on white in dark mode, White on dark in light mode)
+        val offThumbColor = if (Theme.isDark) Color(255, 255, 255, 200) else Color(0, 0, 0, 160)
+        val onThumbColor = if (Theme.isDark) Color(0x00, 0x00, 0x00) else Color(0xFF, 0xFF, 0xFF)
+        val currentThumbColor = blendColor(offThumbColor, onThumbColor, p)
+
+        g2.color = currentThumbColor
+        g2.fill(java.awt.geom.Ellipse2D.Float(thumbX, thumbY, thumbD, thumbD))
+
         g2.dispose()
     }
 }
