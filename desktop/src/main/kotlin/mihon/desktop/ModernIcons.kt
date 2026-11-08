@@ -487,6 +487,15 @@ object ModernIcons {
             }
         }
 
+    fun close(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawLine(6, 6, 18, 18)
+                g2.drawLine(18, 6, 6, 18)
+            }
+        }
+
     /**
      * Sparkles / Graphic enhancement icon.
      */

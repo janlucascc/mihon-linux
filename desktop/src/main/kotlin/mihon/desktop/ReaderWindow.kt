@@ -615,6 +615,11 @@ class ReaderWindow(
 
     init {
         defaultCloseOperation = DISPOSE_ON_CLOSE
+        val existing = activeReader
+        if (existing != null && existing.isDisplayable) {
+            existing.dispose()
+        }
+        activeReader = this
         setSize(1000, 1000)
         setLocationRelativeTo(null)
 
@@ -912,6 +917,9 @@ class ReaderWindow(
                 webtoon.invalidateScaledCache()
                 paged.invalidateCache()
                 paged.setContent(emptyList(), null)
+                if (activeReader === this@ReaderWindow) {
+                    activeReader = null
+                }
                 System.gc()
             }
         })
@@ -1621,5 +1629,11 @@ class ReaderWindow(
             (if (orientation == SwingConstants.VERTICAL) visibleRect.height else visibleRect.width) * 9 / 10
         override fun getScrollableTracksViewportWidth() = fit != FitMode.ORIGINAL
         override fun getScrollableTracksViewportHeight() = false
+    }
+
+    companion object {
+        @Volatile
+        var activeReader: ReaderWindow? = null
+            private set
     }
 }

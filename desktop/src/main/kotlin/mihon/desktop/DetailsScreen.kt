@@ -43,6 +43,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var resumeChapter: Chapter? = null
     private var updatingCategory = false
     private var hoveredRow = -1
+    private var openingChapterId: Long? = null
+    private var cancelStreamingTask: (() -> Unit)? = null
     private var filterMode = 0 // 0 = All, 1 = Unread, 2 = Downloaded
     private var reverseOrder = false
 
@@ -86,6 +88,17 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         isStringPainted = true
         isVisible = false
         preferredSize = Dimension(100, 22)
+    }
+    private val btnCancelStreaming = ModernButton(
+        text = "Cancelar",
+        icon = ModernIcons.close(12) { Color(0xE0, 0x55, 0x65) },
+        variant = ModernButton.Variant.SURFACE,
+    ).apply {
+        isVisible = false
+        margin = java.awt.Insets(2, 8, 2, 8)
+        addActionListener {
+            cancelStreamingTask?.invoke()
+        }
     }
 
     private val listModel = DefaultListModel<Chapter>()
@@ -265,9 +278,16 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             )
         }
 
+        val progressWrap = JPanel(BorderLayout(8, 0)).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 20, 4, 20)
+            add(progressBar, BorderLayout.CENTER)
+            add(btnCancelStreaming, BorderLayout.EAST)
+        }
+
         val bottomBar = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
-            add(progressBar, BorderLayout.NORTH)
+            add(progressWrap, BorderLayout.NORTH)
             add(chapterHeaderBar, BorderLayout.SOUTH)
         }
 
@@ -490,6 +510,12 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private fun openChapter(current: Manga, chapter: Chapter) {
+        // Prevent opening multiple chapters simultaneously or re-triggering while loading
+        if (openingChapterId != null) {
+            ctx.setStatus("Já existe um capítulo sendo aberto. Aguarde ou cancele…")
+            return
+        }
+
         if (ctx.service.isChapterDownloaded(current, chapter)) {
             openReaderFile(current, chapter, ctx.service.chapterCbzFile(current, chapter))
             return
@@ -500,11 +526,23 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             return
         }
 
+        openingChapterId = chapter.id
+        var isCancelled = false
+        cancelStreamingTask = {
+            isCancelled = true
+            openingChapterId = null
+            progressBar.isIndeterminate = false
+            progressBar.isVisible = false
+            btnCancelStreaming.isVisible = false
+            ctx.setStatus("Abertura do capítulo '${chapter.name}' cancelada.")
+        }
+
         // Open streaming reader directly without forcing full download
         progressBar.value = 0
         progressBar.string = "Obtendo páginas de '${chapter.name}'…"
         progressBar.isIndeterminate = true
         progressBar.isVisible = true
+        btnCancelStreaming.isVisible = true
         ctx.setStatus("Carregando páginas de '${chapter.name}'…")
 
         background({
@@ -524,6 +562,15 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }) { result ->
             progressBar.isIndeterminate = false
             progressBar.isVisible = false
+            btnCancelStreaming.isVisible = false
+            val wasOpening = openingChapterId == chapter.id
+            openingChapterId = null
+            cancelStreamingTask = null
+
+            if (isCancelled || !wasOpening) {
+                return@background
+            }
+
             result.onSuccess { streamReader ->
                 ctx.setStatus("Pronto para leitura: '${chapter.name}'")
                 openReaderArchive(current, chapter, streamReader)
