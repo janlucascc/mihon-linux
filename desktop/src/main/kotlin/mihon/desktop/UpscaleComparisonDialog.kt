@@ -213,7 +213,16 @@ class UpscaleComparisonDialog(
             val list = mutableListOf<SampleOption>()
             val mangaDirs = dlDir.listFiles { f -> f.isDirectory }.orEmpty().sortedBy { it.name }
 
+            val nsfwKeywords = listOf(
+                "sexual", "sex", "prazer", "vadia", "sem censura", "harem",
+                "makina-san", "hentai", "erótico", "erotico", "porn", "ecchi", "18+", "+18",
+            )
+
             for (dir in mangaDirs) {
+                val dirLower = dir.name.lowercase()
+                if (nsfwKeywords.any { dirLower.contains(it) }) {
+                    continue
+                }
                 val cbzList = dir.listFiles { f -> f.extension.equals("cbz", ignoreCase = true) && f.length() > 0 }.orEmpty()
                     .sortedWith { a, b -> mihon.core.archive.NaturalOrderComparator.compare(a.name, b.name) }
                 val cap1Cbz = cbzList.firstOrNull { it.name.contains("1") } ?: cbzList.firstOrNull() ?: continue
