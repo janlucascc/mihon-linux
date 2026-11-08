@@ -98,6 +98,7 @@ class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog
 
         val topBar = JPanel(BorderLayout()).apply {
             isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 14, 0)
             add(JLabel("Fila de downloads").apply {
                 font = font.deriveFont(Font.BOLD, 18f)
                 foreground = Theme.TEXT_PRIMARY

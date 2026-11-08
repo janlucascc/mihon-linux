@@ -506,8 +506,10 @@ class ReaderWindow(
     private var currentPage = startPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
     private var reportedPage = currentPage
 
-    /** Bounded thread pool for parallel page decoding and scaling. */
-    private val io = Executors.newFixedThreadPool(3) { r -> Thread(r, "reader-io").apply { isDaemon = true } }
+    /** Bounded thread pool for parallel page decoding and scaling (scaled to available cores). */
+    private val io = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors().coerceIn(4, 8)) { r ->
+        Thread(r, "reader-io").apply { isDaemon = true }
+    }
     private val readerLock = Any()
 
     @Volatile private var closed = false
@@ -519,8 +521,8 @@ class ReaderWindow(
     /** In-flight decoding, scaling, and prefetch jobs for responsive cancellation on rapid navigation. */
     private val inFlightTasks = ConcurrentHashMap<Int, Future<*>>()
 
-    /** Dynamic memory cache bounded between 8 and 32 images according to available JVM heap. */
-    private val maxCacheEntries = ReaderEngine.calculateMaxCacheEntries()
+    /** Dynamic memory cache bounded between 16 and 48 images according to available JVM heap. */
+    private val maxCacheEntries = ReaderEngine.calculateMaxCacheEntries(minEntries = 16, maxEntries = 48)
     private val cacheLock = Any()
     private val cache = object : LinkedHashMap<Int, BufferedImage>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>): Boolean {
@@ -897,7 +899,7 @@ class ReaderWindow(
                 }
             }
         })
-        scroll.verticalScrollBar.addAdjustmentListener { if (isWebtoon) webtoon.updateVisible() }
+        scroll.verticalScrollBar.addAdjustmentListener { if (isWebtoon) webtoon.scheduleUpdateVisible() }
         addWindowListener(object : WindowAdapter() {
             override fun windowClosed(e: WindowEvent) {
                 if (togglingFullscreen) return
@@ -1479,6 +1481,16 @@ class ReaderWindow(
 
         private fun pageAt(y: Int): Int = ReaderEngine.pageAt(y, tops, pageCount)
 
+        private val updateVisibleTimer = javax.swing.Timer(14) {
+            updateVisible()
+        }.apply { isRepeats = false }
+
+        fun scheduleUpdateVisible() {
+            if (!updateVisibleTimer.isRunning) {
+                updateVisibleTimer.restart()
+            }
+        }
+
         fun updateVisible() {
             if (positioning) return
             val vp = viewport ?: return
@@ -1493,22 +1505,22 @@ class ReaderWindow(
             reportProgress(last)
 
             // Cancel tasks for pages that scrolled out of active window
-            cancelDistantTasks(first, (last - first) + 6, 4)
+            cancelDistantTasks(first, (last - first) + 8, 6)
 
-            // Keep a tight window in memory (4 behind, 6 ahead) so RAM stays minimal while reading smoothly
-            images.keys.filter { it < first - 4 || it > last + 6 }.toList().forEach { idx ->
+            // Keep a generous window in memory (8 behind, 12 ahead) so scrolling back and forth never drops or recomputes images
+            images.keys.filter { it < first - 8 || it > last + 12 }.toList().forEach { idx ->
                 images.remove(idx)?.let { runCatching { it.flush() } }
             }
-            requested.filter { it < first - 4 || it > last + 6 }.toList().forEach { idx ->
+            requested.filter { it < first - 8 || it > last + 12 }.toList().forEach { idx ->
                 requested.remove(idx)
             }
-            // Request visible pages first, then prefetch 3 pages ahead and 1 behind
+            // Request visible pages first, then prefetch ahead and behind
             for (i in first..min(last, pageCount - 1)) request(i)
-            for (ahead in 1..3) {
+            for (ahead in 1..4) {
                 val idx = last + ahead
                 if (idx < pageCount) request(idx)
             }
-            for (behind in 1..1) {
+            for (behind in 1..2) {
                 val idx = first - behind
                 if (idx >= 0) request(idx)
             }

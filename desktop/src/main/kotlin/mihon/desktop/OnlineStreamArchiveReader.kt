@@ -41,8 +41,8 @@ class OnlineStreamArchiveReader(
 
     private val diskCacheDir = File(System.getProperty("java.io.tmpdir"), "mihon_stream_cache/${sourceName.hashCode()}").apply { mkdirs() }
     private val memoryLock = Any()
-    private val memoryCache = object : LinkedHashMap<Int, ByteArray>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, ByteArray>): Boolean = size > 6
+    private val memoryCache = object : LinkedHashMap<Int, ByteArray>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, ByteArray>): Boolean = size > 24
     }
 
     override fun getPageStream(page: ArchivePage): InputStream {

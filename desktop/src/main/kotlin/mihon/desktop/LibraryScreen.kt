@@ -222,11 +222,12 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val titleLabel = JLabel("Biblioteca").apply {
             font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
             foreground = Theme.TEXT_PRIMARY
+            border = BorderFactory.createEmptyBorder(0, 0, 0, 8)
         }
 
-        val topAppBar = JPanel(BorderLayout()).apply {
+        val topAppBar = JPanel(BorderLayout(8, 0)).apply {
             background = Theme.BG_APP
-            border = BorderFactory.createEmptyBorder(12, 22, 10, 22)
+            border = BorderFactory.createEmptyBorder(12, 16, 10, 16)
             add(titleLabel, BorderLayout.WEST)
 
             val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
@@ -236,7 +237,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 add(btnFilter)
                 add(btnOverflow)
             }
-            add(actions, BorderLayout.EAST)
+            add(actions, BorderLayout.CENTER)
         }
 
         val topHeader = JPanel(BorderLayout()).apply {
