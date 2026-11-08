@@ -1284,25 +1284,25 @@ class MoreScreen(
         val content = JPanel().apply {
             background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(24, 32, 24, 32)
+            border = BorderFactory.createEmptyBorder(14, 18, 14, 18)
         }
 
         // Header Switch Group (Material 3 Toggle Cards with Switch on right)
-        val lblOfflineTitle = JLabel("Somente disponíveis offline").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
-        val lblOfflineDesc = JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
-        val lblOfflineIcon = JLabel(ModernIcons.offline(22) { Theme.TEXT_PRIMARY })
+        val lblOfflineTitle = JLabel("Somente disponíveis offline").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13f) }
+        val lblOfflineDesc = JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11f) }
+        val lblOfflineIcon = JLabel(ModernIcons.offline(20) { Theme.TEXT_PRIMARY })
 
-        val lblIncognitoTitle = JLabel("Modo anônimo").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
-        val lblIncognitoDesc = JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
-        val lblIncognitoIcon = JLabel(ModernIcons.incognito(22) { Theme.TEXT_PRIMARY })
+        val lblIncognitoTitle = JLabel("Modo anônimo").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13f) }
+        val lblIncognitoDesc = JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11f) }
+        val lblIncognitoIcon = JLabel(ModernIcons.incognito(20) { Theme.TEXT_PRIMARY })
 
         fun createSwitchRow(iconLbl: JLabel, titleLbl: JLabel, descLbl: JLabel, switchComp: M3Switch): JPanel {
-            val row = JPanel(BorderLayout(14, 0)).apply {
+            val row = JPanel(BorderLayout(10, 0)).apply {
                 isOpaque = false
                 alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 46)
+                maximumSize = Dimension(Int.MAX_VALUE, 38)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                val left = JPanel(FlowLayout(FlowLayout.LEFT, 14, 0)).apply {
+                val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
                     isOpaque = false
                     add(iconLbl)
                     add(
@@ -1342,47 +1342,47 @@ class MoreScreen(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(16, 20, 16, 20),
+                BorderFactory.createEmptyBorder(8, 14, 8, 14),
             )
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 130)
+            maximumSize = Dimension(Int.MAX_VALUE, 96)
 
             add(offlineRow)
-            add(Box.createVerticalStrut(14))
+            add(Box.createVerticalStrut(8))
             add(incognitoRow)
         }
         content.add(switchGroup)
-        content.add(Box.createVerticalStrut(20))
+        content.add(Box.createVerticalStrut(10))
 
         // Action Rows from Configs.jpeg with modern vector icons
         val rows = listOf(
-            Triple(ModernIcons.downloads(22) { Theme.TEXT_PRIMARY }, "Fila de downloads", "Gerencie os capítulos sendo baixados"),
-            Triple(ModernIcons.categories(22) { Theme.TEXT_PRIMARY }, "Categorias", "Organize os mangás da biblioteca"),
-            Triple(ModernIcons.statistics(22) { Theme.TEXT_PRIMARY }, "Estatísticas", "Tempo de leitura e mangás lidos"),
-            Triple(ModernIcons.storage(22) { Theme.TEXT_PRIMARY }, "Dados e armazenamento", "Limpar caches e backups"),
-            Triple(ModernIcons.settings(22) { Theme.TEXT_PRIMARY }, "Configurações", "Preferências gerais do Mihon Linux"),
-            Triple(ModernIcons.about(22) { Theme.TEXT_PRIMARY }, "Sobre", "Mihon Linux v0.3.0"),
+            Triple(ModernIcons.downloads(20) { Theme.TEXT_PRIMARY }, "Fila de downloads", "Gerencie os capítulos sendo baixados"),
+            Triple(ModernIcons.categories(20) { Theme.TEXT_PRIMARY }, "Categorias", "Organize os mangás da biblioteca"),
+            Triple(ModernIcons.statistics(20) { Theme.TEXT_PRIMARY }, "Estatísticas", "Tempo de leitura e mangás lidos"),
+            Triple(ModernIcons.storage(20) { Theme.TEXT_PRIMARY }, "Dados e armazenamento", "Limpar caches e backups"),
+            Triple(ModernIcons.settings(20) { Theme.TEXT_PRIMARY }, "Configurações", "Preferências gerais do Mihon Linux"),
+            Triple(ModernIcons.about(20) { Theme.TEXT_PRIMARY }, "Sobre", "Mihon Linux v0.3.0"),
         )
 
         data class RowHolders(val row: JPanel, val titleLbl: JLabel, val descLbl: JLabel, val chevLbl: JLabel)
         val rowHolders = mutableListOf<RowHolders>()
 
         rows.forEach { (icon, title, desc) ->
-            val titleLbl = JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13.5f); foreground = Theme.TEXT_PRIMARY }
+            val titleLbl = JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13f); foreground = Theme.TEXT_PRIMARY }
             val descLbl = JLabel(desc).apply { font = font.deriveFont(Font.PLAIN, 11f); foreground = Theme.TEXT_MUTED }
             val chevLbl = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED })
 
-            val row = JPanel(BorderLayout(14, 0)).apply {
+            val row = JPanel(BorderLayout(10, 0)).apply {
                 background = Theme.BG_SURFACE
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(14, 18, 14, 18),
+                    BorderFactory.createEmptyBorder(8, 14, 8, 14),
                 )
                 alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 64)
+                maximumSize = Dimension(Int.MAX_VALUE, 48)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
 
-                val left = JPanel(FlowLayout(FlowLayout.LEFT, 14, 0)).apply {
+                val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
                     isOpaque = false
                     add(JLabel(icon))
                     add(
@@ -1431,7 +1431,7 @@ class MoreScreen(
             }
             rowHolders.add(RowHolders(row, titleLbl, descLbl, chevLbl))
             content.add(row)
-            content.add(Box.createVerticalStrut(8))
+            content.add(Box.createVerticalStrut(4))
         }
 
         val scroll = JScrollPane(content).apply {
@@ -1456,7 +1456,7 @@ class MoreScreen(
             switchGroup.background = Theme.BG_SURFACE
             switchGroup.border = BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(16, 20, 16, 20),
+                BorderFactory.createEmptyBorder(8, 14, 8, 14),
             )
             offlineSwitch.repaint()
             incognitoSwitch.repaint()
@@ -1464,7 +1464,7 @@ class MoreScreen(
                 row.background = Theme.BG_SURFACE
                 row.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(14, 18, 14, 18),
+                    BorderFactory.createEmptyBorder(8, 14, 8, 14),
                 )
                 titleLbl.foreground = Theme.TEXT_PRIMARY
                 descLbl.foreground = Theme.TEXT_MUTED
