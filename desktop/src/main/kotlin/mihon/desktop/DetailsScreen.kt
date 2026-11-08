@@ -384,8 +384,10 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     fun show(manga: Manga) {
         this.manga = manga
         updatingCategory = true
-        val catIdx = LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }
-            .indexOfFirst { it.first == manga.status }.coerceAtLeast(0)
+        val validCats = LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }
+        catPicker.removeAllItems()
+        validCats.forEach { catPicker.addItem(it.second) }
+        val catIdx = validCats.indexOfFirst { it.first == manga.status }.coerceAtLeast(0)
         catPicker.selectedIndex = catIdx
         updateFavoriteButtonState(manga.favorite)
         updatingCategory = false

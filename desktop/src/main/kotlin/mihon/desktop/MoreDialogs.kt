@@ -2,6 +2,7 @@ package mihon.desktop
 
 import mihon.data.database.DatabaseManager
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
@@ -141,23 +142,14 @@ class CategoriesDialog(
     owner: JFrame,
     private val ctx: AppContext,
     private val onCategoryFilter: (Long) -> Unit,
-) : JDialog(owner, "Categorias", true) {
+) : JDialog(owner, "Personalizar Categorias", true) {
     init {
-        setSize(480, 420)
+        setSize(520, 500)
         setLocationRelativeTo(owner)
         val content = JPanel(BorderLayout()).apply {
             background = Theme.BG_SURFACE
             border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
         }
-
-        val topBar = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            add(JLabel("Categorias da Biblioteca").apply {
-                font = font.deriveFont(Font.BOLD, 18f)
-                foreground = Theme.TEXT_PRIMARY
-            }, BorderLayout.WEST)
-        }
-        content.add(topBar, BorderLayout.NORTH)
 
         val listPanel = JPanel().apply {
             background = Theme.BG_SURFACE
@@ -165,60 +157,138 @@ class CategoriesDialog(
             border = BorderFactory.createEmptyBorder(14, 0, 14, 0)
         }
 
-        background({
-            val favs = ctx.service.library()
-            val counts = favs.groupBy { it.status }.mapValues { it.value.size }
-            counts to favs.size
-        }) { res ->
-            res.onSuccess { (counts, total) ->
-                listPanel.removeAll()
-                val categories = listOf(
-                    Triple("📁", "Todos", 0L to total),
-                    Triple("📖", "Lendo", 1L to (counts[1L] ?: 0)),
-                    Triple("✅", "Completos", 2L to (counts[2L] ?: 0)),
-                    Triple("🔖", "Quero ler", 3L to (counts[3L] ?: 0)),
-                )
+        fun refreshList() {
+            background({
+                val favs = ctx.service.library()
+                val counts = favs.groupBy { it.status }.mapValues { it.value.size }
+                counts to favs.size
+            }) { res ->
+                res.onSuccess { (counts, total) ->
+                    listPanel.removeAll()
+                    val entries = LibraryCategory.entries
 
-                categories.forEach { (icon, title, pair) ->
-                    val (catId, count) = pair
-                    val row = JPanel(BorderLayout(12, 0)).apply {
-                        background = Theme.BG_CARD
-                        border = BorderFactory.createCompoundBorder(
-                            BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                            BorderFactory.createEmptyBorder(12, 16, 12, 16),
-                        )
-                        maximumSize = Dimension(Int.MAX_VALUE, 54)
-                        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-
-                        val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
-                            isOpaque = false
-                            add(JLabel(icon).apply { font = font.deriveFont(16f) })
-                            add(JLabel(title).apply {
-                                font = font.deriveFont(Font.BOLD, 13.5f)
-                                foreground = Theme.TEXT_PRIMARY
-                            })
+                    entries.forEach { (catId, title) ->
+                        val count = if (catId == LibraryCategory.ALL) total else (counts[catId] ?: 0)
+                        val icon = when (catId) {
+                            LibraryCategory.ALL -> "📁"
+                            LibraryCategory.READING -> "📖"
+                            LibraryCategory.COMPLETED -> "✅"
+                            LibraryCategory.PLAN_TO_READ -> "🔖"
+                            else -> "🏷️"
                         }
-                        val countBadge = JLabel("$count mangá(s)").apply {
-                            font = font.deriveFont(12f)
-                            foreground = Theme.TEXT_MUTED
-                        }
-                        add(left, BorderLayout.WEST)
-                        add(countBadge, BorderLayout.EAST)
 
-                        addMouseListener(object : java.awt.event.MouseAdapter() {
-                            override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                                onCategoryFilter(catId)
-                                dispose()
+                        val row = JPanel(BorderLayout(12, 0)).apply {
+                            background = Theme.BG_CARD
+                            border = BorderFactory.createCompoundBorder(
+                                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                                BorderFactory.createEmptyBorder(10, 16, 10, 16),
+                            )
+                            maximumSize = Dimension(Int.MAX_VALUE, 54)
+
+                            val left = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
+                                isOpaque = false
+                                add(JLabel(icon).apply { font = font.deriveFont(16f) })
+                                add(JLabel(title).apply {
+                                    font = font.deriveFont(Font.BOLD, 13.5f)
+                                    foreground = Theme.TEXT_PRIMARY
+                                    cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                                    addMouseListener(object : java.awt.event.MouseAdapter() {
+                                        override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                                            onCategoryFilter(catId)
+                                            dispose()
+                                        }
+                                    })
+                                })
                             }
-                        })
+
+                            val right = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                                isOpaque = false
+                                add(JLabel("$count mangá(s)").apply {
+                                    font = font.deriveFont(12f)
+                                    foreground = Theme.TEXT_MUTED
+                                })
+
+                                if (catId != LibraryCategory.ALL) {
+                                    val btnEdit = JButton("✏️").apply {
+                                        isFocusable = false
+                                        toolTipText = "Renomear categoria"
+                                        font = font.deriveFont(11f)
+                                        addActionListener {
+                                            val newName = JOptionPane.showInputDialog(
+                                                this@CategoriesDialog,
+                                                "Novo nome para a categoria '$title':",
+                                                title,
+                                            )?.trim()
+                                            if (!newName.isNullOrBlank() && newName != title) {
+                                                LibraryCategory.updateCategory(catId, newName)
+                                                refreshList()
+                                            }
+                                        }
+                                    }
+                                    add(btnEdit)
+                                }
+
+                                if (catId != LibraryCategory.ALL && catId != LibraryCategory.READING && catId != LibraryCategory.COMPLETED && catId != LibraryCategory.PLAN_TO_READ) {
+                                    val btnDel = JButton("🗑️").apply {
+                                        isFocusable = false
+                                        toolTipText = "Excluir categoria personalizada"
+                                        font = font.deriveFont(11f)
+                                        addActionListener {
+                                            val confirm = JOptionPane.showConfirmDialog(
+                                                this@CategoriesDialog,
+                                                "Excluir a categoria '$title'?\n(Os mangás não serão excluídos, voltarão para 'Lendo')",
+                                                "Excluir Categoria",
+                                                JOptionPane.YES_NO_OPTION,
+                                            )
+                                            if (confirm == JOptionPane.YES_OPTION) {
+                                                LibraryCategory.removeCategory(catId)
+                                                refreshList()
+                                            }
+                                        }
+                                    }
+                                    add(btnDel)
+                                }
+                            }
+
+                            add(left, BorderLayout.WEST)
+                            add(right, BorderLayout.EAST)
+                        }
+                        listPanel.add(row)
+                        listPanel.add(Box.createVerticalStrut(8))
                     }
-                    listPanel.add(row)
-                    listPanel.add(Box.createVerticalStrut(8))
+                    listPanel.revalidate()
+                    listPanel.repaint()
                 }
-                listPanel.revalidate()
-                listPanel.repaint()
             }
         }
+
+        val topBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 10, 0)
+            add(JLabel("Categorias da Biblioteca").apply {
+                font = font.deriveFont(Font.BOLD, 18f)
+                foreground = Theme.TEXT_PRIMARY
+            }, BorderLayout.WEST)
+
+            val btnAdd = JButton("+ Nova Categoria").apply {
+                isFocusable = false
+                font = font.deriveFont(Font.BOLD, 12f)
+                addActionListener {
+                    val name = JOptionPane.showInputDialog(
+                        this@CategoriesDialog,
+                        "Digite o nome da nova categoria:",
+                        "Criar Categoria",
+                        JOptionPane.PLAIN_MESSAGE,
+                    )?.trim()
+                    if (!name.isNullOrBlank()) {
+                        LibraryCategory.addCategory(name)
+                        refreshList()
+                    }
+                }
+            }
+            add(btnAdd, BorderLayout.EAST)
+        }
+        content.add(topBar, BorderLayout.NORTH)
 
         content.add(JScrollPane(listPanel).apply {
             border = null
@@ -234,30 +304,54 @@ class CategoriesDialog(
         }
         content.add(bottomBar, BorderLayout.SOUTH)
         add(content)
+
+        refreshList()
     }
 }
 
 /**
  * Material 3 Dialog: Estatísticas de Leitura
  */
-class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(owner, "Estatísticas", true) {
+class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(owner, "Estatísticas & Wrapped", true) {
     init {
-        setSize(520, 460)
+        setSize(780, 680)
         setLocationRelativeTo(owner)
         val content = JPanel(BorderLayout()).apply {
             background = Theme.BG_SURFACE
-            border = BorderFactory.createEmptyBorder(22, 26, 22, 26)
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
         }
 
-        val titleLabel = JLabel("Estatísticas de Leitura").apply {
-            font = font.deriveFont(Font.BOLD, 18f)
-            foreground = Theme.TEXT_PRIMARY
+        val topBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 12, 0)
+            val titleLabel = JLabel("Estatísticas & Mihon Wrapped").apply {
+                font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+                foreground = Theme.TEXT_PRIMARY
+            }
+            val subtitleLabel = JLabel("Seus hábitos de leitura, mangás favoritos e recordes de tempo").apply {
+                font = font.deriveFont(Font.PLAIN, 12f)
+                foreground = Theme.TEXT_MUTED
+            }
+            val headerBox = JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                add(titleLabel)
+                add(Box.createVerticalStrut(3))
+                add(subtitleLabel)
+            }
+            add(headerBox, BorderLayout.WEST)
         }
-        content.add(titleLabel, BorderLayout.NORTH)
+        content.add(topBar, BorderLayout.NORTH)
 
-        val grid = JPanel(GridLayout(3, 2, 12, 12)).apply {
+        val mainContainer = JPanel().apply {
             background = Theme.BG_SURFACE
-            border = BorderFactory.createEmptyBorder(16, 0, 16, 0)
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        }
+
+        val grid = JPanel(GridLayout(2, 3, 10, 10)).apply {
+            background = Theme.BG_SURFACE
+            maximumSize = Dimension(Int.MAX_VALUE, 150)
+            alignmentX = 0f
         }
 
         fun statCard(icon: String, title: String, value: String): JPanel {
@@ -266,24 +360,31 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(14, 16, 14, 16),
+                    BorderFactory.createEmptyBorder(10, 14, 10, 14),
                 )
-                val top = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                val top = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
                     isOpaque = false
-                    add(JLabel(icon).apply { font = font.deriveFont(18f) })
+                    add(JLabel(icon).apply { font = font.deriveFont(16f) })
                     add(JLabel(title).apply {
-                        font = font.deriveFont(12f)
+                        font = font.deriveFont(11.5f)
                         foreground = Theme.TEXT_MUTED
                     })
                 }
                 val valLabel = JLabel(value).apply {
-                    font = font.deriveFont(Font.BOLD, 18f)
+                    font = font.deriveFont(Font.BOLD, 17f)
                     foreground = Theme.TEXT_PRIMARY
-                    border = BorderFactory.createEmptyBorder(8, 6, 0, 0)
+                    border = BorderFactory.createEmptyBorder(6, 4, 0, 0)
                 }
                 add(top)
                 add(valLabel)
             }
+        }
+
+        val wrappedContainer = JPanel().apply {
+            background = Theme.BG_SURFACE
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = BorderFactory.createEmptyBorder(18, 0, 8, 0)
+            alignmentX = 0f
         }
 
         background({
@@ -303,12 +404,204 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                 grid.add(statCard("🔌", "Fontes Instaladas", "${ctx.extensions.size}"))
                 grid.add(statCard("💾", "Cache de Capas", "${cacheMb} MB"))
 
-                grid.revalidate()
-                grid.repaint()
+                wrappedContainer.removeAll()
+
+                // Spotify Wrapped Section Header
+                val wrappedHeader = JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    maximumSize = Dimension(Int.MAX_VALUE, 30)
+                    alignmentX = 0f
+                    add(JLabel("⭐ SEU RECAP (Mihon Wrapped)").apply {
+                        font = font.deriveFont(Font.BOLD, 14f)
+                        foreground = Theme.ACCENT
+                    }, BorderLayout.WEST)
+                }
+                wrappedContainer.add(wrappedHeader)
+                wrappedContainer.add(Box.createVerticalStrut(12))
+
+                // Wrapped Content Row: Left is Top Manga Hero Card, Right is Top List + Genres
+                val wrappedRow = JPanel(GridLayout(1, 2, 14, 0)).apply {
+                    isOpaque = false
+                    maximumSize = Dimension(Int.MAX_VALUE, 260)
+                    alignmentX = 0f
+                }
+
+                // Top Manga Hero Card (Spotify Wrapped Style)
+                val topManga = stats.topMangas.firstOrNull()
+                val heroCard = JPanel(BorderLayout(12, 12)).apply {
+                    background = Color(24, 26, 34)
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Color(90, 100, 140, 120), 1),
+                        BorderFactory.createEmptyBorder(16, 16, 16, 16),
+                    )
+
+                    val topBadge = JLabel("👑 MANGÁ #1 MAIS LIDO").apply {
+                        font = font.deriveFont(Font.BOLD, 11f)
+                        foreground = Color(255, 215, 0)
+                    }
+                    add(topBadge, BorderLayout.NORTH)
+
+                    if (topManga != null) {
+                        val coverLbl = JLabel(ctx.covers.get(topManga.manga.id, topManga.manga.title)).apply {
+                            preferredSize = Dimension(90, 130)
+                        }
+                        val infoPanel = JPanel().apply {
+                            isOpaque = false
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            val titleLbl = JLabel(topManga.manga.title).apply {
+                                font = font.deriveFont(Font.BOLD, 15f)
+                                foreground = Color.WHITE
+                            }
+                            val authorLbl = JLabel(topManga.manga.author ?: "Autor desconhecido").apply {
+                                font = font.deriveFont(Font.PLAIN, 12f)
+                                foreground = Color(180, 180, 190)
+                            }
+                            val mins = topManga.totalReadingTimeMs / 1000 / 60
+                            val chapsLbl = JLabel("${topManga.chaptersRead} capítulo(s) lido(s)").apply {
+                                font = font.deriveFont(Font.BOLD, 13f)
+                                foreground = Theme.ACCENT
+                            }
+                            val timeLbl = JLabel(if (mins > 0) "~$mins min dedicados" else "Em leitura ativa").apply {
+                                font = font.deriveFont(Font.PLAIN, 11.5f)
+                                foreground = Color(160, 160, 170)
+                            }
+                            add(titleLbl)
+                            add(Box.createVerticalStrut(4))
+                            add(authorLbl)
+                            add(Box.createVerticalStrut(12))
+                            add(chapsLbl)
+                            add(Box.createVerticalStrut(4))
+                            add(timeLbl)
+                        }
+                        val centerBox = JPanel(BorderLayout(12, 0)).apply {
+                            isOpaque = false
+                            add(coverLbl, BorderLayout.WEST)
+                            add(infoPanel, BorderLayout.CENTER)
+                        }
+                        add(centerBox, BorderLayout.CENTER)
+                    } else {
+                        val emptyLbl = JLabel("Leia seus primeiros capítulos para desbloquear seu mangá #1!", SwingConstants.CENTER).apply {
+                            foreground = Theme.TEXT_MUTED
+                            font = font.deriveFont(12f)
+                        }
+                        add(emptyLbl, BorderLayout.CENTER)
+                    }
+                }
+
+                // Right Panel: Top 5 Mangas & Top Genres
+                val rightPanel = JPanel().apply {
+                    background = Theme.BG_CARD
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                        BorderFactory.createEmptyBorder(14, 16, 14, 16),
+                    )
+
+                    val topMangasTitle = JLabel("Top Mangás").apply {
+                        font = font.deriveFont(Font.BOLD, 12f)
+                        foreground = Theme.TEXT_MUTED
+                        alignmentX = 0f
+                    }
+                    add(topMangasTitle)
+                    add(Box.createVerticalStrut(8))
+
+                    if (stats.topMangas.isNotEmpty()) {
+                        stats.topMangas.forEachIndexed { index, item ->
+                            val row = JPanel(BorderLayout(8, 0)).apply {
+                                isOpaque = false
+                                maximumSize = Dimension(Int.MAX_VALUE, 24)
+                                alignmentX = 0f
+                                val rank = JLabel("${index + 1}. ").apply {
+                                    font = font.deriveFont(Font.BOLD, 12f)
+                                    foreground = if (index == 0) Color(255, 215, 0) else Theme.TEXT_MUTED
+                                }
+                                val name = JLabel(item.manga.title).apply {
+                                    font = font.deriveFont(Font.BOLD, 12f)
+                                    foreground = Theme.TEXT_PRIMARY
+                                }
+                                val count = JLabel("${item.chaptersRead} cap.").apply {
+                                    font = font.deriveFont(11f)
+                                    foreground = Theme.TEXT_MUTED
+                                }
+                                val left = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                                    isOpaque = false
+                                    add(rank)
+                                    add(name)
+                                }
+                                add(left, BorderLayout.WEST)
+                                add(count, BorderLayout.EAST)
+                            }
+                            add(row)
+                            add(Box.createVerticalStrut(4))
+                        }
+                    } else {
+                        add(JLabel("Nenhuma leitura registrada ainda.").apply {
+                            foreground = Theme.TEXT_MUTED
+                            font = font.deriveFont(11f)
+                        })
+                    }
+
+                    add(Box.createVerticalStrut(10))
+                    val genreTitle = JLabel("Gêneros Favoritos").apply {
+                        font = font.deriveFont(Font.BOLD, 12f)
+                        foreground = Theme.TEXT_MUTED
+                        alignmentX = 0f
+                    }
+                    add(genreTitle)
+                    add(Box.createVerticalStrut(6))
+
+                    val genrePillRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 4)).apply {
+                        isOpaque = false
+                        alignmentX = 0f
+                        if (stats.topGenres.isNotEmpty()) {
+                            stats.topGenres.forEach { (genre, count) ->
+                                val pill = JLabel("$genre ($count)").apply {
+                                    font = font.deriveFont(11f)
+                                    foreground = Theme.TEXT_PRIMARY
+                                    border = BorderFactory.createCompoundBorder(
+                                        BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                                        BorderFactory.createEmptyBorder(2, 6, 2, 6),
+                                    )
+                                }
+                                add(pill)
+                            }
+                        } else {
+                            add(JLabel("Gêneros aparecerão conforme você adiciona mangás.").apply {
+                                foreground = Theme.TEXT_MUTED
+                                font = font.deriveFont(11f)
+                            })
+                        }
+                    }
+                    add(genrePillRow)
+
+                    if (stats.mostActiveDay != null) {
+                        add(Box.createVerticalStrut(8))
+                        val dayLbl = JLabel("📅 Dia mais ativo de leitura: ${stats.mostActiveDay}").apply {
+                            font = font.deriveFont(Font.BOLD, 11.5f)
+                            foreground = Theme.SUCCESS
+                            alignmentX = 0f
+                        }
+                        add(dayLbl)
+                    }
+                }
+
+                wrappedRow.add(heroCard)
+                wrappedRow.add(rightPanel)
+                wrappedContainer.add(wrappedRow)
+
+                mainContainer.revalidate()
+                mainContainer.repaint()
             }
         }
 
-        content.add(grid, BorderLayout.CENTER)
+        mainContainer.add(grid)
+        mainContainer.add(wrappedContainer)
+
+        val scroll = JScrollPane(mainContainer).apply {
+            border = null
+            verticalScrollBar.unitIncrement = 20
+        }
+        content.add(scroll, BorderLayout.CENTER)
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             isOpaque = false

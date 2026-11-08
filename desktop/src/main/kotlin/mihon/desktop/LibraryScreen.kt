@@ -89,6 +89,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     init {
         ctx.addOfflineFilterListener { applyFilter() }
+        LibraryCategory.addChangeListener {
+            tabsBar.repaint()
+            applyFilter()
+        }
         background = Theme.BG_APP
         grid.background = Theme.BG_APP
         grid.layoutOrientation = JList.HORIZONTAL_WRAP

@@ -37,12 +37,69 @@ object LibraryCategory {
     const val COMPLETED = 2L
     const val PLAN_TO_READ = 6L
 
-    val entries = listOf(
+    private val prefs = java.util.prefs.Preferences.userRoot().node("mihon-linux-categories")
+    private val defaultCategories = listOf(
         ALL to "Todos",
         READING to "Lendo",
         COMPLETED to "Completos",
         PLAN_TO_READ to "Quero ler",
     )
+
+    private val listeners = mutableListOf<() -> Unit>()
+
+    fun addChangeListener(listener: () -> Unit) {
+        synchronized(listeners) { listeners.add(listener) }
+    }
+
+    private fun notifyChanged() {
+        val copy = synchronized(listeners) { listeners.toList() }
+        copy.forEach { it.invoke() }
+    }
+
+    val entries: List<Pair<Long, String>>
+        get() {
+            val saved = prefs.get("custom_categories", null)
+            if (saved.isNullOrBlank()) return defaultCategories
+            return try {
+                val list = saved.split(";;").mapNotNull { item ->
+                    val parts = item.split("::", limit = 2)
+                    if (parts.size == 2) parts[0].toLongOrNull()?.let { it to parts[1] } else null
+                }
+                if (list.any { it.first == ALL }) list else listOf(ALL to "Todos") + list
+            } catch (_: Throwable) {
+                defaultCategories
+            }
+        }
+
+    fun saveCategories(newEntries: List<Pair<Long, String>>) {
+        val serialized = newEntries.joinToString(";;") { "${it.first}::${it.second}" }
+        prefs.put("custom_categories", serialized)
+        notifyChanged()
+    }
+
+    fun addCategory(label: String): Long {
+        val trimmed = label.trim()
+        val current = entries
+        val maxId = current.maxOfOrNull { it.first } ?: 10L
+        val nextId = (maxId + 1L).coerceAtLeast(10L)
+        val updated = current + (nextId to trimmed)
+        saveCategories(updated)
+        return nextId
+    }
+
+    fun updateCategory(id: Long, newLabel: String) {
+        if (id == ALL) return
+        val current = entries
+        val updated = current.map { if (it.first == id) id to newLabel.trim() else it }
+        saveCategories(updated)
+    }
+
+    fun removeCategory(id: Long) {
+        if (id == ALL || id == READING) return
+        val current = entries
+        val updated = current.filter { it.first != id }
+        saveCategories(updated)
+    }
 
     fun labelOf(status: Long): String = entries.firstOrNull { it.first == status }?.second ?: "Lendo"
 }
@@ -543,12 +600,21 @@ class LibraryService(
         return archives.sortedWith { a, b -> NaturalOrderComparator.compare(a.name, b.name) }
     }
 
+    data class TopMangaStat(
+        val manga: Manga,
+        val chaptersRead: Int,
+        val totalReadingTimeMs: Long,
+    )
+
     data class ReadingStats(
         val totalManga: Int,
         val totalChaptersRead: Int,
         val totalChaptersDownloaded: Int,
         val historyCount: Int,
         val totalReadingTimeMs: Long,
+        val topMangas: List<TopMangaStat> = emptyList(),
+        val topGenres: List<Pair<String, Int>> = emptyList(),
+        val mostActiveDay: String? = null,
     )
 
     suspend fun getReadingStatistics(): ReadingStats {
@@ -556,19 +622,58 @@ class LibraryService(
         val totalManga = favs.size
         var readChapters = 0
         var downloadedChapters = 0
+        val mangaChaps = mutableMapOf<Long, List<Chapter>>()
         for (m in favs) {
             val chaps = chapters.getChapterByMangaId(m.id)
+            mangaChaps[m.id] = chaps
             readChapters += chaps.count { it.read }
             downloadedChapters += chaps.count { isChapterDownloaded(m, it) }
         }
         val hist = recentHistory()
         val totalDuration = hist.sumOf { it.history.readDuration }
+
+        // Group history by manga for Spotify Wrapped style insights
+        val historyByManga = hist.groupBy { it.manga.id }
+        val allKnownMangas = (favs + hist.map { it.manga }).distinctBy { it.id }.associateBy { it.id }
+
+        val topMangasList = historyByManga.mapNotNull { (mangaId, entries) ->
+            val manga = allKnownMangas[mangaId] ?: return@mapNotNull null
+            val chapsReadCount = entries.map { it.chapter.id }.distinct().size
+            val timeSpent = entries.sumOf { it.history.readDuration }
+            TopMangaStat(manga, chapsReadCount, timeSpent)
+        }.sortedWith(compareByDescending<TopMangaStat> { it.chaptersRead }.thenByDescending { it.totalReadingTimeMs })
+        .take(5)
+
+        // Top Genres breakdown
+        val genreCounts = mutableMapOf<String, Int>()
+        for (m in favs) {
+            m.genre?.forEach { g ->
+                val clean = g.trim()
+                if (clean.isNotEmpty()) {
+                    genreCounts[clean] = (genreCounts[clean] ?: 0) + 1
+                }
+            }
+        }
+        val topGenresList = genreCounts.entries.sortedByDescending { it.value }.take(5).map { it.key to it.value }
+
+        // Most active reading day
+        val dayFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE", java.util.Locale("pt", "BR"))
+        val dayCounts = hist.mapNotNull { entry ->
+            entry.history.readAt?.let {
+                dayFormatter.format(java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()).atZone(java.time.ZoneId.systemDefault()))
+            }
+        }.groupingBy { it.replaceFirstChar { c -> c.uppercase() } }.eachCount()
+        val mostActiveDayStr = dayCounts.maxByOrNull { it.value }?.key
+
         return ReadingStats(
             totalManga = totalManga,
             totalChaptersRead = readChapters,
             totalChaptersDownloaded = downloadedChapters,
             historyCount = hist.size,
             totalReadingTimeMs = totalDuration,
+            topMangas = topMangasList,
+            topGenres = topGenresList,
+            mostActiveDay = mostActiveDayStr,
         )
     }
 }

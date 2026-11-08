@@ -30,6 +30,7 @@ import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTextField
 import javax.swing.ListCellRenderer
+import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.ImageIcon
 import javax.swing.event.DocumentEvent
@@ -256,6 +257,32 @@ sealed interface HistoryListItem {
 /** Shows recent reading history with sticky date headers, covers, and quick actions (favorite & remove). */
 class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
+    private val emptyPanel = JPanel().apply {
+        isOpaque = false
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(60, 20, 40, 20)
+        add(JLabel("🕒", SwingConstants.CENTER).apply {
+            font = font.deriveFont(44f)
+            alignmentX = 0.5f
+        })
+        add(Box.createVerticalStrut(14))
+        add(JLabel("Nenhum histórico recente", SwingConstants.CENTER).apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 17f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0.5f
+        })
+        add(Box.createVerticalStrut(6))
+        add(JLabel("Os capítulos que você ler aparecerão listados aqui.", SwingConstants.CENTER).apply {
+            font = font.deriveFont(13f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0.5f
+        })
+        isVisible = false
+    }
+
+    private val centerContainer = JPanel(BorderLayout()).apply {
+        background = Theme.BG_APP
+    }
     private val model = DefaultListModel<HistoryListItem>()
     private val list = JList(model)
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
@@ -334,11 +361,14 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 24
         }
+        centerContainer.add(scroll, BorderLayout.CENTER)
+        centerContainer.add(emptyPanel, BorderLayout.NORTH)
         add(top, BorderLayout.NORTH)
-        add(scroll, BorderLayout.CENTER)
+        add(centerContainer, BorderLayout.CENTER)
 
         ctx.addThemeListener {
             background = Theme.BG_APP
+            centerContainer.background = Theme.BG_APP
             list.background = Theme.BG_APP
             top.background = Theme.BG_SURFACE
             scroll.background = Theme.BG_APP
@@ -352,6 +382,7 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         background({ ctx.service.recentHistory() }) { result ->
             model.clear()
             val entries = result.getOrDefault(emptyList())
+            emptyPanel.isVisible = entries.isEmpty()
             val todayStr = dateFmt.format(java.time.Instant.now())
             val yesterdayStr = dateFmt.format(java.time.Instant.now().minus(java.time.Duration.ofDays(1)))
 
@@ -376,6 +407,8 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     ctx.covers.load(entry.manga, firstChapterPath = { null }, onLoaded = { list.repaint() })
                 }
             }
+            centerContainer.revalidate()
+            centerContainer.repaint()
         }
     }
 
