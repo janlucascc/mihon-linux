@@ -1515,59 +1515,70 @@ class ReaderWindow(
             val snapQuality = quality
             val snapFilter = colorFilter
 
-            val future = io.submit {
-                try {
-                    if (closed || Thread.currentThread().isInterrupted) {
-                        requested.remove(i)
-                        return@submit
-                    }
-                    val original = cachedOriginal ?: readPageFromArchive(i)
-                    val naturalSize = original?.let { Dimension(it.width, it.height) }
-                    val result = original?.let {
-                        val targetH = (it.height.toDouble() * targetW / it.width).toInt().coerceAtLeast(1)
-                        var res = if (snapQuality == MangaImageEnhancer.QualityMode.BILINEAR) {
-                            scaleImageFast(it, targetW, targetH)
-                        } else {
-                            scaleImage(it, targetW, targetH, snapQuality)
-                        }
-                        if (snapFilter != MangaImageEnhancer.ColorFilterMode.NONE) {
-                            res = MangaImageEnhancer.applyColorFilter(res, snapFilter)
-                        }
-                        res
-                    }
-                    SwingUtilities.invokeLater {
-                        if (closed || gen != layoutGeneration) {
-                            result?.let { runCatching { it.flush() } }
+            if (closed || io.isShutdown || io.isTerminated) {
+                requested.remove(i)
+                return
+            }
+            val future = try {
+                io.submit {
+                    try {
+                        if (closed || Thread.currentThread().isInterrupted) {
                             requested.remove(i)
-                            return@invokeLater
+                            return@submit
                         }
-                        if (original != null && !isPageCached(i)) {
-                            putCachedImage(i, original)
-                        }
-                        if (result == null) {
-                            failed.add(i)
-                            requested.remove(i)
-                            repaint(0, tops[i], width, heights[i])
-                        } else {
-                            images[i]?.let { runCatching { it.flush() } }
-                            images[i] = result
-                            if (sizes[i] == null && naturalSize != null) {
-                                sizes[i] = naturalSize
-                                recomputeGeometryPreserveScroll(changedPage = i)
+                        val original = cachedOriginal ?: readPageFromArchive(i)
+                        val naturalSize = original?.let { Dimension(it.width, it.height) }
+                        val result = original?.let {
+                            val targetH = (it.height.toDouble() * targetW / it.width).toInt().coerceAtLeast(1)
+                            var res = if (snapQuality == MangaImageEnhancer.QualityMode.BILINEAR) {
+                                scaleImageFast(it, targetW, targetH)
                             } else {
+                                scaleImage(it, targetW, targetH, snapQuality)
+                            }
+                            if (snapFilter != MangaImageEnhancer.ColorFilterMode.NONE) {
+                                res = MangaImageEnhancer.applyColorFilter(res, snapFilter)
+                            }
+                            res
+                        }
+                        SwingUtilities.invokeLater {
+                            if (closed || gen != layoutGeneration) {
+                                result?.let { runCatching { it.flush() } }
+                                requested.remove(i)
+                                return@invokeLater
+                            }
+                            if (original != null && !isPageCached(i)) {
+                                putCachedImage(i, original)
+                            }
+                            if (result == null) {
+                                failed.add(i)
+                                requested.remove(i)
                                 repaint(0, tops[i], width, heights[i])
+                            } else {
+                                images[i]?.let { runCatching { it.flush() } }
+                                images[i] = result
+                                if (sizes[i] == null && naturalSize != null) {
+                                    sizes[i] = naturalSize
+                                    recomputeGeometryPreserveScroll(changedPage = i)
+                                } else {
+                                    repaint(0, tops[i], width, heights[i])
+                                }
                             }
                         }
+                    } catch (_: InterruptedException) {
+                        requested.remove(i)
+                    } catch (_: Throwable) {
+                        requested.remove(i)
+                    } finally {
+                        inFlightTasks.remove(i)
                     }
-                } catch (_: InterruptedException) {
-                    requested.remove(i)
-                } catch (_: Throwable) {
-                    requested.remove(i)
-                } finally {
-                    inFlightTasks.remove(i)
                 }
+            } catch (_: java.util.concurrent.RejectedExecutionException) {
+                requested.remove(i)
+                null
             }
-            inFlightTasks[i] = future
+            if (future != null) {
+                inFlightTasks[i] = future
+            }
         }
 
         override fun getPreferredSize(): Dimension {
