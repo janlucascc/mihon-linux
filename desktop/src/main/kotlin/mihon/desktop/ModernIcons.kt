@@ -515,4 +515,130 @@ object ModernIcons {
                 g2.fill(s2)
             }
         }
+
+    /**
+     * Library navigation destination icon (open book / reading).
+     */
+    fun library(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val left = Path2D.Float().apply {
+                    moveTo(12f, 6.5f)
+                    quadTo(7.5f, 5.0f, 3f, 6.0f)
+                    lineTo(3f, 18.5f)
+                    quadTo(7.5f, 17.5f, 12f, 19f)
+                    closePath()
+                }
+                val right = Path2D.Float().apply {
+                    moveTo(12f, 6.5f)
+                    quadTo(16.5f, 5.0f, 21f, 6.0f)
+                    lineTo(21f, 18.5f)
+                    quadTo(16.5f, 17.5f, 12f, 19f)
+                    closePath()
+                }
+                g2.draw(left)
+                g2.draw(right)
+                g2.drawLine(12, 7, 12, 19)
+            }
+        }
+
+    /**
+     * Updates destination icon (notification bell).
+     */
+    fun updates(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val bell = Path2D.Float().apply {
+                    moveTo(12f, 3.5f)
+                    quadTo(12f, 3f, 12f, 2.5f)
+                    moveTo(7f, 16.5f)
+                    lineTo(5f, 16.5f)
+                    quadTo(6.5f, 15f, 6.5f, 10.5f)
+                    curveTo(6.5f, 7.5f, 8.5f, 5f, 12f, 5f)
+                    curveTo(15.5f, 5f, 17.5f, 7.5f, 17.5f, 10.5f)
+                    quadTo(17.5f, 15f, 19f, 16.5f)
+                    lineTo(17f, 16.5f)
+                }
+                g2.draw(bell)
+                g2.drawLine(4, 16, 20, 16)
+                g2.drawArc(10, 2, 4, 3, 0, 180)
+                g2.drawArc(10, 17, 4, 3, 180, 180)
+            }
+        }
+
+    /**
+     * History destination icon (clock with counter-clockwise arrow).
+     */
+    fun history(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawArc(4, 4, 16, 16, 60, 290)
+                g2.drawLine(10, 3, 13, 5)
+                g2.drawLine(10, 7, 13, 5)
+                g2.drawLine(12, 8, 12, 12)
+                g2.drawLine(12, 12, 15, 14)
+            }
+        }
+
+    /**
+     * Browse / Explore destination icon (compass).
+     */
+    fun browse(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.draw(Ellipse2D.Float(3.5f, 3.5f, 17f, 17f))
+                val needle = Path2D.Float().apply {
+                    moveTo(15.5f, 8.5f)
+                    lineTo(12f, 11f)
+                    lineTo(8.5f, 15.5f)
+                    lineTo(11f, 12f)
+                    closePath()
+                }
+                g2.fill(needle)
+            }
+        }
+
+    /**
+     * More destination icon (three horizontal dots ⋯).
+     */
+    fun more(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(3.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawLine(6, 12, 6, 12)
+                g2.drawLine(12, 12, 12, 12)
+                g2.drawLine(18, 12, 18, 12)
+            }
+        }
+
+    /**
+     * Sidebar collapse/expand toggle icon.
+     */
+    fun sidebarToggle(size: Int = 18, collapsed: Boolean = false, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.draw(RoundRectangle2D.Float(3.5f, 4f, 17f, 16f, 3f, 3f))
+                g2.drawLine(9, 4, 9, 20)
+                if (collapsed) {
+                    val arr = Path2D.Float().apply {
+                        moveTo(13f, 9f)
+                        lineTo(16f, 12f)
+                        lineTo(13f, 15f)
+                    }
+                    g2.draw(arr)
+                } else {
+                    val arr = Path2D.Float().apply {
+                        moveTo(16f, 9f)
+                        lineTo(13f, 12f)
+                        lineTo(16f, 15f)
+                    }
+                    g2.draw(arr)
+                }
+            }
+        }
 }

@@ -28,6 +28,7 @@ import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
+import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
@@ -273,10 +274,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
 
         ctx.addThemeListener {
             side.background = Theme.BG_SIDEBAR
-            side.border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(20, 14, 18, 14),
-            )
+            updateSidebarLayout()
             brandLabel.foreground = Theme.TEXT_PRIMARY
             versionLabel.foreground = Theme.TEXT_MUTED
             content.background = Theme.BG_APP
@@ -314,53 +312,108 @@ class MihonApp : JFrame("Mihon"), Navigator {
         navButtons[highlight]?.isSelected = true
     }
 
+    private var sidebarCollapsed = prefs.getBoolean("sidebar_collapsed", false)
+    private lateinit var sidePanel: JPanel
+    private lateinit var btnToggleSidebar: JButton
+    private lateinit var topRow: JPanel
     private lateinit var brandLabel: JLabel
     private lateinit var versionLabel: JLabel
 
+    private fun updateSidebarLayout() {
+        val width = if (sidebarCollapsed) 64 else 210
+        val padH = if (sidebarCollapsed) 8 else 12
+        sidePanel.preferredSize = Dimension(width, 0)
+        sidePanel.border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
+            BorderFactory.createEmptyBorder(16, padH, 16, padH),
+        )
+        brandLabel.isVisible = !sidebarCollapsed
+        versionLabel.isVisible = !sidebarCollapsed
+        btnToggleSidebar.icon = ModernIcons.sidebarToggle(18, sidebarCollapsed) { Theme.TEXT_PRIMARY }
+        btnToggleSidebar.toolTipText = if (sidebarCollapsed) "Expandir menu lateral" else "Recolher menu lateral"
+
+        topRow.removeAll()
+        if (sidebarCollapsed) {
+            topRow.add(btnToggleSidebar, BorderLayout.CENTER)
+        } else {
+            topRow.add(brandLabel, BorderLayout.WEST)
+            topRow.add(btnToggleSidebar, BorderLayout.EAST)
+        }
+
+        navButtons.values.forEach { btn ->
+            if (btn is M3NavPillButton) {
+                btn.isCollapsed = sidebarCollapsed
+            }
+        }
+        sidePanel.revalidate()
+        sidePanel.repaint()
+    }
+
     private fun sidebar(): JPanel {
-        val panel = JPanel().apply {
+        sidePanel = JPanel().apply {
             background = Theme.BG_SIDEBAR
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(20, 14, 18, 14),
+                BorderFactory.createEmptyBorder(16, if (sidebarCollapsed) 8 else 12, 16, if (sidebarCollapsed) 8 else 12),
             )
-            preferredSize = Dimension(220, 0)
+            preferredSize = Dimension(if (sidebarCollapsed) 64 else 210, 0)
         }
-        brandLabel = JLabel("Mihon", AppIcon.getIcon(28), SwingConstants.LEFT).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+        brandLabel = JLabel("Mihon", AppIcon.getIcon(26), SwingConstants.LEFT).apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 20f)
             foreground = Theme.TEXT_PRIMARY
-            iconTextGap = 10
+            iconTextGap = 8
+            isVisible = !sidebarCollapsed
         }
-        val brandRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+        btnToggleSidebar = JButton().apply {
+            icon = ModernIcons.sidebarToggle(18, sidebarCollapsed) { Theme.TEXT_PRIMARY }
+            isFocusable = false
+            isContentAreaFilled = false
+            border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            toolTipText = if (sidebarCollapsed) "Expandir menu lateral" else "Recolher menu lateral"
+            addActionListener {
+                sidebarCollapsed = !sidebarCollapsed
+                prefs.putBoolean("sidebar_collapsed", sidebarCollapsed)
+                updateSidebarLayout()
+            }
+        }
+        topRow = JPanel(BorderLayout()).apply {
             isOpaque = false
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 40)
-            add(brandLabel)
+            maximumSize = Dimension(Int.MAX_VALUE, 36)
+            if (sidebarCollapsed) {
+                add(btnToggleSidebar, BorderLayout.CENTER)
+            } else {
+                add(brandLabel, BorderLayout.WEST)
+                add(btnToggleSidebar, BorderLayout.EAST)
+            }
         }
-        panel.add(brandRow)
-        panel.add(Box.createVerticalStrut(2))
+        sidePanel.add(topRow)
+        sidePanel.add(Box.createVerticalStrut(2))
         versionLabel = JLabel("Desktop Linux").apply {
             font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11f)
             foreground = Theme.TEXT_MUTED
             alignmentX = 0f
+            isVisible = !sidebarCollapsed
         }
-        panel.add(versionLabel)
-        panel.add(Box.createVerticalStrut(22))
+        sidePanel.add(versionLabel)
+        sidePanel.add(Box.createVerticalStrut(18))
 
         val group = ButtonGroup()
         // 5 Primary Material 3 destinations matching Mihon Android's NavigationBar:
         // Biblioteca, Atualizações, Histórico, Navegar, Mais
         listOf(
-            Triple(LIBRARY, "Biblioteca", null),
-            Triple(UPDATES, "Atualizações", null),
-            Triple(HISTORY, "Histórico", null),
-            Triple(BROWSE, "Navegar", null),
-            Triple(MORE, "Mais", null),
-        ).forEach { (card, label, badge) ->
-            val button = M3NavPillButton(label, badge).apply {
+            Triple(LIBRARY, "Biblioteca", ModernIcons.library(19) { Theme.TEXT_PRIMARY }),
+            Triple(UPDATES, "Atualizações", ModernIcons.updates(19) { Theme.TEXT_PRIMARY }),
+            Triple(HISTORY, "Histórico", ModernIcons.history(19) { Theme.TEXT_PRIMARY }),
+            Triple(BROWSE, "Navegar", ModernIcons.browse(19) { Theme.TEXT_PRIMARY }),
+            Triple(MORE, "Mais", ModernIcons.more(19) { Theme.TEXT_PRIMARY }),
+        ).forEach { (card, label, icon) ->
+            val button = M3NavPillButton(label, icon).apply {
                 alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 44)
+                maximumSize = Dimension(Int.MAX_VALUE, 42)
+                isCollapsed = sidebarCollapsed
                 addActionListener {
                     when (card) {
                         LIBRARY -> showLibrary()
@@ -372,10 +425,10 @@ class MihonApp : JFrame("Mihon"), Navigator {
             }
             group.add(button)
             navButtons[card] = button
-            panel.add(button)
-            panel.add(Box.createVerticalStrut(6))
+            sidePanel.add(button)
+            sidePanel.add(Box.createVerticalStrut(5))
         }
-        return panel
+        return sidePanel
     }
 
     private fun settingsScreen(): JComponent {
@@ -1032,9 +1085,22 @@ class M3Switch(
 }
 
 /**
- * Material 3 Navigation Pill Button (emulating Mihon Android's active pill selection and badge counters).
+ * Material 3 Navigation Pill Button (emulating Mihon Android's active pill selection, icons, and badge counters).
  */
-class M3NavPillButton(private val label: String, private val badgeText: String? = null) : JToggleButton() {
+class M3NavPillButton(
+    val labelText: String,
+    val navIcon: Icon,
+    private val badgeText: String? = null,
+) : JToggleButton() {
+
+    var isCollapsed: Boolean = false
+        set(value) {
+            field = value
+            toolTipText = if (value) labelText else null
+            revalidate()
+            repaint()
+        }
+
     init {
         isOpaque = false
         isFocusable = false
@@ -1043,6 +1109,7 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
         isFocusPainted = false
         border = null
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        toolTipText = null
     }
 
     override fun paintBorder(g: java.awt.Graphics) {
@@ -1057,11 +1124,10 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
         val w = width
         val h = height
 
-        val pillX = 4
-        val pillY = 3
-        val pillW = w - 8
-        val pillH = h - 6
-        // Material 3 Stadium Pill: corner arc equals height so ends are smooth semicircles and top/bottom are straight
+        val pillX = 2
+        val pillY = 2
+        val pillW = w - 4
+        val pillH = h - 4
         val arc = pillH
 
         // M3 Active Pill Container
@@ -1073,23 +1139,37 @@ class M3NavPillButton(private val label: String, private val badgeText: String? 
             g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
         }
 
-        g2.font = font.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
-        g2.color = if (isSelected) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
-        val fm = g2.fontMetrics
-        g2.drawString(label, 20, ((h - fm.height) / 2) + fm.ascent)
+        val iconW = navIcon.iconWidth
+        val iconH = navIcon.iconHeight
+        val iconY = (h - iconH) / 2
 
-        // Subtle M3 Counter Badge on the right (if provided)
-        if (!badgeText.isNullOrBlank()) {
-            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
-            val bFm = g2.fontMetrics
-            val bw = (bFm.stringWidth(badgeText) + 12).coerceAtLeast(20)
-            val bh = 18
-            val bx = w - bw - 14
-            val by = (h - bh) / 2
-            g2.color = if (isSelected) (if (Theme.isDark) Color(255, 255, 255, 45) else Color(0, 0, 0, 30)) else (if (Theme.isDark) Color(255, 255, 255, 25) else Color(0, 0, 0, 16))
-            g2.fillRoundRect(bx, by, bw, bh, bh, bh)
-            g2.color = Theme.TEXT_PRIMARY
-            g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
+        if (isCollapsed) {
+            val iconX = (w - iconW) / 2
+            navIcon.paintIcon(this, g2, iconX, iconY)
+        } else {
+            val iconX = 14
+            navIcon.paintIcon(this, g2, iconX, iconY)
+
+            g2.font = font.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
+            g2.color = if (isSelected) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+            val fm = g2.fontMetrics
+            val textX = iconX + iconW + 12
+            val textY = ((h - fm.height) / 2) + fm.ascent
+            g2.drawString(labelText, textX, textY)
+
+            // Subtle M3 Counter Badge on the right (if provided)
+            if (!badgeText.isNullOrBlank()) {
+                g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
+                val bFm = g2.fontMetrics
+                val bw = (bFm.stringWidth(badgeText) + 12).coerceAtLeast(20)
+                val bh = 18
+                val bx = w - bw - 12
+                val by = (h - bh) / 2
+                g2.color = if (isSelected) (if (Theme.isDark) Color(255, 255, 255, 45) else Color(0, 0, 0, 30)) else (if (Theme.isDark) Color(255, 255, 255, 25) else Color(0, 0, 0, 16))
+                g2.fillRoundRect(bx, by, bw, bh, bh, bh)
+                g2.color = Theme.TEXT_PRIMARY
+                g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
+            }
         }
         g2.dispose()
     }
