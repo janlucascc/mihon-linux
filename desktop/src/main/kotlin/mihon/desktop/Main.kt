@@ -1076,9 +1076,9 @@ class UpdatesPlaceholderScreen(ctx: AppContext) : JPanel(BorderLayout()) {
 }
 
 /**
- * Material 3 "Mais" Screen (MoreScreen / Configs.jpeg):
- * Switches for "Somente disponíveis offline" & "Modo anônimo", quick menu rows for Fila de Downloads,
- * Categorias, Estatísticas, Dados & Armazenamento, Configurações e Sobre.
+ * AntiGravity-styled "Mais" Screen (MoreScreen):
+ * Uses grouped rounded cards (`SettingsGroupCard`) with internal 1px hairline dividers,
+ * clear section headers, 15px icon margins, animated M3Switch toggles, and interactive hover rows.
  */
 class MoreScreen(
     private val ctx: AppContext,
@@ -1089,6 +1089,8 @@ class MoreScreen(
     private val onOpenSettings: () -> Unit,
     private val onOpenAbout: () -> Unit,
 ) : JPanel(BorderLayout()) {
+
+    private val themeUpdaters = mutableListOf<() -> Unit>()
 
     private val offlineSwitch = M3Switch(ctx.onlyOfflineFilter) { enabled ->
         ctx.setOfflineFilter(enabled)
@@ -1103,30 +1105,94 @@ class MoreScreen(
     init {
         ctx.addOfflineFilterListener { offlineSwitch.isSelected = it }
         background = Theme.BG_APP
+
         val content = JPanel().apply {
             background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(14, 18, 14, 18)
+            border = BorderFactory.createEmptyBorder(28, 36, 36, 36)
         }
 
-        // Header Switch Group (Material 3 Toggle Cards with Switch on right)
-        val lblOfflineTitle = JLabel("Somente disponíveis offline").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13f) }
-        val lblOfflineDesc = JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11f) }
-        val lblOfflineIcon = JLabel(ModernIcons.offline(20) { Theme.TEXT_PRIMARY })
+        // Page Header (AntiGravity H1 + Subtitle)
+        val h1 = JLabel("Mais").apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 24f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+        }
+        val subtitle = JLabel("Controle modos rápidos de leitura, ferramentas da biblioteca, estatísticas e preferências.").apply {
+            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0f
+        }
+        content.add(h1)
+        content.add(Box.createVerticalStrut(4))
+        content.add(subtitle)
+        content.add(Box.createVerticalStrut(24))
+        themeUpdaters.add {
+            h1.foreground = Theme.TEXT_PRIMARY
+            subtitle.foreground = Theme.TEXT_MUTED
+        }
 
-        val lblIncognitoTitle = JLabel("Modo anônimo").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13f) }
-        val lblIncognitoDesc = JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11f) }
-        val lblIncognitoIcon = JLabel(ModernIcons.incognito(20) { Theme.TEXT_PRIMARY })
-
-        fun createSwitchRow(iconLbl: JLabel, titleLbl: JLabel, descLbl: JLabel, switchComp: M3Switch): JPanel {
-            val row = JPanel(BorderLayout(10, 0)).apply {
-                isOpaque = false
+        fun addSectionHeader(title: String, desc: String) {
+            val tLbl = JLabel(title).apply {
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
+                foreground = Theme.TEXT_PRIMARY
                 alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 38)
+            }
+            val dLbl = JLabel(desc).apply {
+                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
+                foreground = Theme.TEXT_MUTED
+                alignmentX = 0f
+            }
+            content.add(tLbl)
+            content.add(Box.createVerticalStrut(3))
+            content.add(dLbl)
+            content.add(Box.createVerticalStrut(10))
+            themeUpdaters.add {
+                tLbl.foreground = Theme.TEXT_PRIMARY
+                dLbl.foreground = Theme.TEXT_MUTED
+            }
+        }
+
+        fun createInteractiveRow(
+            icon: Icon,
+            title: String,
+            desc: String,
+            rightComponent: JComponent,
+            onClick: () -> Unit,
+        ): JPanel {
+            var hovered = false
+            val titleLbl = JLabel(title).apply {
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 13f)
+                foreground = Theme.TEXT_PRIMARY
+                alignmentX = 0f
+            }
+            val descLbl = JLabel(desc).apply {
+                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 11.5f)
+                foreground = Theme.TEXT_MUTED
+                alignmentX = 0f
+            }
+            val iconLbl = JLabel(icon)
+
+            val row = object : JPanel(BorderLayout(12, 0)) {
+                override fun paintComponent(g: java.awt.Graphics) {
+                    if (hovered) {
+                        val g2 = g.create() as java.awt.Graphics2D
+                        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                        g2.color = if (Theme.isDark) Color(255, 255, 255, 10) else Color(0, 0, 0, 8)
+                        g2.fillRoundRect(4, 2, width - 8, height - 4, 10, 10)
+                        g2.dispose()
+                    }
+                    super.paintComponent(g)
+                }
+            }.apply {
+                isOpaque = false
+                border = BorderFactory.createEmptyBorder(13, 4, 13, 18)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+
                 val left = JPanel().apply {
                     isOpaque = false
                     layout = BoxLayout(this, BoxLayout.X_AXIS)
+                    // 15px left of icon and 15px right of icon
                     border = BorderFactory.createEmptyBorder(0, 15, 0, 0)
                     add(iconLbl)
                     add(Box.createHorizontalStrut(15))
@@ -1135,169 +1201,178 @@ class MoreScreen(
                             isOpaque = false
                             layout = BoxLayout(this, BoxLayout.Y_AXIS)
                             add(titleLbl)
+                            add(Box.createVerticalStrut(3))
                             add(descLbl)
                         },
                     )
                 }
-                add(left, BorderLayout.WEST)
-                add(switchComp, BorderLayout.EAST)
 
-                fun bindClick(c: java.awt.Component) {
+                val rightWrap = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                    isOpaque = false
+                    add(rightComponent)
+                }
+
+                add(left, BorderLayout.WEST)
+                add(rightWrap, BorderLayout.EAST)
+
+                val rowRef = this
+                fun bindMouse(c: java.awt.Component) {
+                    c.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                     c.addMouseListener(object : MouseAdapter() {
+                        override fun mouseEntered(e: MouseEvent) {
+                            if (!hovered) {
+                                hovered = true
+                                rowRef.repaint()
+                            }
+                        }
+                        override fun mouseExited(e: MouseEvent) {
+                            val pt = javax.swing.SwingUtilities.convertPoint(c, e.point, rowRef)
+                            if (!rowRef.contains(pt)) {
+                                hovered = false
+                                rowRef.repaint()
+                            }
+                        }
                         override fun mousePressed(e: MouseEvent) {
-                            if (c !== switchComp) {
-                                switchComp.isSelected = !switchComp.isSelected
+                            if (c !== rightComponent || rightComponent !is M3Switch) {
+                                onClick()
                             }
                         }
                     })
-                    if (c is java.awt.Container) {
-                        c.components.forEach { bindClick(it) }
+                    if (c is java.awt.Container && c !== rightComponent) {
+                        c.components.forEach { bindMouse(it) }
                     }
                 }
-                bindClick(this)
+                bindMouse(this)
+            }
+
+            themeUpdaters.add {
+                titleLbl.foreground = Theme.TEXT_PRIMARY
+                descLbl.foreground = Theme.TEXT_MUTED
+                iconLbl.repaint()
             }
             return row
         }
 
-        val offlineRow = createSwitchRow(lblOfflineIcon, lblOfflineTitle, lblOfflineDesc, offlineSwitch)
-        val incognitoRow = createSwitchRow(lblIncognitoIcon, lblIncognitoTitle, lblIncognitoDesc, incognitoSwitch)
-
-        val switchGroup = JPanel().apply {
-            background = Theme.BG_SURFACE
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(8, 0, 8, 14),
-            )
-            alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 96)
-
-            add(offlineRow)
-            add(Box.createVerticalStrut(8))
-            add(incognitoRow)
-        }
-        content.add(switchGroup)
-        content.add(Box.createVerticalStrut(10))
-
-        // Action Rows from Configs.jpeg with modern vector icons
-        val rows = listOf(
-            Triple(ModernIcons.downloads(20) { Theme.TEXT_PRIMARY }, "Fila de downloads", "Gerencie os capítulos sendo baixados"),
-            Triple(ModernIcons.categories(20) { Theme.TEXT_PRIMARY }, "Categorias", "Organize os mangás da biblioteca"),
-            Triple(ModernIcons.statistics(20) { Theme.TEXT_PRIMARY }, "Estatísticas", "Tempo de leitura e mangás lidos"),
-            Triple(ModernIcons.storage(20) { Theme.TEXT_PRIMARY }, "Dados e armazenamento", "Limpar caches e backups"),
-            Triple(ModernIcons.settings(20) { Theme.TEXT_PRIMARY }, "Configurações", "Preferências gerais do Mihon Linux"),
-            Triple(ModernIcons.about(20) { Theme.TEXT_PRIMARY }, "Sobre", "Mihon Linux v0.3.0"),
+        // --- SEÇÃO 1: Modos Rápidos ---
+        addSectionHeader(
+            "Modos Rápidos",
+            "Ative filtros globais de leitura e privacidade instantaneamente.",
         )
+        val quickModesCard = SettingsGroupCard()
+        quickModesCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.offline(20) { Theme.TEXT_PRIMARY },
+                title = "Somente disponíveis offline",
+                desc = "Filtra todos os itens em sua biblioteca para exibir apenas capítulos salvos no dispositivo.",
+                rightComponent = offlineSwitch,
+                onClick = { offlineSwitch.isSelected = !offlineSwitch.isSelected },
+            ),
+        )
+        quickModesCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.incognito(20) { Theme.TEXT_PRIMARY },
+                title = "Modo anônimo",
+                desc = "Pausa o histórico de leitura e não registra novas páginas lidas enquanto estiver ativo.",
+                rightComponent = incognitoSwitch,
+                onClick = { incognitoSwitch.isSelected = !incognitoSwitch.isSelected },
+            ),
+        )
+        content.add(quickModesCard)
+        content.add(Box.createVerticalStrut(24))
 
-        data class RowHolders(val row: JPanel, val titleLbl: JLabel, val descLbl: JLabel, val chevLbl: JLabel)
-        val rowHolders = mutableListOf<RowHolders>()
+        // --- SEÇÃO 2: Biblioteca & Atividade ---
+        addSectionHeader(
+            "Biblioteca & Atividade",
+            "Gerencie seus downloads em segundo plano, categorias e estatísticas de leitura.",
+        )
+        val libraryCard = SettingsGroupCard()
+        libraryCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.downloads(20) { Theme.TEXT_PRIMARY },
+                title = "Fila de downloads",
+                desc = "Acompanhe e gerencie os capítulos que estão sendo baixados no momento.",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenDownloadsQueue,
+            ),
+        )
+        libraryCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.categories(20) { Theme.TEXT_PRIMARY },
+                title = "Categorias",
+                desc = "Organize os mangás da sua biblioteca por status e coleções.",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenCategories,
+            ),
+        )
+        libraryCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.statistics(20) { Theme.TEXT_PRIMARY },
+                title = "Estatísticas",
+                desc = "Visualize seu tempo total de leitura, obras lidas e progresso de capítulos.",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenStatistics,
+            ),
+        )
+        content.add(libraryCard)
+        content.add(Box.createVerticalStrut(24))
 
-        rows.forEach { (icon, title, desc) ->
-            val titleLbl = JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13f); foreground = Theme.TEXT_PRIMARY }
-            val descLbl = JLabel(desc).apply { font = font.deriveFont(Font.PLAIN, 11f); foreground = Theme.TEXT_MUTED }
-            val chevLbl = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED })
+        // --- SEÇÃO 3: Sistema & Preferências ---
+        addSectionHeader(
+            "Sistema & Preferências",
+            "Gerenciamento de armazenamento local, ajustes gerais do aplicativo e versão.",
+        )
+        val systemCard = SettingsGroupCard()
+        systemCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.storage(20) { Theme.TEXT_PRIMARY },
+                title = "Dados e armazenamento",
+                desc = "Inspecione o uso de disco, limpe caches de capas e gerencie backups.",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenStorageManager,
+            ),
+        )
+        systemCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.settings(20) { Theme.TEXT_PRIMARY },
+                title = "Configurações",
+                desc = "Personalize aparência, leitor, gráficos Ultra HD, pastas e atalhos.",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenSettings,
+            ),
+        )
+        systemCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.about(20) { Theme.TEXT_PRIMARY },
+                title = "Sobre",
+                desc = "Mihon Linux v0.3.0 • Port Desktop de Alta Performance",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenAbout,
+            ),
+        )
+        content.add(systemCard)
 
-            val row = JPanel(BorderLayout(10, 0)).apply {
-                background = Theme.BG_SURFACE
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(8, 0, 8, 14),
-                )
-                alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 48)
-                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-
-                val left = JPanel().apply {
-                    isOpaque = false
-                    layout = BoxLayout(this, BoxLayout.X_AXIS)
-                    border = BorderFactory.createEmptyBorder(0, 15, 0, 0)
-                    add(JLabel(icon))
-                    add(Box.createHorizontalStrut(15))
-                    add(
-                        JPanel().apply {
-                            isOpaque = false
-                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                            add(titleLbl)
-                            add(descLbl)
-                        },
-                    )
-                }
-                add(left, BorderLayout.WEST)
-                add(chevLbl, BorderLayout.EAST)
-
-                val rowPanel = this
-                val action = {
-                    when (title) {
-                        "Fila de downloads" -> onOpenDownloadsQueue()
-                        "Categorias" -> onOpenCategories()
-                        "Estatísticas" -> onOpenStatistics()
-                        "Dados e armazenamento" -> onOpenStorageManager()
-                        "Configurações" -> onOpenSettings()
-                        "Sobre" -> onOpenAbout()
-                        else -> ctx.setStatus("Opção '$title' selecionada")
-                    }
-                }
-
-                fun bindClick(c: java.awt.Component) {
-                    c.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                    c.addMouseListener(object : MouseAdapter() {
-                        override fun mousePressed(e: MouseEvent) {
-                            action()
-                        }
-                        override fun mouseEntered(e: MouseEvent) {
-                            rowPanel.background = Theme.BG_CARD_HOVER
-                        }
-                        override fun mouseExited(e: MouseEvent) {
-                            rowPanel.background = Theme.BG_SURFACE
-                        }
-                    })
-                    if (c is java.awt.Container) {
-                        c.components.forEach { bindClick(it) }
-                    }
-                }
-                bindClick(this)
-            }
-            rowHolders.add(RowHolders(row, titleLbl, descLbl, chevLbl))
-            content.add(row)
-            content.add(Box.createVerticalStrut(4))
+        val wrapper = JPanel(BorderLayout()).apply {
+            background = Theme.BG_APP
+            add(content, BorderLayout.NORTH)
         }
-
-        val scroll = JScrollPane(content).apply {
+        val scroll = JScrollPane(wrapper).apply {
             border = null
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 24
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         }
         add(scroll, BorderLayout.CENTER)
 
         ctx.addThemeListener {
             background = Theme.BG_APP
             content.background = Theme.BG_APP
+            wrapper.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
-            lblOfflineIcon.foreground = Theme.TEXT_PRIMARY
-            lblOfflineTitle.foreground = Theme.TEXT_PRIMARY
-            lblOfflineDesc.foreground = Theme.TEXT_MUTED
-            lblIncognitoIcon.foreground = Theme.TEXT_PRIMARY
-            lblIncognitoTitle.foreground = Theme.TEXT_PRIMARY
-            lblIncognitoDesc.foreground = Theme.TEXT_MUTED
-            switchGroup.background = Theme.BG_SURFACE
-            switchGroup.border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(8, 0, 8, 14),
-            )
             offlineSwitch.repaint()
             incognitoSwitch.repaint()
-            rowHolders.forEach { (row, titleLbl, descLbl, chevLbl) ->
-                row.background = Theme.BG_SURFACE
-                row.border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(8, 0, 8, 14),
-                )
-                titleLbl.foreground = Theme.TEXT_PRIMARY
-                descLbl.foreground = Theme.TEXT_MUTED
-                chevLbl.foreground = Theme.TEXT_MUTED
-            }
+            themeUpdaters.forEach { it.invoke() }
             repaint()
         }
     }
