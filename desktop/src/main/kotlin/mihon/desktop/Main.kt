@@ -1287,11 +1287,11 @@ class MoreScreen(
         // Header Switch Group (Material 3 Toggle Cards with Switch on right)
         val lblOfflineTitle = JLabel("Somente disponíveis offline").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
         val lblOfflineDesc = JLabel("Filtra todos os itens em sua biblioteca").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
-        val lblOfflineIcon = JLabel("☁⃠").apply { font = font.deriveFont(18f); foreground = Theme.TEXT_PRIMARY }
+        val lblOfflineIcon = JLabel(ModernIcons.offline(22) { Theme.TEXT_PRIMARY })
 
         val lblIncognitoTitle = JLabel("Modo anônimo").apply { foreground = Theme.TEXT_PRIMARY; font = font.deriveFont(Font.BOLD, 13.5f) }
         val lblIncognitoDesc = JLabel("Pausa o histórico de leitura").apply { foreground = Theme.TEXT_MUTED; font = font.deriveFont(11.5f) }
-        val lblIncognitoIcon = JLabel("👓").apply { font = font.deriveFont(18f); foreground = Theme.TEXT_PRIMARY }
+        val lblIncognitoIcon = JLabel(ModernIcons.incognito(22) { Theme.TEXT_PRIMARY })
 
         fun createSwitchRow(iconLbl: JLabel, titleLbl: JLabel, descLbl: JLabel, switchComp: M3Switch): JPanel {
             val row = JPanel(BorderLayout(14, 0)).apply {
@@ -1299,7 +1299,7 @@ class MoreScreen(
                 alignmentX = 0f
                 maximumSize = Dimension(Int.MAX_VALUE, 46)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                val left = JPanel(FlowLayout(FlowLayout.LEFT, 12, 0)).apply {
+                val left = JPanel(FlowLayout(FlowLayout.LEFT, 14, 0)).apply {
                     isOpaque = false
                     add(iconLbl)
                     add(
@@ -1351,14 +1351,14 @@ class MoreScreen(
         content.add(switchGroup)
         content.add(Box.createVerticalStrut(20))
 
-        // Action Rows from Configs.jpeg
+        // Action Rows from Configs.jpeg with modern vector icons
         val rows = listOf(
-            Triple("📥", "Fila de downloads", "Gerencie os capítulos sendo baixados"),
-            Triple("📁", "Categorias", "Organize os mangás da biblioteca"),
-            Triple("📈", "Estatísticas", "Tempo de leitura e mangás lidos"),
-            Triple("🗄️", "Dados e armazenamento", "Limpar caches e backups"),
-            Triple("⚙️", "Configurações", "Preferências gerais do Mihon Linux"),
-            Triple("ℹ️", "Sobre", "Mihon Linux v0.3.0"),
+            Triple(ModernIcons.downloads(22) { Theme.TEXT_PRIMARY }, "Fila de downloads", "Gerencie os capítulos sendo baixados"),
+            Triple(ModernIcons.categories(22) { Theme.TEXT_PRIMARY }, "Categorias", "Organize os mangás da biblioteca"),
+            Triple(ModernIcons.statistics(22) { Theme.TEXT_PRIMARY }, "Estatísticas", "Tempo de leitura e mangás lidos"),
+            Triple(ModernIcons.storage(22) { Theme.TEXT_PRIMARY }, "Dados e armazenamento", "Limpar caches e backups"),
+            Triple(ModernIcons.settings(22) { Theme.TEXT_PRIMARY }, "Configurações", "Preferências gerais do Mihon Linux"),
+            Triple(ModernIcons.about(22) { Theme.TEXT_PRIMARY }, "Sobre", "Mihon Linux v0.3.0"),
         )
 
         data class RowHolders(val row: JPanel, val titleLbl: JLabel, val descLbl: JLabel, val chevLbl: JLabel)
@@ -1367,7 +1367,7 @@ class MoreScreen(
         rows.forEach { (icon, title, desc) ->
             val titleLbl = JLabel(title).apply { font = font.deriveFont(Font.BOLD, 13.5f); foreground = Theme.TEXT_PRIMARY }
             val descLbl = JLabel(desc).apply { font = font.deriveFont(Font.PLAIN, 11f); foreground = Theme.TEXT_MUTED }
-            val chevLbl = JLabel("›").apply { font = font.deriveFont(Font.BOLD, 18f); foreground = Theme.TEXT_MUTED }
+            val chevLbl = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED })
 
             val row = JPanel(BorderLayout(14, 0)).apply {
                 background = Theme.BG_SURFACE
@@ -1379,9 +1379,9 @@ class MoreScreen(
                 maximumSize = Dimension(Int.MAX_VALUE, 64)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
 
-                val left = JPanel(FlowLayout(FlowLayout.LEFT, 12, 0)).apply {
+                val left = JPanel(FlowLayout(FlowLayout.LEFT, 14, 0)).apply {
                     isOpaque = false
-                    add(JLabel(icon).apply { font = font.deriveFont(18f) })
+                    add(JLabel(icon))
                     add(
                         JPanel().apply {
                             isOpaque = false

@@ -23,6 +23,7 @@ import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.prefs.Preferences
 import javax.swing.BorderFactory
 import javax.swing.JButton
@@ -44,7 +45,9 @@ import kotlin.math.min
 enum class ReadMode(val label: String) {
     SINGLE("Página única"),
     DOUBLE_RTL("Página dupla (mangá, D→E)"),
-    WEBTOON("Webtoon (rolagem)"),
+    DOUBLE_LTR("Página dupla (quadrinhos, E→D)"),
+    WEBTOON("Webtoon contínuo"),
+    CONTINUOUS_VERTICAL("Vertical com espaçamento"),
 }
 
 enum class FitMode(val label: String) {
@@ -88,6 +91,158 @@ internal fun scaleImage(
 ): BufferedImage = MangaImageEnhancer.scale(src, targetW, targetH, quality)
 
 /**
+ * Algorithmic reader engine for double-page spreads, wide-page splitting,
+ * dynamic cache memory budgeting, and webtoon strip layout calculations.
+ */
+object ReaderEngine {
+
+    /**
+     * Determines which pages are displayed together in a spread starting at [p].
+     * Page 0 (cover) is strictly isolated and never paired.
+     * Wide pages (W > H) are isolated as lone spreads.
+     * For double page modes (DOUBLE_RTL, DOUBLE_LTR), pairs [p] and [p + 1] only if
+     * neither is wide and their aspect ratios match within 0.18 tolerance.
+     */
+    fun spreadAt(
+        p: Int,
+        mode: ReadMode,
+        pageCount: Int,
+        isWide: (Int) -> Boolean,
+        aspectRatio: ((Int) -> Double?)? = null,
+    ): List<Int> {
+        if (p !in 0 until pageCount) return emptyList()
+        if (mode != ReadMode.DOUBLE_RTL && mode != ReadMode.DOUBLE_LTR) return listOf(p)
+        if (p == 0) return listOf(0)
+        if (isWide(p)) return listOf(p)
+
+        val n = p + 1
+        if (n >= pageCount || isWide(n)) return listOf(p)
+
+        if (aspectRatio != null) {
+            val ar1 = aspectRatio(p)
+            val ar2 = aspectRatio(n)
+            if (ar1 != null && ar2 != null && kotlin.math.abs(ar1 - ar2) > 0.18) {
+                return listOf(p)
+            }
+        }
+        return listOf(p, n)
+    }
+
+    /**
+     * Finds the spread start index that precedes [currentPage] by iterating spreads forward.
+     */
+    fun prevSpreadStart(
+        currentPage: Int,
+        mode: ReadMode,
+        pageCount: Int,
+        isWide: (Int) -> Boolean,
+        aspectRatio: ((Int) -> Double?)? = null,
+    ): Int {
+        if (currentPage <= 0) return 0
+        if (mode != ReadMode.DOUBLE_RTL && mode != ReadMode.DOUBLE_LTR) {
+            return (currentPage - 1).coerceAtLeast(0)
+        }
+        var curr = 0
+        var prev = 0
+        while (curr < currentPage) {
+            prev = curr
+            val spread = spreadAt(curr, mode, pageCount, isWide, aspectRatio)
+            curr += max(1, spread.size)
+        }
+        return prev
+    }
+
+    /**
+     * Splits a wide image into two half pages according to reading direction.
+     * For RTL (manga): Part 0 (first half) is Right half, Part 1 (second half) is Left half.
+     * For LTR (comics/default): Part 0 (first half) is Left half, Part 1 (second half) is Right half.
+     */
+    fun getHalfPage(src: BufferedImage, isSecondHalf: Boolean, isRtl: Boolean): BufferedImage {
+        val halfW = src.width / 2
+        val h = src.height
+        if (halfW <= 0) return src
+        val xOffset = when {
+            !isRtl && !isSecondHalf -> 0
+            !isRtl && isSecondHalf -> halfW
+            isRtl && !isSecondHalf -> halfW
+            else -> 0
+        }
+        return src.getSubimage(xOffset, 0, halfW, h)
+    }
+
+    /**
+     * Splits a wide image and stacks top and bottom halves vertically for webtoon display.
+     */
+    fun splitAndMerge(src: BufferedImage, isRtl: Boolean): BufferedImage {
+        val halfW = src.width / 2
+        val h = src.height
+        if (halfW <= 0) return src
+        val merged = BufferedImage(halfW, h * 2, BufferedImage.TYPE_INT_RGB)
+        merged.createGraphics().apply {
+            val topHalf = if (isRtl) src.getSubimage(halfW, 0, halfW, h) else src.getSubimage(0, 0, halfW, h)
+            val bottomHalf = if (isRtl) src.getSubimage(0, 0, halfW, h) else src.getSubimage(halfW, 0, halfW, h)
+            drawImage(topHalf, 0, 0, null)
+            drawImage(bottomHalf, 0, h, null)
+            dispose()
+        }
+        return merged
+    }
+
+    /**
+     * Calculates maximum memory cache entries bounded between [minEntries] and [maxEntries]
+     * based on available JVM max heap (allocating ~48MB per high-resolution cached image).
+     */
+    fun calculateMaxCacheEntries(
+        maxMemoryBytes: Long = Runtime.getRuntime().maxMemory(),
+        minEntries: Int = 8,
+        maxEntries: Int = 32,
+    ): Int {
+        val maxHeapMb = maxMemoryBytes / (1024 * 1024)
+        val entries = (maxHeapMb / 48).toInt()
+        return entries.coerceIn(minEntries, maxEntries)
+    }
+
+    /**
+     * Computes webtoon page layout offsets (tops) and heights with optional inter-page gap.
+     */
+    fun computeWebtoonLayout(
+        pageCount: Int,
+        pageWidthFn: (Int) -> Int,
+        pageHeightFn: (Int, Int) -> Int,
+        pageGap: Int = 0,
+    ): Pair<IntArray, IntArray> {
+        val tops = IntArray(pageCount + 1)
+        val heights = IntArray(pageCount)
+        var y = 0
+        for (i in 0 until pageCount) {
+            val w = pageWidthFn(i)
+            val h = pageHeightFn(i, w)
+            tops[i] = y
+            heights[i] = h
+            y += h + if (i < pageCount - 1) pageGap else 0
+        }
+        tops[pageCount] = y
+        return tops to heights
+    }
+
+    /**
+     * Performs binary search to find which webtoon page contains vertical position [y].
+     */
+    fun pageAt(y: Int, tops: IntArray, pageCount: Int): Int {
+        if (pageCount <= 0 || tops.isEmpty()) return 0
+        if (y <= tops[0]) return 0
+        if (y >= tops[pageCount - 1]) return pageCount - 1
+        var lo = 0
+        var hi = pageCount - 1
+        while (lo < hi) {
+            val mid = (lo + hi + 1) / 2
+            if (tops[mid] <= y) lo = mid else hi = mid - 1
+        }
+        return lo
+    }
+}
+
+/**
  * Reads a .cbz/.zip file or an image folder.
  *
  * Modes: single page, double page (right-to-left) and webtoon (continuous scroll), each with
@@ -122,6 +277,16 @@ class ReaderWindow(
         val qStr = prefs.get("quality", "ULTRA_HD")
         if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.ULTRA_HD
     }.getOrDefault(MangaImageEnhancer.QualityMode.ULTRA_HD)
+    private var colorFilter = runCatching {
+        MangaImageEnhancer.ColorFilterMode.valueOf(prefs.get("colorFilter", "NONE"))
+    }.getOrDefault(MangaImageEnhancer.ColorFilterMode.NONE)
+    private var splitWidePages = prefs.getBoolean("splitWidePages", true)
+    private var splitWideRtl = prefs.getBoolean("splitWideRtl", true)
+    private var currentSubPage = 0
+    private var webtoonSideMarginPercent = prefs.getInt("webtoonSideMarginPercent", 0).coerceIn(0, 35)
+
+    private val isWebtoon get() = mode == ReadMode.WEBTOON || mode == ReadMode.CONTINUOUS_VERTICAL
+    private val isDouble get() = mode == ReadMode.DOUBLE_RTL || mode == ReadMode.DOUBLE_LTR
 
     /** Natural size of each page; filled in the background (webtoon layout and wide-page detection). */
     private val sizes = arrayOfNulls<Dimension>(pageCount)
@@ -138,16 +303,39 @@ class ReaderWindow(
     private var togglingFullscreen = false
     private var zoomFactor = 1.0
 
-    /** Shared thread-safe bounded LRU cache of decoded original images (up to 8 pages to conserve RAM). */
+    /** In-flight decoding, scaling, and prefetch jobs for responsive cancellation on rapid navigation. */
+    private val inFlightTasks = ConcurrentHashMap<Int, Future<*>>()
+
+    /** Dynamic memory cache bounded between 8 and 32 images according to available JVM heap. */
+    private val maxCacheEntries = ReaderEngine.calculateMaxCacheEntries()
     private val cacheLock = Any()
     private val cache = object : LinkedHashMap<Int, BufferedImage>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>) = size > 8
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>): Boolean {
+            val evict = size > maxCacheEntries
+            if (evict) {
+                runCatching { eldest.value.flush() }
+            }
+            return evict
+        }
     }
 
     private fun getCachedImage(index: Int): BufferedImage? = synchronized(cacheLock) { cache[index] }
     private fun putCachedImage(index: Int, image: BufferedImage) { synchronized(cacheLock) { cache[index] = image } }
     private fun isPageCached(index: Int): Boolean = synchronized(cacheLock) { cache.containsKey(index) }
-    private val prefetching = ConcurrentHashMap.newKeySet<Int>()
+
+    private fun cancelDistantTasks(centerPage: Int, radiusAhead: Int = 4, radiusBehind: Int = 2) {
+        val minP = (centerPage - radiusBehind).coerceAtLeast(0)
+        val maxP = (centerPage + radiusAhead).coerceAtMost(pageCount - 1)
+        val it = inFlightTasks.entries.iterator()
+        while (it.hasNext()) {
+            val entry = it.next()
+            val p = entry.key
+            if (p < minP || p > maxP) {
+                entry.value.cancel(true)
+                it.remove()
+            }
+        }
+    }
 
     private val pageLabel = JLabel(" ")
     private var updatingSlider = false
@@ -213,9 +401,47 @@ class ReaderWindow(
             isFocusable = false
             toolTipText = "Algoritmo de redimensionamento e reconstrução de traços (Lanczos-3 + Anime4K Line-Art)"
         }
+        val filterBox = JComboBox(MangaImageEnhancer.ColorFilterMode.entries.map { it.label }.toTypedArray()).apply {
+            selectedIndex = colorFilter.ordinal
+            isFocusable = false
+            toolTipText = "Filtro de leitura (Grayscale, Noturno Invertido, Sépia)"
+        }
+        fun button(text: String, action: () -> Unit) = JButton(text).apply {
+            isFocusable = false
+            addActionListener { action() }
+        }
+        val marginBtn = JButton("Margem: ${webtoonSideMarginPercent}%").apply {
+            isFocusable = false
+            toolTipText = "Margem lateral em Webtoon para monitores ultrawide (0%, 15%, 25%, 35%)"
+            isVisible = isWebtoon
+            addActionListener {
+                webtoonSideMarginPercent = when (webtoonSideMarginPercent) {
+                    0 -> 15
+                    15 -> 25
+                    25 -> 35
+                    else -> 0
+                }
+                text = "Margem: ${webtoonSideMarginPercent}%"
+                prefs.putInt("webtoonSideMarginPercent", webtoonSideMarginPercent)
+                if (isWebtoon) webtoon.relayout()
+            }
+        }
+        val splitBtn = JButton(if (splitWidePages) "Divisão: Ligada" else "Divisão: Desligada").apply {
+            isFocusable = false
+            toolTipText = "Divisão automática de páginas duplas em páginas normais sequenciais"
+            isVisible = !isWebtoon
+            addActionListener {
+                splitWidePages = !splitWidePages
+                text = if (splitWidePages) "Divisão: Ligada" else "Divisão: Desligada"
+                prefs.putBoolean("splitWidePages", splitWidePages)
+                if (!isWebtoon) showSpread()
+            }
+        }
         modeBox.addActionListener {
             mode = ReadMode.entries[modeBox.selectedIndex]
             prefs.put("mode", mode.name)
+            marginBtn.isVisible = isWebtoon
+            splitBtn.isVisible = !isWebtoon
             applyView()
         }
         fitBox.addActionListener {
@@ -229,9 +455,12 @@ class ReaderWindow(
             webtoon.invalidateScaledCache()
             applyView()
         }
-        fun button(text: String, action: () -> Unit) = JButton(text).apply {
-            isFocusable = false
-            addActionListener { action() }
+        filterBox.addActionListener {
+            colorFilter = MangaImageEnhancer.ColorFilterMode.entries[filterBox.selectedIndex]
+            prefs.put("colorFilter", colorFilter.name)
+            paged.invalidateCache()
+            webtoon.invalidateScaledCache()
+            applyView()
         }
         topHud = JPanel(FlowLayout(FlowLayout.CENTER, 8, 6)).apply {
             background = Color(18, 19, 24, 240)
@@ -239,6 +468,9 @@ class ReaderWindow(
             add(modeBox)
             add(fitBox)
             add(qualityBox)
+            add(filterBox)
+            add(marginBtn)
+            add(splitBtn)
             add(button("−") { adjustZoom(0.85) })
             add(button("100%") { resetZoom() })
             add(button("+") { adjustZoom(1.18) })
@@ -307,7 +539,7 @@ class ReaderWindow(
         scroll.viewport.addComponentListener(object : ComponentAdapter() {
             override fun componentResized(e: ComponentEvent) {
                 val vw = scroll.viewport.width
-                if (mode == ReadMode.WEBTOON) {
+                if (isWebtoon) {
                     if (vw > 0 && vw != webtoon.layoutWidth) webtoon.relayout()
                 } else {
                     paged.revalidate()
@@ -315,19 +547,23 @@ class ReaderWindow(
                 }
             }
         })
-        scroll.verticalScrollBar.addAdjustmentListener { if (mode == ReadMode.WEBTOON) webtoon.updateVisible() }
+        scroll.verticalScrollBar.addAdjustmentListener { if (isWebtoon) webtoon.updateVisible() }
         addWindowListener(object : WindowAdapter() {
             override fun windowClosed(e: WindowEvent) {
                 if (togglingFullscreen) return
                 closed = true
                 progressTimer.stop()
                 onProgress(reportedPage, pageCount)
+                inFlightTasks.values.forEach { runCatching { it.cancel(true) } }
+                inFlightTasks.clear()
                 io.shutdownNow()
                 reader.close()
                 synchronized(cacheLock) {
+                    cache.values.forEach { runCatching { it.flush() } }
                     cache.clear()
                 }
                 webtoon.invalidateScaledCache()
+                paged.invalidateCache()
                 paged.setContent(emptyList(), null)
                 System.gc()
             }
@@ -347,29 +583,44 @@ class ReaderWindow(
     // --- Navigation ---------------------------------------------------------------------------
 
     private fun isWide(i: Int) = sizes[i]?.let { it.width > it.height } ?: false
+    private fun aspectRatio(i: Int) = sizes[i]?.let { if (it.height > 0) it.width.toDouble() / it.height else null }
 
-    /** Pages shown together when a spread starts at [p] (double mode keeps the cover and wide pages alone). */
-    private fun spreadAt(p: Int): List<Int> {
-        if (mode != ReadMode.DOUBLE_RTL || p == 0 || isWide(p)) return listOf(p)
-        val n = p + 1
-        return if (n < pageCount && !isWide(n)) listOf(p, n) else listOf(p)
-    }
+    /** Pages shown together when a spread starts at [p]. */
+    private fun spreadAt(p: Int): List<Int> =
+        ReaderEngine.spreadAt(p, mode, pageCount, ::isWide, ::aspectRatio)
 
-    private fun prevSpreadStart(): Int {
-        if (currentPage <= 0) return 0
-        if (mode == ReadMode.DOUBLE_RTL) {
-            val c = currentPage - 2
-            if (c >= 0 && spreadAt(c).size == 2) return c
-        }
-        return currentPage - 1
-    }
+    private fun prevSpreadStart(): Int =
+        ReaderEngine.prevSpreadStart(currentPage, mode, pageCount, ::isWide, ::aspectRatio)
 
     private fun next() {
-        if (mode == ReadMode.WEBTOON) scrollBy(scroll.viewport.height * 9 / 10) else goTo(currentPage + spreadAt(currentPage).size)
+        if (isWebtoon) {
+            scrollBy(scroll.viewport.height * 9 / 10)
+        } else if (mode == ReadMode.SINGLE && splitWidePages && isWide(currentPage) && currentSubPage == 0) {
+            currentSubPage = 1
+            showSpread()
+        } else {
+            currentSubPage = 0
+            goTo(currentPage + spreadAt(currentPage).size)
+        }
     }
 
     private fun prev() {
-        if (mode == ReadMode.WEBTOON) scrollBy(-scroll.viewport.height * 9 / 10) else goTo(prevSpreadStart())
+        if (isWebtoon) {
+            scrollBy(-scroll.viewport.height * 9 / 10)
+        } else if (mode == ReadMode.SINGLE && splitWidePages && isWide(currentPage) && currentSubPage == 1) {
+            currentSubPage = 0
+            showSpread()
+        } else {
+            val prevIdx = prevSpreadStart()
+            if (mode == ReadMode.SINGLE && splitWidePages && isWide(prevIdx) && prevIdx != currentPage) {
+                currentSubPage = 1
+                currentPage = prevIdx
+                showSpread()
+            } else {
+                currentSubPage = 0
+                goTo(prevIdx)
+            }
+        }
     }
 
     private fun scrollBy(dy: Int) {
@@ -378,23 +629,28 @@ class ReaderWindow(
 
     private fun adjustZoom(factor: Double) {
         zoomFactor = (zoomFactor * factor).coerceIn(0.4, 3.5)
-        if (mode == ReadMode.WEBTOON) webtoon.relayout() else { paged.revalidate(); paged.repaint() }
+        if (isWebtoon) webtoon.relayout() else { paged.revalidate(); paged.repaint() }
     }
 
     private fun resetZoom() {
         zoomFactor = 1.0
-        if (mode == ReadMode.WEBTOON) webtoon.relayout() else { paged.revalidate(); paged.repaint() }
+        if (isWebtoon) webtoon.relayout() else { paged.revalidate(); paged.repaint() }
     }
 
     private fun goTo(page: Int) {
         if (pageCount == 0) return
         val target = page.coerceIn(0, pageCount - 1)
-        if (mode == ReadMode.WEBTOON) {
+        if (isWebtoon) {
             webtoon.scrollToPage(target)
             return
         }
-        if (target == currentPage) return
+        currentSubPage = 0
+        if (target == currentPage) {
+            showSpread()
+            return
+        }
         currentPage = target
+        cancelDistantTasks(currentPage, radiusAhead = 4, radiusBehind = 2)
         showSpread()
     }
 
@@ -405,7 +661,8 @@ class ReaderWindow(
 
     private fun applyView() {
         generation++
-        if (mode == ReadMode.WEBTOON) {
+        currentSubPage = 0
+        if (isWebtoon) {
             scroll.setViewportView(webtoon)
             webtoon.relayout(currentPage)
         } else {
@@ -422,13 +679,14 @@ class ReaderWindow(
     private fun showSpread() {
         val myGeneration = ++generation
         val indexes = spreadAt(currentPage)
-        val lbl = if (indexes.size == 2) {
-            "Páginas ${indexes[0] + 1}-${indexes[1] + 1}/$pageCount"
-        } else {
-            "Página ${indexes[0] + 1}/$pageCount"
+        val isWideSingle = mode == ReadMode.SINGLE && splitWidePages && isWide(currentPage)
+        val lbl = when {
+            indexes.size == 2 -> "Páginas ${indexes[0] + 1}-${indexes[1] + 1}/$pageCount"
+            isWideSingle -> "Página ${currentPage + 1} (${currentSubPage + 1}/2)/$pageCount"
+            else -> "Página ${indexes.firstOrNull()?.let { it + 1 } ?: (currentPage + 1)}/$pageCount"
         }
-        syncPageUi(indexes.first(), lbl)
-        reportProgress(indexes.last())
+        syncPageUi(indexes.firstOrNull() ?: currentPage, lbl)
+        reportProgress(indexes.lastOrNull() ?: currentPage)
 
         fun finish() {
             if (myGeneration != generation || closed) return
@@ -436,13 +694,28 @@ class ReaderWindow(
             if (images.any { it == null }) {
                 paged.setContent(emptyList(), "Não foi possível decodificar a página")
             } else {
-                val ordered = images.filterNotNull().let { if (mode == ReadMode.DOUBLE_RTL) it.reversed() else it }
-                paged.setContent(ordered, null)
+                val contentImages = if (isWideSingle && images.firstOrNull() != null) {
+                    val half = ReaderEngine.getHalfPage(
+                        images.first()!!,
+                        isSecondHalf = (currentSubPage == 1),
+                        isRtl = splitWideRtl,
+                    )
+                    listOf(half)
+                } else if (mode == ReadMode.DOUBLE_RTL) {
+                    images.filterNotNull().reversed()
+                } else {
+                    images.filterNotNull()
+                }
+                paged.setContent(contentImages, null)
                 scroll.verticalScrollBar.value = 0
                 scroll.horizontalScrollBar.value = 0
             }
-            for (ahead in 1..3) {
-                prefetch(indexes.last() + ahead)
+            cancelDistantTasks(indexes.lastOrNull() ?: currentPage, radiusAhead = 4, radiusBehind = 2)
+            for (ahead in 1..4) {
+                prefetch((indexes.lastOrNull() ?: currentPage) + ahead)
+            }
+            for (behind in 1..2) {
+                prefetch((indexes.firstOrNull() ?: currentPage) - behind)
             }
         }
 
@@ -452,73 +725,87 @@ class ReaderWindow(
             return
         }
         paged.setContent(emptyList(), "Carregando…")
-        io.execute {
-            val loaded = missing.associateWith { readPageFromArchive(it) }
-            SwingUtilities.invokeLater {
-                if (closed) return@invokeLater
-                loaded.forEach { (index, image) ->
-                    if (image != null) {
-                        putCachedImage(index, image)
-                        if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
+        val future = io.submit {
+            try {
+                if (closed || Thread.currentThread().isInterrupted) return@submit
+                val loaded = missing.associateWith { readPageFromArchive(it) }
+                SwingUtilities.invokeLater {
+                    if (closed) return@invokeLater
+                    loaded.forEach { (index, image) ->
+                        if (image != null) {
+                            putCachedImage(index, image)
+                            if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
+                        }
                     }
+                    finish()
                 }
-                finish()
+            } catch (_: InterruptedException) {
+                // Cancelled
+            } finally {
+                missing.forEach { inFlightTasks.remove(it) }
             }
         }
+        missing.forEach { inFlightTasks[it] = future }
     }
 
     private fun prefetch(index: Int) {
-        if (index !in 0 until pageCount || isPageCached(index) || !prefetching.add(index)) return
-        io.execute {
+        if (index !in 0 until pageCount || isPageCached(index) || inFlightTasks.containsKey(index)) return
+        val future = io.submit {
             try {
-                if (closed) return@execute
-                val image = readPageFromArchive(index) ?: return@execute
+                if (closed || Thread.currentThread().isInterrupted) return@submit
+                val image = readPageFromArchive(index) ?: return@submit
                 SwingUtilities.invokeLater {
                     if (!closed) {
                         putCachedImage(index, image)
                         if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
                     }
                 }
+            } catch (_: InterruptedException) {
+                // Cancelled
             } finally {
-                prefetching.remove(index)
+                inFlightTasks.remove(index)
+            }
+        }
+        inFlightTasks[index] = future
+    }
+
+    /**
+     * Reads image headers starting from [currentPage] outwards (visible pages first!),
+     * and only runs after initial visible pages are already queued for decoding.
+     */
+    private fun readSizes() {
+        io.execute {
+            val order = (0 until pageCount).sortedBy { kotlin.math.abs(it - currentPage) }
+            val found = arrayOfNulls<Dimension>(pageCount)
+            for (i in order) {
+                if (closed) return@execute
+                if (sizes[i] != null) continue
+                found[i] = runCatching {
+                    synchronized(readerLock) {
+                        reader.getPageStream(reader.pages[i]).use { stream ->
+                            ImageDecoder.readDimensions(stream)
+                        }
+                    }
+                }.getOrNull()
+            }
+            SwingUtilities.invokeLater {
+                if (closed) return@invokeLater
+                var anyChanged = false
+                found.forEachIndexed { i, d ->
+                    if (d != null && sizes[i] == null) {
+                        sizes[i] = d
+                        anyChanged = true
+                    }
+                }
+                if (anyChanged && isWebtoon) {
+                    webtoon.recomputeGeometryPreserveScroll()
+                }
+                if (anyChanged && mode == ReadMode.SINGLE && splitWidePages && isWide(currentPage)) {
+                    showSpread()
+                }
             }
         }
     }
-
-        /**
-         * Reads image headers starting from [currentPage] outwards (visible pages first!),
-         * and only runs after initial visible pages are already queued for decoding.
-         */
-        private fun readSizes() {
-            io.execute {
-                val order = (0 until pageCount).sortedBy { kotlin.math.abs(it - currentPage) }
-                val found = arrayOfNulls<Dimension>(pageCount)
-                for (i in order) {
-                    if (closed) return@execute
-                    if (sizes[i] != null) continue
-                    found[i] = runCatching {
-                        synchronized(readerLock) {
-                            reader.getPageStream(reader.pages[i]).use { stream ->
-                                ImageDecoder.readDimensions(stream)
-                            }
-                        }
-                    }.getOrNull()
-                }
-                SwingUtilities.invokeLater {
-                    if (closed) return@invokeLater
-                    var anyChanged = false
-                    found.forEachIndexed { i, d ->
-                        if (d != null && sizes[i] == null) {
-                            sizes[i] = d
-                            anyChanged = true
-                        }
-                    }
-                    if (anyChanged && mode == ReadMode.WEBTOON) {
-                        webtoon.recomputeGeometryPreserveScroll()
-                    }
-                }
-            }
-        }
 
     // --- Fullscreen ----------------------------------------------------------------------------
 
@@ -547,6 +834,7 @@ class ReaderWindow(
         private var scaled: List<BufferedImage> = emptyList()
         private var scaledKey = ""
         private var pendingKey = ""
+        private var scalingFuture: Future<*>? = null
 
         init {
             background = Color.BLACK
@@ -560,10 +848,20 @@ class ReaderWindow(
                         return
                     }
                     val leftSide = ratio < 0.35
-                    val forward = if (mode == ReadMode.DOUBLE_RTL) leftSide else !leftSide
+                    val forward = if (mode == ReadMode.DOUBLE_RTL || (mode == ReadMode.SINGLE && splitWideRtl)) leftSide else !leftSide
                     if (forward) next() else prev()
                 }
             })
+        }
+
+        fun invalidateCache() {
+            scaledKey = ""
+            pendingKey = ""
+            scalingFuture?.cancel(true)
+            scalingFuture = null
+            scaled.forEach { runCatching { it.flush() } }
+            scaled = emptyList()
+            repaint()
         }
 
         fun setContent(images: List<BufferedImage>, message: String?) {
@@ -571,6 +869,8 @@ class ReaderWindow(
             this.message = message
             scaledKey = ""
             pendingKey = ""
+            scalingFuture?.cancel(true)
+            scalingFuture = null
             revalidate()
             repaint()
         }
@@ -613,35 +913,46 @@ class ReaderWindow(
             val n = natural()
             val totalW = (n.width * s).toInt()
             val totalH = (n.height * s).toInt()
-            val key = images.joinToString(",") { System.identityHashCode(it).toString() } + "@$s@${quality.name}"
+            val key = images.joinToString(",") { System.identityHashCode(it).toString() } + "@$s@${quality.name}@${colorFilter.name}"
+
             if (key != scaledKey && key != pendingKey) {
-                if (quality == MangaImageEnhancer.QualityMode.BILINEAR) {
-                    scaled = images.map { img ->
-                        val w = (img.width * s).toInt().coerceAtLeast(1)
-                        val h = (img.height * s).toInt().coerceAtLeast(1)
-                        scaleImageFast(img, w, h)
-                    }
-                    scaledKey = key
-                } else {
-                    pendingKey = key
-                    val snapImages = images
-                    val snapQuality = quality
-                    io.execute {
+                scalingFuture?.cancel(true)
+                pendingKey = key
+                val snapImages = images
+                val snapQuality = quality
+                val snapFilter = colorFilter
+                val snapS = s
+
+                scalingFuture = io.submit {
+                    try {
+                        if (Thread.currentThread().isInterrupted) return@submit
                         val hq = snapImages.map { img ->
-                            val w = (img.width * s).toInt().coerceAtLeast(1)
-                            val h = (img.height * s).toInt().coerceAtLeast(1)
-                            scaleImage(img, w, h, snapQuality)
+                            val w = (img.width * snapS).toInt().coerceAtLeast(1)
+                            val h = (img.height * snapS).toInt().coerceAtLeast(1)
+                            var res = if (snapQuality == MangaImageEnhancer.QualityMode.BILINEAR) {
+                                scaleImageFast(img, w, h)
+                            } else {
+                                scaleImage(img, w, h, snapQuality)
+                            }
+                            if (snapFilter != MangaImageEnhancer.ColorFilterMode.NONE) {
+                                res = MangaImageEnhancer.applyColorFilter(res, snapFilter)
+                            }
+                            res
                         }
                         SwingUtilities.invokeLater {
                             if (!closed && pendingKey == key) {
+                                scaled.forEach { runCatching { it.flush() } }
                                 scaled = hq
                                 scaledKey = key
                                 repaint()
                             }
                         }
+                    } catch (_: InterruptedException) {
+                        // Task was cancelled
                     }
                 }
             }
+
             var x = ((width - totalW) / 2).coerceAtLeast(0)
             val top = ((height - totalH) / 2).coerceAtLeast(0)
             if (key == scaledKey && scaled.isNotEmpty()) {
@@ -650,7 +961,7 @@ class ReaderWindow(
                     x += img.width
                 }
             } else {
-                // Instant bilinear preview while Lanczos-3 + Anime4K finishes in background (~80ms)
+                // Instant bilinear preview on EDT while background scaling/filtering finishes
                 val g2 = g as java.awt.Graphics2D
                 g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
                 images.forEach { img ->
@@ -690,8 +1001,10 @@ class ReaderWindow(
             private set
 
         fun invalidateScaledCache() {
+            images.values.forEach { runCatching { it.flush() } }
             images.clear()
             requested.clear()
+            failed.clear()
         }
 
         init {
@@ -708,7 +1021,8 @@ class ReaderWindow(
         }
 
         private fun pageWidth(i: Int): Int {
-            val base = if (fit == FitMode.ORIGINAL) sizes[i]?.width ?: layoutWidth else layoutWidth
+            val availableWidth = (layoutWidth * (1.0 - (webtoonSideMarginPercent * 2 / 100.0))).toInt().coerceAtLeast(200)
+            val base = if (fit == FitMode.ORIGINAL) sizes[i]?.width ?: availableWidth else availableWidth
             return (base * zoomFactor).toInt().coerceAtLeast(64)
         }
 
@@ -726,21 +1040,21 @@ class ReaderWindow(
             if (vw <= 0 || pageCount == 0) return
             layoutWidth = vw
             layoutGeneration++
-            // Do NOT clear `images` here! Keep existing images so zooming/resizing scales smoothly
-            // in `paintComponent` until the newly requested HQ Lanczos-3 + Anime4K versions finish.
             requested.clear()
             failed.clear()
             positioning = true
-            var y = 0
-            maxWidth = 0
-            for (i in 0 until pageCount) {
-                val w = pageWidth(i)
-                tops[i] = y
-                heights[i] = computeHeight(i, w)
-                maxWidth = max(maxWidth, w)
-                y += heights[i]
-            }
-            tops[pageCount] = y
+
+            val pageGap = if (mode == ReadMode.CONTINUOUS_VERTICAL) 16 else 0
+            val (newTops, newHeights) = ReaderEngine.computeWebtoonLayout(
+                pageCount = pageCount,
+                pageWidthFn = { pageWidth(it) },
+                pageHeightFn = { idx, w -> computeHeight(idx, w) },
+                pageGap = pageGap,
+            )
+            tops = newTops
+            heights = newHeights
+            maxWidth = (0 until pageCount).maxOfOrNull { pageWidth(it) } ?: 0
+
             revalidate()
             repaint()
             SwingUtilities.invokeLater {
@@ -764,16 +1078,16 @@ class ReaderWindow(
             val anchorIdx = if (positioning) currentPage else pageAt(oldScrollY)
             val offsetInAnchor = if (positioning) 0 else (oldScrollY - tops[anchorIdx]).coerceAtLeast(0)
 
-            var y = 0
-            maxWidth = 0
-            for (i in 0 until pageCount) {
-                val w = pageWidth(i)
-                tops[i] = y
-                heights[i] = computeHeight(i, w)
-                maxWidth = max(maxWidth, w)
-                y += heights[i]
-            }
-            tops[pageCount] = y
+            val pageGap = if (mode == ReadMode.CONTINUOUS_VERTICAL) 16 else 0
+            val (newTops, newHeights) = ReaderEngine.computeWebtoonLayout(
+                pageCount = pageCount,
+                pageWidthFn = { pageWidth(it) },
+                pageHeightFn = { idx, w -> computeHeight(idx, w) },
+                pageGap = pageGap,
+            )
+            tops = newTops
+            heights = newHeights
+            maxWidth = (0 until pageCount).maxOfOrNull { pageWidth(it) } ?: 0
 
             positioning = true
             try {
@@ -803,15 +1117,7 @@ class ReaderWindow(
 
         private val viewport: JViewport? get() = parent as? JViewport
 
-        private fun pageAt(y: Int): Int {
-            var lo = 0
-            var hi = pageCount - 1
-            while (lo < hi) {
-                val mid = (lo + hi + 1) / 2
-                if (tops[mid] <= y) lo = mid else hi = mid - 1
-            }
-            return lo
-        }
+        private fun pageAt(y: Int): Int = ReaderEngine.pageAt(y, tops, pageCount)
 
         fun updateVisible() {
             if (positioning) return
@@ -825,10 +1131,16 @@ class ReaderWindow(
                 syncPageUi(first, "Página ${first + 1}/$pageCount")
             }
             reportProgress(last)
+
+            // Cancel tasks for pages that scrolled out of active window
+            cancelDistantTasks(first, (last - first) + 6, 4)
+
             // Keep a tight window in memory (4 behind, 6 ahead) so RAM stays minimal while reading smoothly
-            images.keys.filter { it < first - 4 || it > last + 6 }.toList().forEach {
-                images.remove(it)
-                requested.remove(it)
+            images.keys.filter { it < first - 4 || it > last + 6 }.toList().forEach { idx ->
+                images.remove(idx)?.let { runCatching { it.flush() } }
+            }
+            requested.filter { it < first - 4 || it > last + 6 }.toList().forEach { idx ->
+                requested.remove(idx)
             }
             // Request visible pages first, then prefetch 3 pages ahead and 1 behind
             for (i in first..min(last, pageCount - 1)) request(i)
@@ -848,35 +1160,62 @@ class ReaderWindow(
             if ((existing != null && existing.width == targetW) || !requested.add(i)) return
             val gen = layoutGeneration
             val cachedOriginal = getCachedImage(i)
-            io.execute {
-                val original = cachedOriginal ?: readPageFromArchive(i)
-                val naturalSize = original?.let { Dimension(it.width, it.height) }
-                val result = original?.let {
-                    val targetH = (it.height.toDouble() * targetW / it.width).toInt().coerceAtLeast(1)
-                    scaleImage(it, targetW, targetH, quality)
-                }
-                SwingUtilities.invokeLater {
-                    if (closed || gen != layoutGeneration) {
+            val snapQuality = quality
+            val snapFilter = colorFilter
+
+            val future = io.submit {
+                try {
+                    if (closed || Thread.currentThread().isInterrupted) {
                         requested.remove(i)
-                        return@invokeLater
+                        return@submit
                     }
-                    if (original != null && !isPageCached(i)) {
-                        putCachedImage(i, original)
-                    }
-                    if (result == null) {
-                        failed.add(i)
-                        repaint(0, tops[i], width, heights[i])
-                    } else {
-                        images[i] = result
-                        if (sizes[i] == null && naturalSize != null) {
-                            sizes[i] = naturalSize
-                            recomputeGeometryPreserveScroll(changedPage = i)
+                    val original = cachedOriginal ?: readPageFromArchive(i)
+                    val naturalSize = original?.let { Dimension(it.width, it.height) }
+                    val result = original?.let {
+                        val targetH = (it.height.toDouble() * targetW / it.width).toInt().coerceAtLeast(1)
+                        var res = if (snapQuality == MangaImageEnhancer.QualityMode.BILINEAR) {
+                            scaleImageFast(it, targetW, targetH)
                         } else {
+                            scaleImage(it, targetW, targetH, snapQuality)
+                        }
+                        if (snapFilter != MangaImageEnhancer.ColorFilterMode.NONE) {
+                            res = MangaImageEnhancer.applyColorFilter(res, snapFilter)
+                        }
+                        res
+                    }
+                    SwingUtilities.invokeLater {
+                        if (closed || gen != layoutGeneration) {
+                            result?.let { runCatching { it.flush() } }
+                            requested.remove(i)
+                            return@invokeLater
+                        }
+                        if (original != null && !isPageCached(i)) {
+                            putCachedImage(i, original)
+                        }
+                        if (result == null) {
+                            failed.add(i)
+                            requested.remove(i)
                             repaint(0, tops[i], width, heights[i])
+                        } else {
+                            images[i]?.let { runCatching { it.flush() } }
+                            images[i] = result
+                            if (sizes[i] == null && naturalSize != null) {
+                                sizes[i] = naturalSize
+                                recomputeGeometryPreserveScroll(changedPage = i)
+                            } else {
+                                repaint(0, tops[i], width, heights[i])
+                            }
                         }
                     }
+                } catch (_: InterruptedException) {
+                    requested.remove(i)
+                } catch (_: Throwable) {
+                    requested.remove(i)
+                } finally {
+                    inFlightTasks.remove(i)
                 }
             }
+            inFlightTasks[i] = future
         }
 
         override fun getPreferredSize(): Dimension {

@@ -72,9 +72,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         isVisible = false
     }
 
-    private fun m3HeaderIconButton(iconChar: String, tip: String, onClick: (JButton) -> Unit): JButton {
-        return JButton(iconChar).apply {
-            font = font.deriveFont(Font.PLAIN, 18f)
+    private fun m3HeaderIconButton(icon: javax.swing.Icon, tip: String, onClick: (JButton) -> Unit): JButton {
+        return JButton(icon).apply {
             foreground = Theme.TEXT_PRIMARY
             background = Theme.BG_APP
             isOpaque = false
@@ -150,8 +149,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         // Material 3 TopAppBar matching Mihon Android's barra superior.jpeg:
         // Left: Clean large title "Biblioteca"
-        // Right: 🔍 (Search toggle), ☷ (Filter & Sort popup), ⋮ (Overflow menu)
-        val btnSearch = m3HeaderIconButton("🔍", "Pesquisar") {
+        // Right: Search toggle, Filter & Sort popup, Overflow menu
+        val btnSearch = m3HeaderIconButton(ModernIcons.search(20) { Theme.TEXT_PRIMARY }, "Pesquisar") {
             filterField.isVisible = !filterField.isVisible
             if (filterField.isVisible) {
                 filterField.requestFocusInWindow()
@@ -163,7 +162,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             repaint()
         }
 
-        val btnFilter = m3HeaderIconButton("☷", "Filtros e exibição") { anchor ->
+        val btnFilter = m3HeaderIconButton(ModernIcons.filter(20) { Theme.TEXT_PRIMARY }, "Filtros e exibição") { anchor ->
             val popup = JPopupMenu()
 
             val offlineItem = JCheckBoxMenuItem("Somente disponíveis offline", onlyDownloadedFilter).apply {
@@ -205,7 +204,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             popup.show(anchor, 0, anchor.height)
         }
 
-        val btnOverflow = m3HeaderIconButton("⋮", "Mais opções") { anchor ->
+        val btnOverflow = m3HeaderIconButton(ModernIcons.moreVert(20) { Theme.TEXT_PRIMARY }, "Mais opções") { anchor ->
             val popup = JPopupMenu()
             popup.add(JMenuItem("↻ Atualizar biblioteca").apply {
                 addActionListener { checkUpdatesForAll() }

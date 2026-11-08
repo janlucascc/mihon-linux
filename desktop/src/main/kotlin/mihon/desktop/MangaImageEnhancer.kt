@@ -45,6 +45,13 @@ object MangaImageEnhancer {
         PNG_LOSSLESS("png", "PNG Sem Perdas (100% — Fidelidade absoluta de estúdio)"),
     }
 
+    enum class ColorFilterMode(val label: String) {
+        NONE("Normal"),
+        GRAYSCALE("Tons de cinza"),
+        INVERTED("Invertido (Modo Noturno)"),
+        SEPIA("Sépia (Leitura Suave)"),
+    }
+
     /**
      * Pre-processes raw downloaded page bytes during chapter installation (.cbz creation).
      * Applies [mode] (Ultra HD image quality enhancement on 1x native resolution).
@@ -147,6 +154,65 @@ object MangaImageEnhancer {
             // Seamless fallback to lightweight bilinear scaling if heap is exhausted
             scaleImageFast(src, tw, th)
         }
+    }
+
+    /**
+     * Applies reading color filter (Grayscale, Night/Inverted, Sepia) to [src].
+     */
+    fun applyColorFilter(src: BufferedImage, filter: ColorFilterMode): BufferedImage {
+        if (filter == ColorFilterMode.NONE) return src
+        return try {
+            val w = src.width
+            val h = src.height
+            val inPixels = extractRgbPixels(src)
+            val outPixels = IntArray(w * h)
+
+            IntStream.range(0, h).parallel().forEach { y ->
+                val rowOffset = y * w
+                for (x in 0 until w) {
+                    val rgb = inPixels[rowOffset + x]
+                    val r = (rgb ushr 16) and 0xFF
+                    val g = (rgb ushr 8) and 0xFF
+                    val b = rgb and 0xFF
+
+                    val filtered = when (filter) {
+                        ColorFilterMode.GRAYSCALE -> {
+                            val lum = (299 * r + 587 * g + 114 * b) / 1000
+                            (0xFF shl 24) or (lum shl 16) or (lum shl 8) or lum
+                        }
+                        ColorFilterMode.INVERTED -> {
+                            (0xFF shl 24) or ((255 - r) shl 16) or ((255 - g) shl 8) or (255 - b)
+                        }
+                        ColorFilterMode.SEPIA -> {
+                            val nr = min(255, (r * 393 + g * 769 + b * 189) / 1000)
+                            val ng = min(255, (r * 349 + g * 686 + b * 168) / 1000)
+                            val nb = min(255, (r * 272 + g * 534 + b * 131) / 1000)
+                            (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
+                        }
+                        ColorFilterMode.NONE -> rgb
+                    }
+                    outPixels[rowOffset + x] = filtered
+                }
+            }
+            packRgbPixels(outPixels, w, h)
+        } catch (_: OutOfMemoryError) {
+            System.gc()
+            src
+        }
+    }
+
+    /**
+     * Scales [src] to ([targetW] x [targetH]) and applies [filter].
+     */
+    fun scaleAndFilter(
+        src: BufferedImage,
+        targetW: Int,
+        targetH: Int,
+        quality: QualityMode = QualityMode.ULTRA_HD,
+        filter: ColorFilterMode = ColorFilterMode.NONE,
+    ): BufferedImage {
+        val scaled = scale(src, targetW, targetH, quality)
+        return if (filter != ColorFilterMode.NONE) applyColorFilter(scaled, filter) else scaled
     }
 
     /**
@@ -482,7 +548,9 @@ object MangaImageEnhancer {
         ) {
             return buf.data
         }
-        if (img.type == BufferedImage.TYPE_3BYTE_BGR && buf is DataBufferByte && buf.data.size >= total * 3) {
+        if (img.type == BufferedImage.TYPE_3BYTE_BGR && buf is DataBufferByte &&
+            buf.offsets.size == 1 && buf.offset == 0 && buf.data.size == total * 3
+        ) {
             val bytes = buf.data
             val out = IntArray(total)
             var bi = 0
@@ -495,7 +563,9 @@ object MangaImageEnhancer {
             }
             return out
         }
-        if (img.type == BufferedImage.TYPE_4BYTE_ABGR && buf is DataBufferByte && buf.data.size >= total * 4) {
+        if (img.type == BufferedImage.TYPE_4BYTE_ABGR && buf is DataBufferByte &&
+            buf.offsets.size == 1 && buf.offset == 0 && buf.data.size == total * 4
+        ) {
             val bytes = buf.data
             val out = IntArray(total)
             var bi = 0
