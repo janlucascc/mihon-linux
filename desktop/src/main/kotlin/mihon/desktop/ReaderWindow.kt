@@ -471,17 +471,17 @@ class ReaderWindow(
     title: String,
     source: Any, // File or ArchiveReader
     startPage: Int = 0,
-    private val onPrevChapter: (() -> Unit)? = null,
-    private val onNextChapter: (() -> Unit)? = null,
-    private val onProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
+    private var onPrevChapter: (() -> Unit)? = null,
+    private var onNextChapter: (() -> Unit)? = null,
+    private var onProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
 ) : JFrame("Mihon Linux - $title") {
 
-    private val reader: ArchiveReader = when (source) {
+    private var reader: ArchiveReader = when (source) {
         is ArchiveReader -> source
         is File -> ArchiveReaderFactory.of(source)
         else -> throw IllegalArgumentException("Fonte não suportada: $source")
     }
-    private val pageCount = reader.pageCount
+    private var pageCount = reader.pageCount
     private val prefs = Preferences.userRoot().node("mihon-linux-reader")
 
     private var mode = runCatching { ReadMode.valueOf(prefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
@@ -502,7 +502,7 @@ class ReaderWindow(
     private val isDouble get() = mode == ReadMode.DOUBLE_RTL || mode == ReadMode.DOUBLE_LTR
 
     /** Natural size of each page; filled in the background (webtoon layout and wide-page detection). */
-    private val sizes = arrayOfNulls<Dimension>(pageCount)
+    private var sizes = arrayOfNulls<Dimension>(pageCount)
     private var currentPage = startPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
     private var reportedPage = currentPage
 
@@ -569,6 +569,17 @@ class ReaderWindow(
     private val webtoon = WebtoonView()
     private val scroll = JScrollPane(paged)
 
+    private val btnPrevChapter = JButton("⏮ Cap. Ant.").apply {
+        isFocusable = false
+        isVisible = onPrevChapter != null
+        addActionListener { onPrevChapter?.invoke() }
+    }
+    private val btnNextChapter = JButton("Próx. Cap. ⏭").apply {
+        isFocusable = false
+        isVisible = onNextChapter != null
+        addActionListener { onNextChapter?.invoke() }
+    }
+
     private val autoScrollBtn: JButton = JButton("Auto-Scroll (A)").apply {
         isFocusable = false
         toolTipText = "Rolagem suave contínua mãos-livres (Espaço ou A)"
@@ -582,8 +593,7 @@ class ReaderWindow(
         onReachedEnd = {
             if (onNextChapter != null) {
                 val timer = Timer(1200) {
-                    dispose()
-                    onNextChapter.invoke()
+                    onNextChapter?.invoke()
                 }.apply { isRepeats = false; start() }
             }
         },
@@ -630,6 +640,7 @@ class ReaderWindow(
     }
 
     init {
+        iconImages = listOf(16, 32, 48, 64, 128, 256).map { AppIcon.createImage(it) }
         defaultCloseOperation = DISPOSE_ON_CLOSE
         val existing = activeReader
         if (existing != null && existing.isDisplayable) {
@@ -763,18 +774,14 @@ class ReaderWindow(
             )
             val leftNav = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
                 isOpaque = false
-                if (onPrevChapter != null) {
-                    add(button("⏮ Cap. Ant.") { dispose(); onPrevChapter.invoke() })
-                }
+                add(btnPrevChapter)
                 add(button("◀") { prev() })
             }
             val rightNav = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
                 isOpaque = false
                 add(pageLabel)
                 add(button("▶") { next() })
-                if (onNextChapter != null) {
-                    add(button("Próx. Cap. ⏭") { dispose(); onNextChapter.invoke() })
-                }
+                add(btnNextChapter)
             }
             add(leftNav, BorderLayout.WEST)
             add(pageSlider, BorderLayout.CENTER)
@@ -877,16 +884,14 @@ class ReaderWindow(
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(-1)
                         } else if (onPrevChapter != null) {
-                            dispose()
-                            onPrevChapter.invoke()
+                            onPrevChapter?.invoke()
                         }
                     }
                     KeyEvent.VK_CLOSE_BRACKET -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(1)
                         } else if (onNextChapter != null) {
-                            dispose()
-                            onNextChapter.invoke()
+                            onNextChapter?.invoke()
                         }
                     }
                     KeyEvent.VK_F11 -> toggleFullscreen()
@@ -953,8 +958,82 @@ class ReaderWindow(
 
     // --- Navigation ---------------------------------------------------------------------------
 
-    private fun isWide(i: Int) = sizes[i]?.let { it.width > it.height } ?: false
-    private fun aspectRatio(i: Int) = sizes[i]?.let { if (it.height > 0) it.width.toDouble() / it.height else null }
+    /**
+     * Loads a new chapter directly in-place without closing or recreating the reader window.
+     */
+    fun loadChapter(
+        newTitle: String,
+        newSource: Any,
+        startPage: Int = 0,
+        newPrevChapter: (() -> Unit)? = null,
+        newNextChapter: (() -> Unit)? = null,
+        newOnProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
+    ) {
+        autoScroll.stop()
+        hoverResumeTimer.stop()
+        progressTimer.stop()
+        flushProgress(reportedPage)
+
+        inFlightTasks.values.forEach { runCatching { it.cancel(true) } }
+        inFlightTasks.clear()
+
+        val oldReader = reader
+        val nextReader: ArchiveReader = when (newSource) {
+            is ArchiveReader -> newSource
+            is File -> ArchiveReaderFactory.of(newSource)
+            else -> throw IllegalArgumentException("Fonte não suportada: $newSource")
+        }
+        synchronized(readerLock) {
+            reader = nextReader
+        }
+        runCatching { oldReader.close() }
+
+        synchronized(cacheLock) {
+            cache.values.forEach { runCatching { it.flush() } }
+            cache.clear()
+        }
+
+        pageCount = nextReader.pageCount
+        sizes = arrayOfNulls(pageCount)
+        currentPage = startPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+        reportedPage = currentPage
+        currentSubPage = 0
+        generation++
+
+        title = "Mihon Linux - $newTitle"
+        onPrevChapter = newPrevChapter
+        onNextChapter = newNextChapter
+        onProgress = newOnProgress
+
+        btnPrevChapter.isVisible = newPrevChapter != null
+        btnNextChapter.isVisible = newNextChapter != null
+
+        webtoon.resetForNewChapter(pageCount)
+        paged.invalidateCache()
+
+        updatingSlider = true
+        pageSlider.maximum = max(pageCount, 1)
+        pageSlider.value = (currentPage + 1).coerceIn(1, max(pageCount, 1))
+        updatingSlider = false
+
+        scroll.verticalScrollBar.value = 0
+        scroll.horizontalScrollBar.value = 0
+
+        if (pageCount == 0) {
+            paged.setContent(emptyList(), "Nenhuma imagem encontrada")
+            pageLabel.text = "Página 0/0"
+        } else {
+            applyView()
+            SwingUtilities.invokeLater { readSizes() }
+        }
+        bottomHud.revalidate()
+        bottomHud.repaint()
+        toFront()
+        requestFocus()
+    }
+
+    private fun isWide(i: Int) = sizes.getOrNull(i)?.let { it.width > it.height } ?: false
+    private fun aspectRatio(i: Int) = sizes.getOrNull(i)?.let { if (it.height > 0) it.width.toDouble() / it.height else null }
 
     /** Pages shown together when a spread starts at [p]. */
     private fun spreadAt(p: Int): List<Int> =
@@ -1045,7 +1124,11 @@ class ReaderWindow(
     // --- Single / double page ------------------------------------------------------------------
 
     private fun readPageFromArchive(index: Int): BufferedImage? =
-        runCatching { synchronized(readerLock) { reader.getPageImage(reader.pages[index]) } }.getOrNull()
+        runCatching {
+            val r = reader
+            if (index !in 0 until r.pages.size) return null
+            synchronized(readerLock) { r.getPageImage(r.pages[index]) }
+        }.getOrNull()
 
     private fun showSpread() {
         val myGeneration = ++generation
@@ -1097,13 +1180,14 @@ class ReaderWindow(
         }
         paged.setContent(emptyList(), "Carregando…")
         val future = io.submit {
+            val snapGen = generation
             try {
                 if (closed || Thread.currentThread().isInterrupted) return@submit
                 val loaded = missing.associateWith { readPageFromArchive(it) }
                 SwingUtilities.invokeLater {
-                    if (closed) return@invokeLater
+                    if (closed || snapGen != generation) return@invokeLater
                     loaded.forEach { (index, image) ->
-                        if (image != null) {
+                        if (image != null && index in sizes.indices) {
                             putCachedImage(index, image)
                             if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
                         }
@@ -1121,12 +1205,13 @@ class ReaderWindow(
 
     private fun prefetch(index: Int) {
         if (index !in 0 until pageCount || isPageCached(index) || inFlightTasks.containsKey(index)) return
+        val snapGen = generation
         val future = io.submit {
             try {
                 if (closed || Thread.currentThread().isInterrupted) return@submit
                 val image = readPageFromArchive(index) ?: return@submit
                 SwingUtilities.invokeLater {
-                    if (!closed) {
+                    if (!closed && snapGen == generation && index in sizes.indices) {
                         putCachedImage(index, image)
                         if (sizes[index] == null) sizes[index] = Dimension(image.width, image.height)
                     }
@@ -1145,28 +1230,31 @@ class ReaderWindow(
      * and only runs after initial visible pages are already queued for decoding.
      */
     private fun readSizes() {
+        val snapGen = generation
+        val snapReader = reader
+        val snapCount = pageCount
         io.execute {
-            val order = (0 until pageCount).sortedBy { kotlin.math.abs(it - currentPage) }
-            val found = arrayOfNulls<Dimension>(pageCount)
+            val order = (0 until snapCount).sortedBy { kotlin.math.abs(it - currentPage) }
+            val found = arrayOfNulls<Dimension>(snapCount)
             for (i in order) {
-                if (closed) return@execute
-                if (sizes[i] != null) continue
+                if (closed || snapGen != generation) return@execute
+                if (sizes.getOrNull(i) != null) continue
                 found[i] = runCatching {
-                    val stream = if (reader is OnlineStreamArchiveReader) {
-                        reader.getPageStream(reader.pages[i])
+                    val stream = if (snapReader is OnlineStreamArchiveReader) {
+                        snapReader.getPageStream(snapReader.pages[i])
                     } else {
                         synchronized(readerLock) {
-                            reader.getPageStream(reader.pages[i])
+                            snapReader.getPageStream(snapReader.pages[i])
                         }
                     }
                     stream.use { ImageDecoder.readDimensions(it) }
                 }.getOrNull()
             }
             SwingUtilities.invokeLater {
-                if (closed) return@invokeLater
+                if (closed || snapGen != generation) return@invokeLater
                 var anyChanged = false
                 found.forEachIndexed { i, d ->
-                    if (d != null && sizes[i] == null) {
+                    if (d != null && i in sizes.indices && sizes[i] == null) {
                         sizes[i] = d
                         anyChanged = true
                     }
@@ -1383,6 +1471,14 @@ class ReaderWindow(
             failed.clear()
         }
 
+        fun resetForNewChapter(count: Int) {
+            invalidateScaledCache()
+            heights = IntArray(count)
+            tops = IntArray(count + 1)
+            maxWidth = 0
+            layoutGeneration++
+        }
+
         init {
             background = Color.BLACK
             addMouseListener(object : MouseAdapter() {
@@ -1398,12 +1494,12 @@ class ReaderWindow(
 
         private fun pageWidth(i: Int): Int {
             val availableWidth = (layoutWidth * (1.0 - (webtoonSideMarginPercent * 2 / 100.0))).toInt().coerceAtLeast(200)
-            val base = if (fit == FitMode.ORIGINAL) sizes[i]?.width ?: availableWidth else availableWidth
+            val base = if (fit == FitMode.ORIGINAL) sizes.getOrNull(i)?.width ?: availableWidth else availableWidth
             return (base * zoomFactor).toInt().coerceAtLeast(64)
         }
 
         private fun computeHeight(i: Int, w: Int): Int {
-            val d = sizes[i]
+            val d = sizes.getOrNull(i)
             return if (d != null && d.width > 0) {
                 (d.height.toDouble() * w / d.width).toInt().coerceAtLeast(1)
             } else {
@@ -1590,10 +1686,10 @@ class ReaderWindow(
                             } else {
                                 images[i]?.let { runCatching { it.flush() } }
                                 images[i] = result
-                                if (sizes[i] == null && naturalSize != null) {
+                                if (i in sizes.indices && sizes[i] == null && naturalSize != null) {
                                     sizes[i] = naturalSize
                                     recomputeGeometryPreserveScroll(changedPage = i)
-                                } else {
+                                } else if (i in tops.indices && i in heights.indices) {
                                     repaint(0, tops[i], width, heights[i])
                                 }
                             }

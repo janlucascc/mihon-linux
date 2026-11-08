@@ -175,6 +175,7 @@ internal fun applyCustomTheme(bgApp: Color, bgSidebar: Color, bgSurface: Color, 
 }
 
 fun main() {
+    AppIcon.installLinuxDesktopIntegration()
     setupUncaughtErrorHandling()
     configureTheme()
     SwingUtilities.invokeLater { MihonApp() }
@@ -252,7 +253,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
     private val navButtons = linkedMapOf<String, JToggleButton>()
 
     init {
-        iconImage = AppIcon.createImage(64)
+        iconImages = AppIcon.getWindowIcons()
         ctx.navigator = this
         defaultCloseOperation = EXIT_ON_CLOSE
         setSize(1240, 840)
@@ -990,6 +991,11 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             tabBar.background = Theme.BG_APP
             tabBar.border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
             repaint()
+        }
+
+        ctx.addExtensionListener {
+            btnExtensions.text = "Extensões (${ctx.extensions.size})"
+            sourcesListScreen.rebuildList()
         }
     }
 

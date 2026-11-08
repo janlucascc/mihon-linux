@@ -583,21 +583,63 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
+    private fun triggerAutoPrefetch(current: Manga, idx: Int) {
+        val autoPrefetch = Preferences.userRoot().node("mihon-linux-reader").getBoolean("autoPrefetch", true)
+        if (!current.isLocal && idx >= 0 && autoPrefetch) {
+            val upcoming = chapters.drop(idx + 1).take(2)
+                .filter { !ctx.service.isChapterDownloaded(current, it) }
+            val source = ctx.sourceFor(current.source)
+            if (upcoming.isNotEmpty() && source != null) {
+                background({
+                    SwingUtilities.invokeLater { chapterList.repaint() }
+                    ctx.service.prefetchChapters(current, upcoming, source) { cached ->
+                        SwingUtilities.invokeLater {
+                            ctx.setStatus("Pré-carregado em cache: '${cached.name}' ✔")
+                            chapterList.repaint()
+                        }
+                    }
+                }) {
+                    chapterList.repaint()
+                }
+            }
+        }
+    }
+
     private fun openReaderArchive(current: Manga, chapter: Chapter, reader: mihon.core.archive.ArchiveReader) {
         try {
-            val started = System.currentTimeMillis()
             val idx = chapters.indexOfFirst { it.id == chapter.id }
             val prevChap = if (idx > 0) chapters[idx - 1] else null
             val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
 
-            ReaderWindow(
-                title = "${current.title} - ${chapter.name}",
-                source = reader,
-                startPage = if (chapter.read) 0 else chapter.lastPageRead,
-                onPrevChapter = prevChap?.let { { openChapter(current, it) } },
-                onNextChapter = nextChap?.let { { openChapter(current, it) } },
-            ) { page, count, deltaMillis ->
+            triggerAutoPrefetch(current, idx)
+
+            val title = "${current.title} - ${chapter.name}"
+            val startPage = if (chapter.read) 0 else chapter.lastPageRead
+            val prevAction = prevChap?.let { { openChapter(current, it) } }
+            val nextAction = nextChap?.let { { openChapter(current, it) } }
+            val progressCallback: (Int, Int, Long) -> Unit = { page, count, deltaMillis ->
                 background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
+            }
+
+            val existing = ReaderWindow.activeReader
+            if (existing != null && existing.isDisplayable) {
+                existing.loadChapter(
+                    newTitle = title,
+                    newSource = reader,
+                    startPage = startPage,
+                    newPrevChapter = prevAction,
+                    newNextChapter = nextAction,
+                    newOnProgress = progressCallback,
+                )
+            } else {
+                ReaderWindow(
+                    title = title,
+                    source = reader,
+                    startPage = startPage,
+                    onPrevChapter = prevAction,
+                    onNextChapter = nextAction,
+                    onProgress = progressCallback,
+                )
             }
         } catch (e: Exception) {
             JOptionPane.showMessageDialog(this, "Não foi possível abrir o leitor: ${e.message}", "Erro", JOptionPane.ERROR_MESSAGE)
@@ -606,40 +648,39 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private fun openReaderFile(current: Manga, chapter: Chapter, file: java.io.File, canRetryDownload: Boolean = true) {
         try {
-            val started = System.currentTimeMillis()
             val idx = chapters.indexOfFirst { it.id == chapter.id }
             val prevChap = if (idx > 0) chapters[idx - 1] else null
             val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
 
-            // Pre-download upcoming 2 chapters in background only if opted-in via settings
-            val autoPrefetch = Preferences.userRoot().node("mihon-linux-reader").getBoolean("autoPrefetch", false)
-            if (!current.isLocal && idx >= 0 && autoPrefetch) {
-                val upcoming = chapters.drop(idx + 1).take(2)
-                    .filter { !ctx.service.isChapterDownloaded(current, it) }
-                val source = ctx.sourceFor(current.source)
-                if (upcoming.isNotEmpty() && source != null) {
-                    background({
-                        SwingUtilities.invokeLater { chapterList.repaint() }
-                        ctx.service.prefetchChapters(current, upcoming, source) { cached ->
-                            SwingUtilities.invokeLater {
-                                ctx.setStatus("Pré-carregado em cache: '${cached.name}' ✔")
-                                chapterList.repaint()
-                            }
-                        }
-                    }) {
-                        chapterList.repaint()
-                    }
-                }
+            triggerAutoPrefetch(current, idx)
+
+            val title = "${current.title} - ${chapter.name}"
+            val startPage = if (chapter.read) 0 else chapter.lastPageRead
+            val prevAction = prevChap?.let { { openChapter(current, it) } }
+            val nextAction = nextChap?.let { { openChapter(current, it) } }
+            val progressCallback: (Int, Int, Long) -> Unit = { page, count, deltaMillis ->
+                background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
             }
 
-            ReaderWindow(
-                title = "${current.title} - ${chapter.name}",
-                source = file,
-                startPage = if (chapter.read) 0 else chapter.lastPageRead,
-                onPrevChapter = prevChap?.let { { openChapter(current, it) } },
-                onNextChapter = nextChap?.let { { openChapter(current, it) } },
-            ) { page, count, deltaMillis ->
-                background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
+            val existing = ReaderWindow.activeReader
+            if (existing != null && existing.isDisplayable) {
+                existing.loadChapter(
+                    newTitle = title,
+                    newSource = file,
+                    startPage = startPage,
+                    newPrevChapter = prevAction,
+                    newNextChapter = nextAction,
+                    newOnProgress = progressCallback,
+                )
+            } else {
+                ReaderWindow(
+                    title = title,
+                    source = file,
+                    startPage = startPage,
+                    onPrevChapter = prevAction,
+                    onNextChapter = nextAction,
+                    onProgress = progressCallback,
+                )
             }
         } catch (e: Exception) {
             if (!current.isLocal && canRetryDownload && file.exists()) {

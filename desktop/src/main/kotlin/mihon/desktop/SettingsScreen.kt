@@ -662,7 +662,7 @@ class AntiGravitySettingsScreen(
         val execCard = SettingsGroupCard()
         val autoPrefetchPill = SegmentedPillSelector(
             options = listOf(false to "Sob Demanda", true to "Pré-baixar (2 Cap.)"),
-            initialValue = readerPrefs.getBoolean("autoPrefetch", false),
+            initialValue = readerPrefs.getBoolean("autoPrefetch", true),
         ) { enabled ->
             readerPrefs.putBoolean("autoPrefetch", enabled)
             ctx.setStatus(if (enabled) "Pré-download automático ativado" else "Leitura sob demanda ativada")

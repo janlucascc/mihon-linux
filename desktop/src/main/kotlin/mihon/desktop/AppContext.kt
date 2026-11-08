@@ -269,15 +269,17 @@ interface Navigator {
 class AppContext(
     val dbFile: File,
     val service: LibraryService,
-    val extensions: List<ExtensionSource>,
+    extensions: List<ExtensionSource>,
     val covers: CoverCache,
     val setStatus: (String) -> Unit,
 ) {
+    val extensions: MutableList<ExtensionSource> = extensions.toMutableList()
     lateinit var navigator: Navigator
     var incognitoMode: Boolean = false
     var onlyOfflineFilter: Boolean = false
     private val offlineFilterListeners = mutableListOf<(Boolean) -> Unit>()
     private val themeListeners = mutableListOf<(Boolean) -> Unit>()
+    private val extensionListeners = mutableListOf<() -> Unit>()
 
     fun addOfflineFilterListener(listener: (Boolean) -> Unit) {
         offlineFilterListeners.add(listener)
@@ -296,6 +298,20 @@ class AppContext(
 
     fun notifyThemeChanged(isDark: Boolean) {
         Theme.setDarkMode(isDark)
+    }
+
+    fun addExtensionListener(listener: () -> Unit) {
+        extensionListeners.add(listener)
+    }
+
+    fun registerExtension(ext: ExtensionSource) {
+        val existingIdx = extensions.indexOfFirst { it.id == ext.id || it.baseUrl.equals(ext.baseUrl, ignoreCase = true) }
+        if (existingIdx >= 0) {
+            extensions[existingIdx] = ext
+        } else {
+            extensions.add(ext)
+        }
+        extensionListeners.forEach { it.invoke() }
     }
 
     fun sourceFor(sourceId: Long): ExtensionSource? =

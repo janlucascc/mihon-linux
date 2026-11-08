@@ -93,4 +93,118 @@ object AppIcon {
     }
 
     fun getIcon(size: Int): Icon = ImageIcon(createImage(size))
+
+    fun getWindowIcons(): List<BufferedImage> =
+        listOf(16, 24, 32, 48, 64, 128, 256).map { createImage(it) }
+
+    /**
+     * Ensures the Linux desktop environment (GNOME/KDE/Wayland/X11) has high-resolution PNG and SVG
+     * icons registered in `~/.local/share/icons/hicolor/` and a matching `.desktop` entry with
+     * the proper `StartupWMClass` so the dock/taskbar never shows a generic gear icon.
+     */
+    fun installLinuxDesktopIntegration() {
+        val os = System.getProperty("os.name", "").lowercase()
+        if (!os.contains("linux")) return
+
+        // 1. Set AWT X11 WM_CLASS & Taskbar icon
+        runCatching {
+            val toolkit = java.awt.Toolkit.getDefaultToolkit()
+            val awtAppClassNameField = toolkit.javaClass.getDeclaredField("awtAppClassName")
+            awtAppClassNameField.isAccessible = true
+            awtAppClassNameField.set(toolkit, "mihon-linux")
+        }
+        runCatching {
+            if (java.awt.Taskbar.isTaskbarSupported()) {
+                val taskbar = java.awt.Taskbar.getTaskbar()
+                if (taskbar.isSupported(java.awt.Taskbar.Feature.ICON_IMAGE)) {
+                    taskbar.iconImage = createImage(256)
+                }
+            }
+        }
+
+        // 2. Write hicolor PNG icons & desktop entry asynchronously
+        Thread({
+            runCatching {
+                val home = java.io.File(System.getProperty("user.home"))
+                val hicolor = java.io.File(home, ".local/share/icons/hicolor")
+                val sizes = listOf(16, 24, 32, 48, 64, 128, 256, 512)
+                for (sz in sizes) {
+                    val dir = java.io.File(hicolor, "${sz}x${sz}/apps")
+                    if (!dir.exists()) dir.mkdirs()
+                    val pngFile = java.io.File(dir, "mihon-linux.png")
+                    if (!pngFile.exists() || pngFile.length() < 100L) {
+                        javax.imageio.ImageIO.write(createImage(sz), "PNG", pngFile)
+                    }
+                    // Also write alias matching StartupWMClass for Wayland compositors
+                    val wmClassPng = java.io.File(dir, "mihon-desktop-MainKt.png")
+                    if (!wmClassPng.exists()) {
+                        javax.imageio.ImageIO.write(createImage(sz), "PNG", wmClassPng)
+                    }
+                }
+
+                val scalableDir = java.io.File(hicolor, "scalable/apps").apply { mkdirs() }
+                val svgFile = java.io.File(scalableDir, "mihon-linux.svg")
+                svgFile.writeText(
+                    """
+                    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+                      <defs>
+                        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stop-color="#3B364C"/>
+                          <stop offset="100%" stop-color="#181722"/>
+                        </linearGradient>
+                        <linearGradient id="pg" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stop-color="#FAFAFA"/>
+                          <stop offset="100%" stop-color="#DEE2E6"/>
+                        </linearGradient>
+                      </defs>
+                      <rect width="256" height="256" rx="60" fill="url(#bg)" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="6"/>
+                      <path d="M128 184 Q90 171 51 187 L51 84 Q90 69 128 84 Z" fill="url(#pg)"/>
+                      <path d="M128 184 Q166 171 205 187 L205 84 Q166 69 128 84 Z" fill="url(#pg)"/>
+                      <line x1="128" y1="79" x2="128" y2="187" stroke="#8A8D98" stroke-width="9" stroke-linecap="round"/>
+                      <path d="M113 64 L143 64 L143 141 L128 123 L113 141 Z" fill="#EF4444"/>
+                    </svg>
+                    """.trimIndent(),
+                )
+
+                val mainIconFile = java.io.File(hicolor, "256x256/apps/mihon-linux.png")
+                val appsDir = java.io.File(home, ".local/share/applications").apply { mkdirs() }
+                val launcherBin = java.io.File(home, ".local/bin/mihon-linux")
+                val execPath = if (launcherBin.exists()) launcherBin.absolutePath else "mihon-linux"
+
+                val desktopContent = """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Mihon Linux
+                    Comment=Leitor de mangá (CBZ, ZIP e pastas)
+                    Exec=$execPath
+                    Icon=${mainIconFile.absolutePath}
+                    Categories=Graphics;Viewer;
+                    Terminal=false
+                    StartupNotify=true
+                    StartupWMClass=mihon-linux
+                """.trimIndent() + "\n"
+
+                java.io.File(appsDir, "mihon-linux.desktop").writeText(desktopContent)
+
+                // Secondary .desktop entry with NoDisplay=true for default JVM StartupWMClass on Wayland
+                val waylandFallbackContent = """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Mihon Linux
+                    Exec=$execPath
+                    Icon=${mainIconFile.absolutePath}
+                    Terminal=false
+                    NoDisplay=true
+                    StartupWMClass=mihon.desktop.MainKt
+                """.trimIndent() + "\n"
+                java.io.File(appsDir, "mihon.desktop.MainKt.desktop").writeText(waylandFallbackContent)
+
+                runCatching {
+                    ProcessBuilder("gtk-update-icon-cache", "-f", "-t", hicolor.absolutePath)
+                        .start()
+                        .waitFor()
+                }
+            }
+        }, "mihon-desktop-icon-installer").apply { isDaemon = true }.start()
+    }
 }

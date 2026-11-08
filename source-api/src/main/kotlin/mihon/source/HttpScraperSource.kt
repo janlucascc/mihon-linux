@@ -44,7 +44,7 @@ data class ScraperConfig(
 
 /** Generic [ExtensionSource] that scrapes HTML with OkHttp + jsoup according to a [ScraperConfig]. */
 class HttpScraperSource(
-    private val config: ScraperConfig,
+    val config: ScraperConfig,
     private val client: OkHttpClient = defaultClient(),
 ) : ExtensionSource {
 

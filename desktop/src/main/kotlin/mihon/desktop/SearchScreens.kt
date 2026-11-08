@@ -2,6 +2,7 @@ package mihon.desktop
 
 import mihon.source.ExtensionSource
 import mihon.source.MangaResult
+import mihon.source.UrlExtensionGenerator
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -150,6 +151,16 @@ class SearchScreen(
             scroll.viewport.background = Theme.BG_APP
             grid.repaint()
             repaint()
+        }
+
+        ctx.addExtensionListener {
+            val currentSel = sourceFilter.selectedItem as? String
+            sourceFilter.removeAllItems()
+            sourceFilter.addItem("Todas as fontes")
+            ctx.extensions.forEach { sourceFilter.addItem(it.name) }
+            if (currentSel != null) {
+                sourceFilter.selectedItem = currentSel
+            }
         }
 
         loadPopular()
@@ -514,93 +525,198 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 }
 
-/** Lists the loaded extensions as crisp editorial rows. */
-class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
+/** Lists the loaded extensions as crisp editorial rows and includes the Beta URL-to-Extension generator. */
+class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
+    private val model = DefaultListModel<ExtensionSource>()
+    private val list = JList(model)
+    private val footer = JLabel()
+
     init {
         background = Theme.BG_APP
-        val model = DefaultListModel<ExtensionSource>()
-        ctx.extensions.forEach { model.addElement(it) }
-        val list = JList(model)
+        refreshModel()
+
+        val betaBar = JPanel(BorderLayout(12, 0)).apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(12, 24, 12, 24),
+            )
+        }
+        val betaInfo = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(
+                JLabel("⚡ Gerador de Extensões por Link (Beta)").apply {
+                    font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
+                    foreground = Theme.TEXT_PRIMARY
+                },
+            )
+            add(Box.createVerticalStrut(2))
+            add(
+                JLabel("Envie apenas o link de qualquer site de mangá (Madara, MangaStream ou geral) e o app transforma em extensão automaticamente.").apply {
+                    font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
+                    foreground = Theme.TEXT_MUTED
+                },
+            )
+        }
+        val urlInput = JTextField(26).apply {
+            putClientProperty("JTextField.placeholderText", "Cole o link do site (ex: https://meumanga.com)…")
+            preferredSize = Dimension(280, 34)
+        }
+        val btnGenerate = ModernButton("+ Transformar Link em Extensão", variant = ModernButton.Variant.PRIMARY).apply {
+            toolTipText = "Detecta a estrutura do site e cria uma extensão ativa instantaneamente"
+        }
+
+        fun triggerGenerate() {
+            val rawUrl = urlInput.text.trim()
+            if (rawUrl.isEmpty()) {
+                val inputDialog = JOptionPane.showInputDialog(
+                    this@ExtensionsScreen,
+                    "Cole o link do site de mangá que deseja transformar em extensão:\n(Ex: https://mangalivre.to ou https://meusitemanga.com)",
+                    "Gerador de Extensão por Link (Beta)",
+                    JOptionPane.PLAIN_MESSAGE,
+                )?.trim().orEmpty()
+                if (inputDialog.isEmpty()) return
+                urlInput.text = inputDialog
+            }
+            val targetUrl = urlInput.text.trim()
+            btnGenerate.isEnabled = false
+            btnGenerate.text = "Analisando site…"
+            ctx.setStatus("Conectando a '$targetUrl' e gerando extensão Beta…")
+
+            background({
+                UrlExtensionGenerator.generateFromUrl(targetUrl)
+            }) { result ->
+                btnGenerate.isEnabled = true
+                btnGenerate.text = "+ Transformar Link em Extensão"
+                result.onSuccess { gen ->
+                    urlInput.text = ""
+                    ctx.registerExtension(gen.source)
+                    ctx.setStatus("Extensão '${gen.source.name}' criada e ativada com sucesso!")
+                    JOptionPane.showMessageDialog(
+                        this@ExtensionsScreen,
+                        "Extensão criada e instalada com sucesso!\n\n" +
+                            "• Nome: ${gen.source.name}\n" +
+                            "• URL Base: ${gen.source.baseUrl}\n" +
+                            "• Motor detectado: ${gen.detectedEngine}\n" +
+                            "• Arquivo salvo: ${gen.jsonFile.absolutePath}\n\n" +
+                            "Ela já está disponível na aba 'Fontes' para pesquisa e leitura!",
+                        "Extensão Beta Criada",
+                        JOptionPane.INFORMATION_MESSAGE,
+                    )
+                }.onFailure { err ->
+                    ctx.setStatus("Falha ao criar extensão: ${err.message}")
+                    JOptionPane.showMessageDialog(
+                        this@ExtensionsScreen,
+                        "Não foi possível gerar a extensão a partir do link informado:\n${err.message}",
+                        "Erro no Gerador Beta",
+                        JOptionPane.ERROR_MESSAGE,
+                    )
+                }
+            }
+        }
+
+        urlInput.addActionListener { triggerGenerate() }
+        btnGenerate.addActionListener { triggerGenerate() }
+
+        val rightControls = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            isOpaque = false
+            add(urlInput)
+            add(btnGenerate)
+        }
+        betaBar.add(betaInfo, BorderLayout.CENTER)
+        betaBar.add(rightControls, BorderLayout.EAST)
+        add(betaBar, BorderLayout.NORTH)
+
         list.background = Theme.BG_APP
         list.fixedCellHeight = 66
         list.border = BorderFactory.createEmptyBorder(14, 20, 18, 20)
         list.cellRenderer = ListCellRenderer { _, ext, _, selected, _ ->
             val iconImg = ctx.covers.getSourceIcon(ext) { list.repaint() }
-                object : JPanel() {
-                    init { isOpaque = false }
-                    override fun paintComponent(g: Graphics) {
-                        val g2 = g.create() as Graphics2D
-                        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
-                        val x = 8; val w = width - 16; val h = height
-                        if (selected) {
-                            g2.color = Theme.BG_CARD_HOVER
-                            g2.fillRoundRect(x, 2, w, h - 4, 6, 6)
-                        }
-                        g2.color = Theme.BORDER_SUBTLE
-                        g2.drawLine(x + 6, h - 1, x + w - 6, h - 1)
-
-                        // Extension Logo Box
-                        val iconX = x + 12
-                        val iconY = (h - 38) / 2
-                        g2.color = Theme.BG_SURFACE
-                        g2.fillRoundRect(iconX, iconY, 38, 38, 10, 10)
-                        if (iconImg != null && iconImg.image != null) {
-                            val clip = java.awt.geom.RoundRectangle2D.Float(iconX.toFloat(), iconY.toFloat(), 38f, 38f, 10f, 10f)
-                            g2.clip = clip
-                            g2.drawImage(iconImg.image, iconX, iconY, 38, 38, null)
-                            g2.clip = null
-                        } else {
-                            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
-                            g2.color = Theme.ACCENT
-                            val initials = ext.name.take(2).uppercase()
-                            val fm = g2.fontMetrics
-                            g2.drawString(initials, iconX + (38 - fm.stringWidth(initials)) / 2, iconY + (38 + fm.ascent) / 2 - 2)
-                        }
-                        g2.color = Theme.BORDER_SUBTLE
-                        g2.drawRoundRect(iconX, iconY, 38, 38, 10, 10)
-
-                        val textX = iconX + 48
-                        g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 15f)
-                        g2.color = Theme.TEXT_PRIMARY
-                        g2.drawString(ext.name, textX, 26)
-                        if (ext.isNsfw) {
-                            val titleW = g2.fontMetrics.stringWidth(ext.name)
-                            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
-                            val nsfwText = "18+"
-                            val nw = g2.fontMetrics.stringWidth(nsfwText) + 10
-                            g2.color = Theme.ACCENT_SOFT
-                            g2.fillRoundRect(textX + 8 + titleW, 12, nw, 18, 6, 6)
-                            g2.color = Theme.ACCENT_HOVER
-                            g2.drawString(nsfwText, textX + 13 + titleW, 25)
-                        }
-
-                        g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
-                        g2.color = Theme.TEXT_MUTED
-                        g2.drawString("${ext.baseUrl}  │  ${ext.language.uppercase()}", textX, 46)
-
-                        val badge = "● Instalada"
-                        g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
-                        g2.color = Theme.SUCCESS
-                        g2.drawString(badge, x + w - g2.fontMetrics.stringWidth(badge) - 18, (h / 2) + 5)
-                        g2.dispose()
+            object : JPanel() {
+                init { isOpaque = false }
+                override fun paintComponent(g: Graphics) {
+                    val g2 = g.create() as Graphics2D
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+                    val x = 8; val w = width - 16; val h = height
+                    if (selected) {
+                        g2.color = Theme.BG_CARD_HOVER
+                        g2.fillRoundRect(x, 2, w, h - 4, 6, 6)
                     }
+                    g2.color = Theme.BORDER_SUBTLE
+                    g2.drawLine(x + 6, h - 1, x + w - 6, h - 1)
+
+                    // Extension Logo Box
+                    val iconX = x + 12
+                    val iconY = (h - 38) / 2
+                    g2.color = Theme.BG_SURFACE
+                    g2.fillRoundRect(iconX, iconY, 38, 38, 10, 10)
+                    if (iconImg != null && iconImg.image != null) {
+                        val clip = java.awt.geom.RoundRectangle2D.Float(iconX.toFloat(), iconY.toFloat(), 38f, 38f, 10f, 10f)
+                        g2.clip = clip
+                        g2.drawImage(iconImg.image, iconX, iconY, 38, 38, null)
+                        g2.clip = null
+                    } else {
+                        g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
+                        g2.color = Theme.ACCENT
+                        val initials = ext.name.take(2).uppercase()
+                        val fm = g2.fontMetrics
+                        g2.drawString(initials, iconX + (38 - fm.stringWidth(initials)) / 2, iconY + (38 + fm.ascent) / 2 - 2)
+                    }
+                    g2.color = Theme.BORDER_SUBTLE
+                    g2.drawRoundRect(iconX, iconY, 38, 38, 10, 10)
+
+                    val textX = iconX + 48
+                    g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 15f)
+                    g2.color = Theme.TEXT_PRIMARY
+                    g2.drawString(ext.name, textX, 26)
+                    if (ext.isNsfw) {
+                        val titleW = g2.fontMetrics.stringWidth(ext.name)
+                        g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
+                        val nsfwText = "18+"
+                        val nw = g2.fontMetrics.stringWidth(nsfwText) + 10
+                        g2.color = Theme.ACCENT_SOFT
+                        g2.fillRoundRect(textX + 8 + titleW, 12, nw, 18, 6, 6)
+                        g2.color = Theme.ACCENT_HOVER
+                        g2.drawString(nsfwText, textX + 13 + titleW, 25)
+                    }
+
+                    g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
+                    g2.color = Theme.TEXT_MUTED
+                    g2.drawString("${ext.baseUrl}  │  ${ext.language.uppercase()}", textX, 46)
+
+                    val badge = "● Instalada"
+                    g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
+                    g2.color = Theme.SUCCESS
+                    g2.drawString(badge, x + w - g2.fontMetrics.stringWidth(badge) - 18, (h / 2) + 5)
+                    g2.dispose()
                 }
             }
+        }
         val scroll = JScrollPane(list).apply {
             border = null
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
         }
         add(scroll, BorderLayout.CENTER)
-        val footer = JLabel("  ${ctx.extensions.size} fonte(s) ativa(s)  •  Adicione arquivos .json em ~/.mihon/sources/ ou .jar em ~/.mihon/extensions/").apply {
+        footer.apply {
             foreground = Theme.TEXT_MUTED
             border = BorderFactory.createEmptyBorder(10, 14, 10, 14)
         }
         add(footer, BorderLayout.SOUTH)
 
+        ctx.addExtensionListener {
+            refreshModel()
+        }
+
         ctx.addThemeListener {
             background = Theme.BG_APP
+            betaBar.background = Theme.BG_SURFACE
+            betaBar.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(12, 24, 12, 24),
+            )
             list.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
@@ -608,6 +724,13 @@ class ExtensionsScreen(ctx: AppContext) : JPanel(BorderLayout()) {
             list.repaint()
             repaint()
         }
+    }
+
+    fun refreshModel() {
+        model.clear()
+        ctx.extensions.forEach { model.addElement(it) }
+        footer.text = "  ${ctx.extensions.size} fonte(s) ativa(s)  •  Adicione links acima ou arquivos .json em ~/.mihon/sources/"
+        list.repaint()
     }
 }
 
@@ -667,6 +790,10 @@ class SourcesListScreen(
             scroll.viewport.background = Theme.BG_APP
             rebuildList()
             repaint()
+        }
+
+        ctx.addExtensionListener {
+            rebuildList()
         }
 
         rebuildList()
