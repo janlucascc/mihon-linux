@@ -313,40 +313,78 @@ class MihonApp : JFrame("Mihon"), Navigator {
     }
 
     private var sidebarCollapsed = prefs.getBoolean("sidebar_collapsed", false)
+    private var sidebarAnimTimer: javax.swing.Timer? = null
+    private var sidebarProgress: Float = if (sidebarCollapsed) 1f else 0f
     private lateinit var sidePanel: JPanel
     private lateinit var btnToggleSidebar: JButton
     private lateinit var topRow: JPanel
     private lateinit var brandLabel: JLabel
     private lateinit var versionLabel: JLabel
 
-    private fun updateSidebarLayout() {
-        val width = if (sidebarCollapsed) 64 else 210
-        val padH = if (sidebarCollapsed) 8 else 12
+    private fun applySidebarProgress(progress: Float) {
+        val p = progress.coerceIn(0f, 1f)
+        sidebarProgress = p
+        val width = (210f + (64f - 210f) * p).toInt()
+        val padH = (12f + (8f - 12f) * p).toInt()
         sidePanel.preferredSize = Dimension(width, 0)
         sidePanel.border = BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
             BorderFactory.createEmptyBorder(16, padH, 16, padH),
         )
-        brandLabel.isVisible = !sidebarCollapsed
-        versionLabel.isVisible = !sidebarCollapsed
-        btnToggleSidebar.icon = ModernIcons.sidebarToggle(18, sidebarCollapsed) { Theme.TEXT_PRIMARY }
-        btnToggleSidebar.toolTipText = if (sidebarCollapsed) "Expandir menu lateral" else "Recolher menu lateral"
 
-        topRow.removeAll()
-        if (sidebarCollapsed) {
-            topRow.add(btnToggleSidebar, BorderLayout.CENTER)
-        } else {
-            topRow.add(brandLabel, BorderLayout.WEST)
-            topRow.add(btnToggleSidebar, BorderLayout.EAST)
+        val showBrand = p < 0.45f
+        if (brandLabel.isVisible != showBrand) {
+            brandLabel.isVisible = showBrand
+            versionLabel.isVisible = showBrand
+            topRow.removeAll()
+            if (!showBrand) {
+                topRow.add(btnToggleSidebar, BorderLayout.CENTER)
+            } else {
+                topRow.add(brandLabel, BorderLayout.WEST)
+                topRow.add(btnToggleSidebar, BorderLayout.EAST)
+            }
         }
+        val textAlpha = ((1f - p * 1.8f).coerceIn(0f, 1f) * 255).toInt()
+        brandLabel.foreground = Color(Theme.TEXT_PRIMARY.red, Theme.TEXT_PRIMARY.green, Theme.TEXT_PRIMARY.blue, textAlpha)
+        versionLabel.foreground = Color(Theme.TEXT_MUTED.red, Theme.TEXT_MUTED.green, Theme.TEXT_MUTED.blue, textAlpha)
 
         navButtons.values.forEach { btn ->
             if (btn is M3NavPillButton) {
-                btn.isCollapsed = sidebarCollapsed
+                btn.collapseProgress = p
+                btn.isCollapsed = p > 0.5f
             }
         }
         sidePanel.revalidate()
         sidePanel.repaint()
+    }
+
+    private fun updateSidebarLayout(animate: Boolean = false) {
+        btnToggleSidebar.icon = ModernIcons.sidebarToggle(18, sidebarCollapsed) { Theme.TEXT_PRIMARY }
+        btnToggleSidebar.toolTipText = if (sidebarCollapsed) "Expandir menu lateral" else "Recolher menu lateral"
+
+        val target = if (sidebarCollapsed) 1f else 0f
+        sidebarAnimTimer?.stop()
+        if (!animate) {
+            applySidebarProgress(target)
+            return
+        }
+
+        val start = sidebarProgress
+        val durationMs = 220L
+        val startTime = System.currentTimeMillis()
+        sidebarAnimTimer = javax.swing.Timer(12) { e ->
+            val elapsed = System.currentTimeMillis() - startTime
+            val rawT = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+            // Ease-out cubic for silky smooth deceleration
+            val inv = 1f - rawT
+            val eased = 1f - (inv * inv * inv)
+            val current = start + (target - start) * eased
+            applySidebarProgress(current)
+            if (rawT >= 1f) {
+                (e.source as? javax.swing.Timer)?.stop()
+                applySidebarProgress(target)
+            }
+        }.also { it.start() }
     }
 
     private fun sidebar(): JPanel {
@@ -375,7 +413,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
             addActionListener {
                 sidebarCollapsed = !sidebarCollapsed
                 prefs.putBoolean("sidebar_collapsed", sidebarCollapsed)
-                updateSidebarLayout()
+                updateSidebarLayout(animate = true)
             }
         }
         topRow = JPanel(BorderLayout()).apply {
@@ -414,6 +452,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
                 alignmentX = 0f
                 maximumSize = Dimension(Int.MAX_VALUE, 42)
                 isCollapsed = sidebarCollapsed
+                collapseProgress = if (sidebarCollapsed) 1f else 0f
                 addActionListener {
                     when (card) {
                         LIBRARY -> showLibrary()
@@ -448,11 +487,8 @@ class MihonApp : JFrame("Mihon"), Navigator {
             }
         }
 
-        val btnCustomTheme = JButton("Editar Cores do Tema...").apply {
-            font = font.deriveFont(Font.PLAIN, 12f)
+        val btnCustomTheme = ModernButton("Editar Cores do Tema...", variant = ModernButton.Variant.SURFACE).apply {
             alignmentX = 0f
-            margin = java.awt.Insets(4, 12, 4, 12)
-            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
             addActionListener { openCustomThemeDialog() }
         }
 
@@ -526,8 +562,8 @@ class MihonApp : JFrame("Mihon"), Navigator {
             }
         }
 
-        val btnBackup = JButton("Exportar Backup (.zip)").apply { addActionListener { exportBackup() } }
-        val btnRestore = JButton("Restaurar Backup (.zip)").apply { addActionListener { importBackup() } }
+        val btnBackup = ModernButton("Exportar Backup (.zip)", ModernIcons.downloads(14) { Theme.TEXT_PRIMARY }, ModernButton.Variant.SURFACE).apply { addActionListener { exportBackup() } }
+        val btnRestore = ModernButton("Restaurar Backup (.zip)", ModernIcons.sync(14) { Theme.TEXT_PRIMARY }, ModernButton.Variant.SURFACE).apply { addActionListener { importBackup() } }
         val backupRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             isOpaque = false
             alignmentX = 0f
@@ -547,19 +583,14 @@ class MihonApp : JFrame("Mihon"), Navigator {
             alignmentX = 0f
             maximumSize = Dimension(Int.MAX_VALUE, 38)
             preferredSize = Dimension(400, 38)
-            val backBtn = JButton("← Voltar").apply {
-                isFocusable = false
-                font = font.deriveFont(Font.BOLD, 13f)
-                margin = java.awt.Insets(4, 10, 4, 10)
-                putClientProperty("JButton.buttonType", "roundRect")
-                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            val backBtn = ModernButton("Voltar", ModernIcons.chevronLeft(15) { Theme.TEXT_PRIMARY }, ModernButton.Variant.SURFACE).apply {
                 toolTipText = "Voltar para o menu Mais"
                 addActionListener {
                     navigate(MORE)
                 }
             }
             add(backBtn)
-            add(Box.createHorizontalStrut(8))
+            add(Box.createHorizontalStrut(12))
             add(titleLbl)
         }
 
@@ -575,7 +606,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
         val lblLogs = JLabel("Logs: ${File(home, ".mihon/logs/mihon.log").absolutePath}").apply { alignmentX = 0f; foreground = Theme.TEXT_MUTED }
 
         val lblAppActionsTitle = JLabel("Aplicativo & Ajuda:").apply { font = font.deriveFont(Font.BOLD, 14f); alignmentX = 0f; foreground = Theme.TEXT_PRIMARY }
-        val btnAbout = JButton("ℹ️ Sobre o Mihon").apply {
+        val btnAbout = ModernButton("Sobre o Mihon", ModernIcons.about(15) { Theme.TEXT_PRIMARY }, ModernButton.Variant.SURFACE).apply {
             addActionListener {
                 JOptionPane.showMessageDialog(
                     this@MihonApp,
@@ -585,7 +616,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
                 )
             }
         }
-        val btnExit = JButton("Encerrar Aplicativo").apply {
+        val btnExit = ModernButton("Encerrar Aplicativo", variant = ModernButton.Variant.SURFACE).apply {
             addActionListener {
                 this@MihonApp.dispatchEvent(java.awt.event.WindowEvent(this@MihonApp, java.awt.event.WindowEvent.WINDOW_CLOSING))
             }
@@ -1100,7 +1131,11 @@ class M3NavPillButton(
         set(value) {
             field = value
             toolTipText = if (value) labelText else null
-            revalidate()
+        }
+
+    var collapseProgress: Float = 0f
+        set(value) {
+            field = value.coerceIn(0f, 1f)
             repaint()
         }
 
@@ -1131,12 +1166,15 @@ class M3NavPillButton(
         val pillY = 2
         val pillW = w - 4
         val pillH = h - 4
-        val arc = pillH
+        val arc = 12
 
-        // M3 Active Pill Container
+        // Modern Squircle Active Pill Container
         if (isSelected) {
             g2.color = Theme.BG_PILL_ACTIVE
             g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
+            // Subtle accent indicator bar on the left
+            g2.color = Theme.ACCENT
+            g2.fillRoundRect(pillX, pillY + 8, 3, pillH - 16, 3, 3)
         } else if (model.isRollover) {
             g2.color = Theme.BG_CARD_HOVER
             g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
@@ -1146,15 +1184,17 @@ class M3NavPillButton(
         val iconH = navIcon.iconHeight
         val iconY = (h - iconH) / 2
 
-        if (isCollapsed) {
-            val iconX = (w - iconW) / 2
-            navIcon.paintIcon(this, g2, iconX, iconY)
-        } else {
-            val iconX = 14
-            navIcon.paintIcon(this, g2, iconX, iconY)
+        val expandedIconX = 14f
+        val collapsedIconX = (w - iconW) / 2f
+        val iconX = (expandedIconX + (collapsedIconX - expandedIconX) * collapseProgress).toInt()
+        navIcon.paintIcon(this, g2, iconX, iconY)
 
+        // Smooth alpha fade-out for text and badge during collapse
+        val textAlpha = ((1f - collapseProgress * 1.6f).coerceIn(0f, 1f) * 255).toInt()
+        if (textAlpha > 4) {
             g2.font = font.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
-            g2.color = if (isSelected) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+            val baseColor = if (isSelected) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+            g2.color = Color(baseColor.red, baseColor.green, baseColor.blue, textAlpha)
             val fm = g2.fontMetrics
             val textX = iconX + iconW + 12
             val textY = ((h - fm.height) / 2) + fm.ascent
@@ -1168,9 +1208,10 @@ class M3NavPillButton(
                 val bh = 18
                 val bx = w - bw - 12
                 val by = (h - bh) / 2
-                g2.color = if (isSelected) (if (Theme.isDark) Color(255, 255, 255, 45) else Color(0, 0, 0, 30)) else (if (Theme.isDark) Color(255, 255, 255, 25) else Color(0, 0, 0, 16))
+                val badgeBgAlpha = ((if (isSelected) 45 else 25) * (textAlpha / 255f)).toInt()
+                g2.color = if (Theme.isDark) Color(255, 255, 255, badgeBgAlpha) else Color(0, 0, 0, badgeBgAlpha)
                 g2.fillRoundRect(bx, by, bw, bh, bh, bh)
-                g2.color = Theme.TEXT_PRIMARY
+                g2.color = Color(Theme.TEXT_PRIMARY.red, Theme.TEXT_PRIMARY.green, Theme.TEXT_PRIMARY.blue, textAlpha)
                 g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
             }
         }
@@ -1388,9 +1429,9 @@ class MoreScreen(
                 val left = JPanel().apply {
                     isOpaque = false
                     layout = BoxLayout(this, BoxLayout.X_AXIS)
-                    border = BorderFactory.createEmptyBorder(0, 5, 0, 0)
+                    border = BorderFactory.createEmptyBorder(0, 15, 0, 0)
                     add(iconLbl)
-                    add(Box.createHorizontalStrut(5))
+                    add(Box.createHorizontalStrut(15))
                     add(
                         JPanel().apply {
                             isOpaque = false
@@ -1471,9 +1512,9 @@ class MoreScreen(
                 val left = JPanel().apply {
                     isOpaque = false
                     layout = BoxLayout(this, BoxLayout.X_AXIS)
-                    border = BorderFactory.createEmptyBorder(0, 5, 0, 0)
+                    border = BorderFactory.createEmptyBorder(0, 15, 0, 0)
                     add(JLabel(icon))
-                    add(Box.createHorizontalStrut(5))
+                    add(Box.createHorizontalStrut(15))
                     add(
                         JPanel().apply {
                             isOpaque = false

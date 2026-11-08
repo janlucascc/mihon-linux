@@ -642,3 +642,150 @@ object ModernIcons {
             }
         }
 }
+
+/**
+ * Modern custom-painted button inspired by Shadcn UI, Linear, and Komga/Kavita desktop interfaces.
+ * Eliminates legacy Swing/FlatLaf thick gray borders and washed-out fills in favor of crisp
+ * 1px hairlines, subtle elevation highlights, smooth hover transitions, and clear visual hierarchy.
+ */
+class ModernButton(
+    text: String = "",
+    icon: Icon? = null,
+    var variant: Variant = Variant.SURFACE,
+) : javax.swing.JButton(text, icon) {
+
+    enum class Variant {
+        PRIMARY,   // Vibrant Indigo/Violet CTA with top specular highlight and white text
+        FAVORITE,  // Active Ruby/Rose tonal surface with subtle border and rose text
+        SURFACE,   // Sleek dark/light card surface with 1px subtle border
+        GHOST,     // Transparent at rest, soft surface fill on hover
+    }
+
+    init {
+        isOpaque = false
+        isContentAreaFilled = false
+        isBorderPainted = false
+        isFocusPainted = false
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        font = font.deriveFont(java.awt.Font.BOLD, 12.5f)
+        iconTextGap = 8
+        updatePadding()
+    }
+
+    private fun updatePadding() {
+        val hasText = !text.isNullOrBlank()
+        border = if (hasText) {
+            javax.swing.BorderFactory.createEmptyBorder(7, 14, 7, 14)
+        } else {
+            javax.swing.BorderFactory.createEmptyBorder(7, 9, 7, 9)
+        }
+    }
+
+    override fun setText(text: String?) {
+        super.setText(text)
+        updatePadding()
+    }
+
+    override fun paintBorder(g: Graphics) {
+        // Suppressed: border is drawn with sub-pixel anti-aliasing inside paintComponent
+    }
+
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+        g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
+
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val arc = 10f
+        val hovered = model.isRollover && isEnabled
+        val pressed = model.isPressed && isEnabled
+
+        val shape = RoundRectangle2D.Float(1f, 1f, w - 2f, h - 2f, arc, arc)
+
+        when (variant) {
+            Variant.PRIMARY -> {
+                val topColor = when {
+                    pressed -> Color(0x43, 0x38, 0xCA)
+                    hovered -> Color(0x6D, 0x70, 0xF8)
+                    else -> Color(0x5B, 0x5E, 0xF0)
+                }
+                val botColor = when {
+                    pressed -> Color(0x37, 0x30, 0xA3)
+                    hovered -> Color(0x56, 0x4E, 0xE8)
+                    else -> Color(0x48, 0x40, 0xDC)
+                }
+                g2.paint = java.awt.GradientPaint(0f, 1f, topColor, 0f, h - 1f, botColor)
+                g2.fill(shape)
+
+                // Top specular inner highlight (Linear / Shadcn style)
+                g2.color = Color(255, 255, 255, if (hovered) 65 else 45)
+                g2.stroke = BasicStroke(1f)
+                g2.draw(RoundRectangle2D.Float(1.5f, 1.5f, w - 3f, h - 3f, arc - 1f, arc - 1f))
+
+                foreground = Color.WHITE
+            }
+
+            Variant.FAVORITE -> {
+                val bgAlpha = when {
+                    pressed -> 52
+                    hovered -> 42
+                    else -> 28
+                }
+                g2.color = Color(0xF4, 0x3F, 0x5E, bgAlpha)
+                g2.fill(shape)
+
+                g2.color = Color(0xF4, 0x3F, 0x5E, if (hovered) 130 else 85)
+                g2.stroke = BasicStroke(1f)
+                g2.draw(shape)
+
+                foreground = if (Theme.isDark) Color(0xFB, 0x71, 0x85) else Color(0xE1, 0x1D, 0x48)
+            }
+
+            Variant.SURFACE -> {
+                val bg = if (Theme.isDark) {
+                    when {
+                        pressed -> Color(0x18, 0x1A, 0x20)
+                        hovered -> Color(0x28, 0x2B, 0x35)
+                        else -> Color(0x1E, 0x20, 0x28)
+                    }
+                } else {
+                    when {
+                        pressed -> Color(0xE2, 0xE8, 0xF0)
+                        hovered -> Color(0xEA, 0xF0, 0xF6)
+                        else -> Color(0xF4, 0xF6, 0xF9)
+                    }
+                }
+                g2.color = bg
+                g2.fill(shape)
+
+                val borderCol = if (Theme.isDark) {
+                    Color(255, 255, 255, if (hovered) 42 else 22)
+                } else {
+                    Color(0, 0, 0, if (hovered) 36 else 20)
+                }
+                g2.color = borderCol
+                g2.stroke = BasicStroke(1f)
+                g2.draw(shape)
+
+                foreground = Theme.TEXT_PRIMARY
+            }
+
+            Variant.GHOST -> {
+                if (pressed || hovered) {
+                    g2.color = if (Theme.isDark) {
+                        Color(255, 255, 255, if (pressed) 26 else 16)
+                    } else {
+                        Color(0, 0, 0, if (pressed) 20 else 12)
+                    }
+                    g2.fill(shape)
+                }
+                foreground = if (hovered) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+            }
+        }
+
+        g2.dispose()
+        super.paintComponent(g)
+    }
+}
