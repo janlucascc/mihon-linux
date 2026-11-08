@@ -610,10 +610,13 @@ class MihonApp : JFrame("Mihon"), Navigator {
         }
 
         // Botão para abrir o Menu Teste comparativo
-        val btnOpenTestLab = JButton("🔬 Abrir Menu Teste Comparativo (Pág. 2 • Cap. 1)").apply {
-            font = font.deriveFont(Font.BOLD, 13f)
+        val btnOpenTestLab = JButton("Abrir Menu Teste Comparativo (Pág. 2 • Cap. 1)").apply {
+            icon = ModernIcons.sparkles(16) { Theme.TEXT_PRIMARY }
+            font = font.deriveFont(Font.BOLD, 12.5f)
             putClientProperty("JButton.buttonType", "roundRect")
             alignmentX = 0f
+            background = Theme.BG_CARD_HOVER
+            foreground = Theme.TEXT_PRIMARY
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
             toolTipText = "Compara a qualidade da imagem padrão (Original vs Ultra HD vs Bilinear)"
             addActionListener {

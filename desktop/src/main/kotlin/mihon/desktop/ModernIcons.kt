@@ -324,6 +324,112 @@ object ModernIcons {
         }
 
     /**
+     * Chevron left back arrow (‹) rendered smoothly.
+     */
+    fun chevronLeft(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val chev = Path2D.Float().apply {
+                    moveTo(15.0f, 6.0f)
+                    lineTo(9.0f, 12.0f)
+                    lineTo(15.0f, 18.0f)
+                }
+                g2.draw(chev)
+            }
+        }
+
+    /**
+     * Heart icon for favorites.
+     */
+    fun heart(size: Int = 18, filled: Boolean = false, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val h = Path2D.Float().apply {
+                    moveTo(12.0f, 20.0f)
+                    curveTo(4.5f, 14.5f, 2.5f, 9.5f, 5.0f, 5.5f)
+                    curveTo(7.0f, 2.5f, 10.5f, 3.5f, 12.0f, 6.5f)
+                    curveTo(13.5f, 3.5f, 17.0f, 2.5f, 19.0f, 5.5f)
+                    curveTo(21.5f, 9.5f, 19.5f, 14.5f, 12.0f, 20.0f)
+                    closePath()
+                }
+                if (filled) g2.fill(h) else g2.draw(h)
+            }
+        }
+
+    /**
+     * Play triangle for reading / continue button.
+     */
+    fun play(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                val p = Path2D.Float().apply {
+                    moveTo(8.0f, 5.5f)
+                    lineTo(18.5f, 12.0f)
+                    lineTo(8.0f, 18.5f)
+                    closePath()
+                }
+                g2.fill(p)
+            }
+        }
+
+    /**
+     * Sync / Refresh circular arrows icon.
+     */
+    fun sync(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawArc(4, 4, 16, 16, 45, 135)
+                g2.drawLine(4, 7, 7, 10)
+                g2.drawLine(4, 7, 7, 4)
+                g2.drawArc(4, 4, 16, 16, 225, 135)
+                g2.drawLine(20, 17, 17, 14)
+                g2.drawLine(20, 17, 17, 20)
+            }
+        }
+
+    /**
+     * Checkmark icon.
+     */
+    fun check(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val p = Path2D.Float().apply {
+                    moveTo(4.5f, 12.5f)
+                    lineTo(9.5f, 17.5f)
+                    lineTo(19.5f, 6.5f)
+                }
+                g2.draw(p)
+            }
+        }
+
+    /**
+     * Trash bin icon.
+     */
+    fun trash(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawLine(4, 6, 20, 6)
+                g2.drawLine(9, 4, 15, 4)
+                val body = Path2D.Float().apply {
+                    moveTo(6.0f, 6.0f)
+                    lineTo(7.0f, 19.0f)
+                    quadTo(7.0f, 20.5f, 8.5f, 20.5f)
+                    lineTo(15.5f, 20.5f)
+                    quadTo(17.0f, 20.5f, 17.0f, 19.0f)
+                    lineTo(18.0f, 6.0f)
+                }
+                g2.draw(body)
+                g2.drawLine(10, 10, 10, 17)
+                g2.drawLine(14, 10, 14, 17)
+            }
+        }
+
+    /**
      * Search magnifying glass.
      */
     fun search(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
@@ -360,6 +466,53 @@ object ModernIcons {
                 g2.drawLine(12, 6, 12, 6)
                 g2.drawLine(12, 12, 12, 12)
                 g2.drawLine(12, 18, 12, 18)
+            }
+        }
+
+    /**
+     * Sort order icon: antiparallel vertical arrows (↑↓).
+     */
+    fun sort(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                // Left arrow pointing up
+                g2.drawLine(7, 18, 7, 6)
+                g2.drawLine(7, 6, 4, 9)
+                g2.drawLine(7, 6, 10, 9)
+                // Right arrow pointing down
+                g2.drawLine(17, 6, 17, 18)
+                g2.drawLine(17, 18, 14, 15)
+                g2.drawLine(17, 18, 20, 15)
+            }
+        }
+
+    /**
+     * Sparkles / Graphic enhancement icon.
+     */
+    fun sparkles(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                // Main 4-point star
+                val s = Path2D.Float().apply {
+                    moveTo(12f, 2f)
+                    quadTo(12f, 10f, 20f, 10f)
+                    quadTo(12f, 10f, 12f, 18f)
+                    quadTo(12f, 10f, 4f, 10f)
+                    quadTo(12f, 10f, 12f, 2f)
+                    closePath()
+                }
+                g2.fill(s)
+                // Small secondary star
+                val s2 = Path2D.Float().apply {
+                    moveTo(19f, 15f)
+                    quadTo(19f, 18.5f, 22.5f, 18.5f)
+                    quadTo(19f, 18.5f, 19f, 22f)
+                    quadTo(19f, 18.5f, 15.5f, 18.5f)
+                    quadTo(19f, 18.5f, 19f, 15f)
+                    closePath()
+                }
+                g2.fill(s2)
             }
         }
 }

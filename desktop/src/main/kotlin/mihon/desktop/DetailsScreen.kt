@@ -21,6 +21,7 @@ import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JLabel
 import javax.swing.JList
+import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
@@ -54,7 +55,10 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         font = font.deriveFont(Font.BOLD, 14f)
     }
     private val filterCombo = JComboBox(arrayOf("Todos os capítulos", "Apenas não lidos", "Apenas baixados"))
-    private val sortOrderBtn = JButton("⇅ Ordem").apply {
+    private val sortOrderBtn = JButton("Ordem").apply {
+        icon = ModernIcons.sort(14) { Theme.TEXT_PRIMARY }
+        putClientProperty("JButton.buttonType", "roundRect")
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         addActionListener {
             reverseOrder = !reverseOrder
             applyChapterListFilter()
@@ -63,13 +67,18 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val catPicker = JComboBox(
         LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }.map { it.second }.toTypedArray(),
     )
-    private val btnFavorite = JButton("♥ Favoritar").apply {
-        font = font.deriveFont(Font.BOLD, 12.5f)
+    private val btnFavorite = JButton("Favoritar").apply {
+        icon = ModernIcons.heart(16, filled = false) { Theme.TEXT_PRIMARY }
+        font = font.deriveFont(Font.BOLD, 12f)
+        putClientProperty("JButton.buttonType", "roundRect")
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         addActionListener { toggleFavorite() }
     }
-    private val btnContinue = JButton("▶ Continuar Leitura").apply {
-        font = font.deriveFont(Font.BOLD, 13f)
+    private val btnContinue = JButton("Continuar Leitura").apply {
+        icon = ModernIcons.play(13) { Theme.TEXT_PRIMARY }
+        font = font.deriveFont(Font.BOLD, 12f)
+        putClientProperty("JButton.buttonType", "roundRect")
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         addActionListener { continueReading() }
     }
     private val progressBar = JProgressBar(0, 100).apply {
@@ -158,18 +167,87 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             applyChapterListFilter()
         }
 
-        val actions = JPanel(FlowLayout(FlowLayout.LEFT, 10, 10)).apply {
-            background = Theme.BG_APP
-            border = BorderFactory.createEmptyBorder(4, 14, 4, 14)
-            add(JButton("← Biblioteca").apply { addActionListener { ctx.navigator.showLibrary() } })
+        val btnBack = JButton("Biblioteca").apply {
+            icon = ModernIcons.chevronLeft(16) { Theme.TEXT_PRIMARY }
+            font = font.deriveFont(Font.BOLD, 12f)
+            putClientProperty("JButton.buttonType", "roundRect")
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            addActionListener { ctx.navigator.showLibrary() }
+        }
+
+        val btnDownload = JButton("Baixar Tudo").apply {
+            icon = ModernIcons.downloads(15) { Theme.TEXT_PRIMARY }
+            font = font.deriveFont(Font.BOLD, 12f)
+            putClientProperty("JButton.buttonType", "roundRect")
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Baixar todos os capítulos do mangá"
+            addActionListener { downloadSelected() }
+        }
+
+        val btnSync = JButton("Sincronizar").apply {
+            icon = ModernIcons.sync(15) { Theme.TEXT_PRIMARY }
+            font = font.deriveFont(Font.BOLD, 12f)
+            putClientProperty("JButton.buttonType", "roundRect")
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Atualizar capítulos da fonte online"
+            addActionListener { refreshRemoteChapters() }
+        }
+
+        val btnOverflow = JButton().apply {
+            icon = ModernIcons.moreVert(18) { Theme.TEXT_PRIMARY }
+            putClientProperty("JButton.buttonType", "roundRect")
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Mais opções"
+            addActionListener {
+                val menu = JPopupMenu().apply {
+                    val miMarkRead = JMenuItem("Marcar selecionados como lidos", ModernIcons.check(14) { Theme.TEXT_PRIMARY }).apply {
+                        addActionListener { markSelected(true) }
+                    }
+                    val miMarkUnread = JMenuItem("Marcar selecionados como não lidos").apply {
+                        addActionListener { markSelected(false) }
+                    }
+                    val miRemove = JMenuItem("Remover da biblioteca", ModernIcons.trash(14) { Color(0xE0, 0x55, 0x65) }).apply {
+                        foreground = Color(0xE0, 0x55, 0x65)
+                        addActionListener { removeCurrent() }
+                    }
+                    add(miMarkRead)
+                    add(miMarkUnread)
+                    addSeparator()
+                    add(miRemove)
+                }
+                menu.show(this, 0, height)
+            }
+        }
+
+        catPicker.apply {
+            putClientProperty("JComboBox.buttonType", "roundRect")
+            preferredSize = Dimension(140, 30)
+        }
+
+        val leftActions = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+            isOpaque = false
+            add(btnBack)
             add(btnFavorite)
             add(btnContinue)
-            add(JButton("⬇ Baixar Tudo").apply { addActionListener { downloadSelected() } })
-            add(JButton("✔ Marcar Lido").apply { addActionListener { markSelected(true) } })
-            add(JButton("↻ Sincronizar").apply { addActionListener { refreshRemoteChapters() } })
-            add(JLabel("Categoria:"))
+        }
+
+        val rightActions = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            isOpaque = false
+            add(btnDownload)
+            add(btnSync)
+            add(JLabel("Categoria:").apply {
+                foreground = Theme.TEXT_MUTED
+                font = font.deriveFont(Font.PLAIN, 12f)
+            })
             add(catPicker)
-            add(JButton("Remover").apply { addActionListener { removeCurrent() } })
+            add(btnOverflow)
+        }
+
+        val actions = JPanel(BorderLayout(8, 0)).apply {
+            background = Theme.BG_APP
+            border = BorderFactory.createEmptyBorder(6, 16, 6, 16)
+            add(leftActions, BorderLayout.WEST)
+            add(rightActions, BorderLayout.EAST)
         }
 
         // Mihon ChapterHeader bar (chapter count + filter + sort toggle)
@@ -229,12 +307,9 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private fun updateContinueButtonStyle() {
-        val btn = btnContinue ?: return
-        val bg = Theme.ACCENT
-        btn.background = bg
-        // Calculate relative luminance to guarantee readable high contrast
-        val lum = (bg.red * 299 + bg.green * 587 + bg.blue * 114) / 1000
-        btn.foreground = if (lum > 140) Color(0x10, 0x10, 0x12) else Color.WHITE
+        btnContinue.background = Theme.BG_CARD_HOVER
+        btnContinue.foreground = Theme.TEXT_PRIMARY
+        btnContinue.icon = ModernIcons.play(13) { Theme.TEXT_PRIMARY }
     }
 
     private fun showChapterMenu(x: Int, y: Int) {
@@ -388,9 +463,9 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 applyChapterListFilter()
                 btnContinue.text = if (resume != null) {
                     val pageSuffix = if (!resume.read && resume.lastPageRead > 0) " (pág. ${resume.lastPageRead + 1})" else ""
-                    "▶ Continuar: ${resume.name.take(22)}$pageSuffix"
+                    "Continuar: ${resume.name.take(20)}$pageSuffix"
                 } else {
-                    "▶ Ler do início"
+                    "Ler do início"
                 }
                 renderHeader(current)
             }
@@ -588,12 +663,15 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private fun updateFavoriteButtonState(isFav: Boolean) {
+        btnFavorite.icon = ModernIcons.heart(16, filled = isFav) {
+            if (isFav) Color(0xE5, 0x50, 0x65) else Theme.TEXT_PRIMARY
+        }
         if (isFav) {
-            btnFavorite.text = "♥ Na Biblioteca"
+            btnFavorite.text = "Na Biblioteca"
             btnFavorite.background = Theme.ACCENT_SOFT
-            btnFavorite.foreground = Theme.ACCENT_HOVER
+            btnFavorite.foreground = if (Theme.isDark) Color(0xFF, 0x85, 0x95) else Color(0xC0, 0x25, 0x35)
         } else {
-            btnFavorite.text = "♡ Adicionar à Biblioteca"
+            btnFavorite.text = "Adicionar"
             btnFavorite.background = Theme.BG_SURFACE
             btnFavorite.foreground = Theme.TEXT_PRIMARY
         }
