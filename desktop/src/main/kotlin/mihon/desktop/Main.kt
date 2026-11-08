@@ -1109,7 +1109,7 @@ class MoreScreen(
         val content = JPanel().apply {
             background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(28, 36, 36, 36)
+            border = BorderFactory.createEmptyBorder(24, 24, 28, 24)
         }
 
         // Page Header (AntiGravity H1 + Subtitle)
@@ -1360,7 +1360,7 @@ class MoreScreen(
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 24
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
         }
         add(scroll, BorderLayout.CENTER)
 

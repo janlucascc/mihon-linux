@@ -128,11 +128,11 @@ class SegmentedPillSelector<T>(
 
     private fun recalculatePreferredSize() {
         val fm = getFontMetrics(font.deriveFont(Font.BOLD, 12f))
-        var totalW = 8 // outer horizontal padding
+        var totalW = 6 // outer horizontal padding
         for ((_, label) in options) {
-            totalW += fm.stringWidth(label) + 24
+            totalW += fm.stringWidth(label) + 16
         }
-        val size = Dimension(totalW, 32)
+        val size = Dimension(totalW, 30)
         preferredSize = size
         minimumSize = size
         maximumSize = size
@@ -170,7 +170,7 @@ class SegmentedPillSelector<T>(
         val bounds = Array(options.size) { IntArray(2) }
         var curX = 3
         for (i in options.indices) {
-            val segW = fmBold.stringWidth(options[i].second) + 24
+            val segW = fmBold.stringWidth(options[i].second) + 16
             bounds[i][0] = curX
             bounds[i][1] = segW
             curX += segW
@@ -498,7 +498,7 @@ class AntiGravitySettingsScreen(
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 24
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
             themeUpdaters.add {
                 wrapper.background = Theme.BG_APP
                 background = Theme.BG_APP
@@ -511,16 +511,16 @@ class AntiGravitySettingsScreen(
         val page = JPanel().apply {
             background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(28, 36, 36, 36)
+            border = BorderFactory.createEmptyBorder(24, 24, 28, 24)
         }
 
         val h1 = JLabel(pageTitle).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 24f)
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
         val sub = JLabel(pageSubtitle).apply {
-            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
+            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
             foreground = Theme.TEXT_MUTED
             alignmentX = 0f
         }
@@ -528,7 +528,7 @@ class AntiGravitySettingsScreen(
         page.add(h1)
         page.add(Box.createVerticalStrut(4))
         page.add(sub)
-        page.add(Box.createVerticalStrut(24))
+        page.add(Box.createVerticalStrut(20))
 
         themeUpdaters.add {
             page.background = Theme.BG_APP
@@ -601,9 +601,9 @@ class AntiGravitySettingsScreen(
             add(rightControl)
         }
 
-        return JPanel(BorderLayout(16, 0)).apply {
+        return JPanel(BorderLayout(12, 0)).apply {
             isOpaque = false
-            border = BorderFactory.createEmptyBorder(14, 18, 14, 18)
+            border = BorderFactory.createEmptyBorder(12, 14, 12, 14)
             add(textCol, BorderLayout.CENTER)
             add(rightWrap, BorderLayout.EAST)
             themeUpdaters.add {
