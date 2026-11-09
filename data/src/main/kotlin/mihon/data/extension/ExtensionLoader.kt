@@ -79,6 +79,24 @@ class ExtensionLoader(
         return extensions
     }
 
+    fun loadDisabledExtensions(): List<ExtensionSource> {
+        val disabled = mutableListOf<ExtensionSource>()
+        if (!sourcesDir.exists()) return disabled
+
+        sourcesDir.listFiles { f -> f.name.endsWith(".json.disabled", ignoreCase = true) && f.name != "exemplo-template.json.disabled" }
+            ?.sortedBy { it.name }
+            ?.forEach { jsonFile ->
+                try {
+                    val config = json.decodeFromString<ScraperConfig>(jsonFile.readText())
+                    disabled.add(HttpScraperSource(config))
+                } catch (e: Exception) {
+                    println("Erro ao carregar fonte desativada ${jsonFile.name}: ${e.message}")
+                }
+            }
+
+        return disabled
+    }
+
     private fun writeSampleConfig() {
         val sample = File(sourcesDir, "exemplo-template.json.disabled")
         if (sample.exists()) return

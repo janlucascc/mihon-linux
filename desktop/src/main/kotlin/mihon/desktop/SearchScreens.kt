@@ -529,8 +529,13 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 }
 
 /** Lists the loaded extensions as crisp editorial rows and includes the Beta URL-to-Extension generator. */
+data class ExtensionUiItem(
+    val source: ExtensionSource,
+    val isEnabled: Boolean,
+)
+
 class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
-    private val model = DefaultListModel<ExtensionSource>()
+    private val model = DefaultListModel<ExtensionUiItem>()
     private val list = JList(model)
     private val footer = JLabel()
 
@@ -634,7 +639,9 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         list.background = Theme.BG_APP
         list.fixedCellHeight = 66
         list.border = BorderFactory.createEmptyBorder(14, 20, 18, 20)
-        list.cellRenderer = ListCellRenderer { _, ext, _, selected, _ ->
+        list.cellRenderer = ListCellRenderer { _, item, _, selected, _ ->
+            val ext = item.source
+            val isEnabled = item.isEnabled
             val iconImg = ctx.covers.getSourceIcon(ext) { list.repaint() }
             object : JPanel() {
                 init { isOpaque = false }
@@ -653,16 +660,22 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     // Extension Logo Box
                     val iconX = x + 12
                     val iconY = (h - 38) / 2
-                    g2.color = Theme.BG_SURFACE
+                    g2.color = if (isEnabled) Theme.BG_SURFACE else Theme.BG_CARD
                     g2.fillRoundRect(iconX, iconY, 38, 38, 10, 10)
                     if (iconImg != null && iconImg.image != null) {
                         val clip = java.awt.geom.RoundRectangle2D.Float(iconX.toFloat(), iconY.toFloat(), 38f, 38f, 10f, 10f)
                         g2.clip = clip
+                        if (!isEnabled) {
+                            // Dim icon when disabled
+                            val composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 0.45f)
+                            g2.composite = composite
+                        }
                         g2.drawImage(iconImg.image, iconX, iconY, 38, 38, null)
+                        g2.composite = java.awt.AlphaComposite.SrcOver
                         g2.clip = null
                     } else {
                         g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
-                        g2.color = Theme.ACCENT
+                        g2.color = if (isEnabled) Theme.ACCENT else Theme.TEXT_MUTED
                         val initials = ext.name.take(2).uppercase()
                         val fm = g2.fontMetrics
                         g2.drawString(initials, iconX + (38 - fm.stringWidth(initials)) / 2, iconY + (38 + fm.ascent) / 2 - 2)
@@ -672,7 +685,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
                     val textX = iconX + 48
                     g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 15f)
-                    g2.color = Theme.TEXT_PRIMARY
+                    g2.color = if (isEnabled) Theme.TEXT_PRIMARY else Theme.TEXT_MUTED
                     g2.drawString(ext.name, textX, 26)
                     if (ext.isNsfw) {
                         val titleW = g2.fontMetrics.stringWidth(ext.name)
@@ -689,9 +702,9 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     g2.color = Theme.TEXT_MUTED
                     g2.drawString("${ext.baseUrl}  │  ${ext.language.uppercase()}", textX, 46)
 
-                    val badge = "● Instalada"
+                    val badge = if (isEnabled) "● Ativa" else "○ Desativada"
                     g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
-                    g2.color = Theme.SUCCESS
+                    g2.color = if (isEnabled) Theme.SUCCESS else Theme.TEXT_MUTED
                     g2.drawString(badge, x + w - g2.fontMetrics.stringWidth(badge) - 18, (h / 2) + 5)
                     g2.dispose()
                 }
@@ -705,8 +718,8 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     val idx = list.locationToIndex(e.point)
                     if (idx >= 0 && list.getCellBounds(idx, idx)?.contains(e.point) == true) {
                         list.selectedIndex = idx
-                        val ext = model.get(idx)
-                        showExtensionContextMenu(ext, e.x, e.y)
+                        val item = model.get(idx)
+                        showExtensionContextMenu(item, e.x, e.y)
                     }
                 }
             }
@@ -743,7 +756,9 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
-    private fun showExtensionContextMenu(ext: ExtensionSource, x: Int, y: Int) {
+    private fun showExtensionContextMenu(item: ExtensionUiItem, x: Int, y: Int) {
+        val ext = item.source
+        val isEnabled = item.isEnabled
         val popup = JPopupMenu().apply {
             background = Theme.BG_SURFACE
             border = BorderFactory.createCompoundBorder(
@@ -752,14 +767,26 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             )
         }
 
-        val itemDisable = JMenuItem("Desativar extensão", ModernIcons.offline(16) { Theme.TEXT_PRIMARY }).apply {
-            font = Theme.FONT_UI.deriveFont(13f)
-            foreground = Theme.TEXT_PRIMARY
-            background = Theme.BG_SURFACE
-            addActionListener {
-                disableExtension(ext)
+        val itemToggle = if (isEnabled) {
+            JMenuItem("Desativar extensão", ModernIcons.offline(16) { Theme.TEXT_PRIMARY }).apply {
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
+                addActionListener {
+                    disableExtension(ext)
+                }
+            }
+        } else {
+            JMenuItem("Ativar extensão", ModernIcons.checkCircle(16) { Theme.SUCCESS }).apply {
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.SUCCESS
+                background = Theme.BG_SURFACE
+                addActionListener {
+                    enableExtension(ext)
+                }
             }
         }
+
         val itemRemove = JMenuItem("Remover extensão", ModernIcons.trash(16) { Theme.DANGER }).apply {
             font = Theme.FONT_UI.deriveFont(13f)
             foreground = Theme.DANGER
@@ -769,10 +796,28 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             }
         }
 
-        popup.add(itemDisable)
+        popup.add(itemToggle)
         popup.addSeparator()
         popup.add(itemRemove)
         popup.show(list, x, y)
+    }
+
+    private fun enableExtension(ext: ExtensionSource) {
+        val sourcesDir = File(System.getProperty("user.home"), ".mihon/sources")
+        val disabledFiles = sourcesDir.listFiles { f: File -> f.name.endsWith(".json.disabled", ignoreCase = true) }?.toList().orEmpty()
+        val target = disabledFiles.firstOrNull { f ->
+            f.name.contains(ext.name, ignoreCase = true) ||
+            f.readText().contains(ext.baseUrl, ignoreCase = true)
+        }
+
+        if (target != null) {
+            val enabledName = target.name.removeSuffix(".disabled")
+            val enabledFile = File(sourcesDir, enabledName)
+            target.renameTo(enabledFile)
+        }
+        ctx.registerExtension(ext)
+        ctx.setStatus("Extensão '${ext.name}' ativada.")
+        refreshModel()
     }
 
     private fun disableExtension(ext: ExtensionSource) {
@@ -789,6 +834,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         ctx.unregisterExtension(ext)
         ctx.setStatus("Extensão '${ext.name}' desativada.")
+        refreshModel()
     }
 
     private fun removeExtension(ext: ExtensionSource) {
@@ -812,12 +858,20 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         target?.delete()
         ctx.unregisterExtension(ext)
         ctx.setStatus("Extensão '${ext.name}' removida com sucesso.")
+        refreshModel()
     }
 
     fun refreshModel() {
         model.clear()
-        ctx.extensions.forEach { model.addElement(it) }
-        footer.text = "  ${ctx.extensions.size} fonte(s) ativa(s)  •  Adicione links acima ou arquivos .json em ~/.mihon/sources/"
+        val home = System.getProperty("user.home")
+        val disabledExtensions = mihon.data.extension.ExtensionLoader(File(home, ".mihon/extensions")).loadDisabledExtensions()
+
+        ctx.extensions.forEach { model.addElement(ExtensionUiItem(it, isEnabled = true)) }
+        disabledExtensions.forEach { model.addElement(ExtensionUiItem(it, isEnabled = false)) }
+
+        val activeCount = ctx.extensions.size
+        val disabledCount = disabledExtensions.size
+        footer.text = "  $activeCount ativa(s)  •  $disabledCount desativada(s)  •  Clique com o botão direito para ativar/desativar"
         list.repaint()
     }
 }
