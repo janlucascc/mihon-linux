@@ -37,7 +37,7 @@ import kotlin.math.min
 
 /**
  * Menu de Teste & Laboratório Visual:
- * Compara a qualidade da imagem padrão (Original vs Ultra HD vs Bilinear)
+ * Compara a qualidade da imagem padrão (Original vs Traço Nitido vs Bilinear)
  * na Página 2 do Capítulo 1 dos mangás da biblioteca sem upscaling forçado.
  */
 class UpscaleComparisonDialog(
@@ -139,7 +139,7 @@ class UpscaleComparisonDialog(
                 )
                 add(Box.createVerticalStrut(3))
                 add(
-                    JLabel("Avalie a melhoria de traço e contraste (Ultra HD) comparado à scan bruta original").apply {
+                    JLabel("Avalie a melhoria de traço e contraste (Traço Nitido) comparado à scan bruta original").apply {
                         font = font.deriveFont(12.5f)
                         foreground = Theme.TEXT_MUTED
                     },
@@ -263,12 +263,12 @@ class UpscaleComparisonDialog(
 
             val orig = raw.originalImg
 
-            // 1. Ultra HD (Restauração de traço de nanquim e cores na resolução padrão)
+            // 1. Traço Nitido (Restauração de traço de nanquim e cores na resolução padrão)
             val ultraHd = MangaImageEnhancer.scale(
                 src = orig,
                 targetW = orig.width,
                 targetH = orig.height,
-                quality = MangaImageEnhancer.QualityMode.ULTRA_HD,
+                quality = MangaImageEnhancer.QualityMode.NITIDO,
             )
 
             // 2. Bilinear Convencional
@@ -336,7 +336,7 @@ class UpscaleComparisonDialog(
         lblMetaRes.text = "${orig.width} × ${orig.height} px"
         val kbSize = data.originalBytes.size / 1024
         lblMetaSize.text = "$kbSize KB (${data.pageName})"
-        lblMetaStatus.text = "Ultra HD Pronto"
+        lblMetaStatus.text = "Traço Nitido Pronto"
 
         tabs.removeAll()
 
@@ -355,12 +355,12 @@ class UpscaleComparisonDialog(
 
         tabs.addTab("🔍 Comparador Split (Lado a Lado)", createSplitPanel(zoomCropOrig, zoomCropHd))
 
-        // 2. Ultra HD (Página Completa)
+        // 2. Traço Nitido (Página Completa)
         tabs.addTab(
-            "✨ Ultra HD (Traço Nítido)",
+            "✨ Traço Nitido (Traço Nítido)",
             createImageViewer(
                 data.ultraHdImg,
-                "Ultra HD (Linhas de nanquim reconstruídas + Contraste dinâmico) — ${data.ultraHdImg.width}x${data.ultraHdImg.height} px",
+                "Traço Nitido (Linhas de nanquim reconstruídas + Contraste dinâmico) — ${data.ultraHdImg.width}x${data.ultraHdImg.height} px",
             ),
         )
 
@@ -393,7 +393,7 @@ class UpscaleComparisonDialog(
                     font = font.deriveFont(Font.BOLD, 12.5f)
                     foreground = Theme.TEXT_PRIMARY
                 }
-                val right = JLabel("⬅ Esquerda: Original da Scanlator  │  Direita: Ultra HD ➡").apply {
+                val right = JLabel("⬅ Esquerda: Original da Scanlator  │  Direita: Traço Nitido ➡").apply {
                     font = font.deriveFont(Font.BOLD, 12f)
                     foreground = Theme.ACCENT_HOVER
                 }
@@ -404,7 +404,7 @@ class UpscaleComparisonDialog(
             val split = JSplitPane(
                 JSplitPane.HORIZONTAL_SPLIT,
                 createImageViewer(leftCrop, "Original (Scanlator com ruído JPEG e serrilhado)"),
-                createImageViewer(rightCrop, "Ultra HD (Traço limpo e preto profundo sem esticar)"),
+                createImageViewer(rightCrop, "Traço Nitido (Traço limpo e preto profundo sem esticar)"),
             ).apply {
                 resizeWeight = 0.5
                 dividerSize = 8
@@ -426,7 +426,7 @@ class UpscaleComparisonDialog(
                     "<h3 style='color:#E0E0E0; margin-bottom: 6px;'>Motor de Melhoria de Imagem Padrão (Sem Upscaling)</h3>" +
                     "<p style='color:#A0A0A0;'>" +
                     "Ao contrário de algoritmos de upscaling que inflam o tamanho em pixels e aumentam o peso dos arquivos, " +
-                    "o modo <b>Ultra HD</b> opera na resolução original da obra. Ele limpa artefatos de compressão JPEG, " +
+                    "o modo <b>Traço Nitido</b> opera na resolução original da obra. Ele limpa artefatos de compressão JPEG, " +
                     "reconstrói linhas finas de nanquim e calibra o contraste para telas modernas sem consumir memória RAM adicional." +
                     "</p></div></html>",
             )
@@ -441,7 +441,7 @@ class UpscaleComparisonDialog(
 
             val rowData = arrayOf(
                 arrayOf(
-                    "Ultra HD",
+                    "Traço Nitido",
                     "${data.ultraHdImg.width}x${data.ultraHdImg.height}",
                     "Ativado (Traço Nítido + Cores Vivas)",
                     "Idêntico ao original (~${data.originalBytes.size / 1024} KB)",

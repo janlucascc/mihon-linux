@@ -44,7 +44,7 @@
 6. [Image Enhancement & Scaling Engines (CPU Lanczos-3/Anime4K vs Android WebGPU)](#6-image-enhancement--scaling-engines-cpu-lanczos-3anime4k-vs-android-webgpu)
    - 6.1 Scaling Paradigms: GPU Compute Shaders vs Multi-Core CPU Super-Resolution
    - 6.2 Deep Dive into Desktop `MangaImageEnhancer` Algorithms
-   - 6.3 Two-Phase Progressive Rendering: Bilinear EDT Preview + Background Ultra HD
+   - 6.3 Two-Phase Progressive Rendering: Bilinear EDT Preview + Background Traço Nitido
    - 6.4 Image Enhancement Expansion: Lanczos-3, Bicubic & Pixel Art Modes
    - 6.5 Visual Color Filters: Grayscale, Inverted Dark Room, Sepia & Brightness
 7. [Comprehensive Feature & Architecture Gap Matrix](#7-comprehensive-feature--architecture-gap-matrix)
@@ -759,7 +759,7 @@ evictedImage.flush() // Immediately frees native Direct3D/OpenGL video surface
 | **Shader/Math Model** | WGSL (WebGPU Shading Language) | Fixed-point integer arithmetic (`FP_SHIFT = 14`, `FP_ONE = 16384`) |
 | **Supported Algorithms** | Bilinear, Bicubic, Lanczos-3, FSR 1.0, Anime4K GLSL port | Fast Bilinear, Lanczos-3 separable, Anime4K Line-Art CAS, 64-bit Color LUT |
 | **Hardware Requirement** | Vulkan 1.1+ / WebGPU capable mobile GPU | Any x86_64 CPU (scales with thread count: 4, 8, 16+ cores) |
-| **Progressive Preview** | Single-pass GPU render | Two-phase: Instant EDT bilinear preview + background Ultra HD worker |
+| **Progressive Preview** | Single-pass GPU render | Two-phase: Instant EDT bilinear preview + background Traço Nitido worker |
 
 ---
 
@@ -808,19 +808,19 @@ Boosts color saturation and clarity in full-color manhwa while strictly preservi
 
 ---
 
-### 6.3 Two-Phase Progressive Rendering: Bilinear EDT Preview + Background Ultra HD
+### 6.3 Two-Phase Progressive Rendering: Bilinear EDT Preview + Background Traço Nitido
 
 To achieve zero perceptible latency in `PagedView` (`ReaderWindow.kt:626-662`):
 1. **Phase 1 (Instant EDT Paint)**: When a page is selected, `paintComponent` immediately scales the unenhanced original image using `g2.drawImage(img, x, top, w, h, null)` with bilinear interpolation. The user sees the page instantly with zero millisecond delay.
 2. **Phase 2 (Background Worker Pass)**: In parallel, an asynchronous task computes Lanczos-3 + Anime4K + 64-bit LUT scaling on `io` worker threads (taking 60–90ms).
-3. **Phase 3 (Surface Swap)**: When the Ultra HD surface finishes, it is stored in `scaled` cache, and `repaint()` swaps the preview for the enhanced surface seamlessly.
+3. **Phase 3 (Surface Swap)**: When the Traço Nitido surface finishes, it is stored in `scaled` cache, and `repaint()` swaps the preview for the enhanced surface seamlessly.
 
 ---
 
 ### 6.4 Image Enhancement Expansion: Lanczos-3, Bicubic & Pixel Art Modes
 
-Currently, Desktop exposes only two modes: `ULTRA_HD` and `BILINEAR`. To match diverse content types, the engine should support:
-- **`ULTRA_HD`**: Lanczos-3 + Anime4K Line-Art + CAS + 64-bit LUT (ideal for modern digital manga and manhwa).
+Currently, Desktop exposes only two modes: `NITIDO` and `BILINEAR`. To match diverse content types, the engine should support:
+- **`NITIDO`**: Lanczos-3 + Anime4K Line-Art + CAS + 64-bit LUT (ideal for modern digital manga and manhwa).
 - **`LANCZOS3`**: Pure Lanczos-3 without line-thinning (optimal for photographic color comics, Western graphic novels, and vintage scanned pages).
 - **`BICUBIC`**: Standard Java2D bicubic smoothing (balanced quality with minimal CPU overhead).
 - **`NEAREST_NEIGHBOR`**: Sharp pixel scaling (essential for retro manga, 8-bit digital art, and pixelated scans).

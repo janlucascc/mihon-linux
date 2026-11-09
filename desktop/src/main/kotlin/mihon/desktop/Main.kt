@@ -1341,7 +1341,7 @@ class MoreScreen(
             createInteractiveRow(
                 icon = ModernIcons.settings(20) { Theme.TEXT_PRIMARY },
                 title = "Configurações",
-                desc = "Personalize aparência, leitor, gráficos Ultra HD, pastas e atalhos.",
+                desc = "Personalize aparência, leitor, gráficos Traço Nitido, pastas e atalhos.",
                 rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
                 onClick = onOpenSettings,
             ),

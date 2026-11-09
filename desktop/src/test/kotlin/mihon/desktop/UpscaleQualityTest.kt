@@ -18,18 +18,18 @@ class UpscaleQualityTest {
         println("=== INÍCIO DO TESTE DE QUALIDADE DE IMAGEM ===")
         println("Dimensões Originais: ${origImg.width} x ${origImg.height} (${rawBytes.size / 1024} KB)")
 
-        // 1. Process Ultra HD mantendo a resolução padrão (sem upscaling forçado)
+        // 1. Process Traço Nitido mantendo a resolução padrão (sem upscaling forçado)
         val t0 = System.currentTimeMillis()
         val (bytesUltraHd, extUltraHd) = MangaImageEnhancer.enhanceForInstall(
             rawBytes = rawBytes,
             originalExt = "jpg",
-            mode = MangaImageEnhancer.InstallEnhanceMode.ULTRA_HD,
+            mode = MangaImageEnhancer.InstallEnhanceMode.NITIDO,
             outputFormat = MangaImageEnhancer.InstallOutputFormat.JPEG_HQ,
         )
         val tUltraHd = System.currentTimeMillis() - t0
         val fileUltraHd = File(scratchDir, "sample_ultrahd.$extUltraHd").apply { writeBytes(bytesUltraHd) }
         val imgUltraHd = ImageIO.read(fileUltraHd)
-        println("Resultado Ultra HD: ${imgUltraHd.width} x ${imgUltraHd.height} (${bytesUltraHd.size / 1024} KB) em ${tUltraHd}ms")
+        println("Resultado Traço Nitido: ${imgUltraHd.width} x ${imgUltraHd.height} (${bytesUltraHd.size / 1024} KB) em ${tUltraHd}ms")
 
         // 2. Validação: resolução nativa mantida intacta
         assertTrue(imgUltraHd.width == origImg.width, "Largura deve ser mantida na resolução padrão")

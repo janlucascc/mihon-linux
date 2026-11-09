@@ -91,7 +91,7 @@ internal fun scaleImage(
     src: BufferedImage,
     targetW: Int,
     targetH: Int,
-    quality: MangaImageEnhancer.QualityMode = MangaImageEnhancer.QualityMode.ULTRA_HD,
+    quality: MangaImageEnhancer.QualityMode = MangaImageEnhancer.QualityMode.NITIDO,
 ): BufferedImage = MangaImageEnhancer.scale(src, targetW, targetH, quality)
 
 /**
@@ -487,9 +487,9 @@ class ReaderWindow(
     private var mode = runCatching { ReadMode.valueOf(prefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
     private var fit = runCatching { FitMode.valueOf(prefs.get("fit", "WINDOW")) }.getOrDefault(FitMode.WINDOW)
     private var quality = runCatching {
-        val qStr = prefs.get("quality", "ULTRA_HD")
-        if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.ULTRA_HD
-    }.getOrDefault(MangaImageEnhancer.QualityMode.ULTRA_HD)
+        val qStr = prefs.get("quality", "NITIDO")
+        if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.NITIDO
+    }.getOrDefault(MangaImageEnhancer.QualityMode.NITIDO)
     private var colorFilter = runCatching {
         MangaImageEnhancer.ColorFilterMode.valueOf(prefs.get("colorFilter", "NONE"))
     }.getOrDefault(MangaImageEnhancer.ColorFilterMode.NONE)

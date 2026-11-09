@@ -552,14 +552,13 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
             val referer = if (source.name.contains("MangaDex", ignoreCase = true)) "https://mangadex.org/" else "${source.baseUrl}/"
             val userAgent = if (source.name.contains("MangaDex", ignoreCase = true)) "MihonLinux/0.3 (Linux Desktop)" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            val cookie = if (source.baseUrl.contains("hentaidatia")) "tia_idade_confirmada=1" else null
             OnlineStreamArchiveReader(
                 sourceName = "${current.title} - ${chapter.name}",
                 imageUrls = imageUrls,
                 client = ctx.service.httpClient,
                 referer = referer,
                 userAgent = userAgent,
-                cookie = cookie,
+                cookie = null,
             )
         }) { result ->
             progressBar.isIndeterminate = false

@@ -21,7 +21,7 @@ import kotlin.math.sqrt
  * High-precision Manga & Manhwa Super-Resolution, Line-Art & Color Enhancer.
  *
  * Provides distinct scaling and post-processing pipelines:
- * - HD_64BIT ("Ultra HD 64-bit (Vivid Color + Crisp Vector Line-Art)")
+ * - HD_64BIT ("Traço Nitido 64-bit (Vivid Color + Crisp Vector Line-Art)")
  *   Upscales with Lanczos-3, performs directional gradient line-art reconstruction (Anime4K Dark-Edge),
  *   dynamic contrast stretching, perceptual micro-contrast sharpening, and color vibrancy/clarity boost.
  * - ULTRA ("Lanczos-3 + Anime4K Line-Art")
@@ -31,13 +31,13 @@ import kotlin.math.sqrt
 object MangaImageEnhancer {
 
     enum class QualityMode(val label: String) {
-        ULTRA_HD("Ultra HD"),
+        NITIDO("Traço Nitido"),
         BILINEAR("Bilinear"),
     }
 
     enum class InstallEnhanceMode(val label: String) {
         OFF("Desativado (Manter Original Bruto)"),
-        ULTRA_HD("Ativar Melhoria Ultra HD (Traço Nítido + Cores Vivas)"),
+        NITIDO("Ativar Melhoria Traço Nitido (Traço Nítido + Cores Vivas)"),
     }
 
     enum class InstallOutputFormat(val ext: String, val label: String) {
@@ -54,7 +54,7 @@ object MangaImageEnhancer {
 
     /**
      * Pre-processes raw downloaded page bytes during chapter installation (.cbz creation).
-     * Applies [mode] (Ultra HD image quality enhancement on 1x native resolution).
+     * Applies [mode] (Traço Nitido image quality enhancement on 1x native resolution).
      */
     fun enhanceForInstall(
         rawBytes: ByteArray,
@@ -69,7 +69,7 @@ object MangaImageEnhancer {
 
         try {
             // Melhora a qualidade da imagem mantendo sua resolução original (sem upscaling)
-            val enhanced = scale(decoded, decoded.width, decoded.height, QualityMode.ULTRA_HD)
+            val enhanced = scale(decoded, decoded.width, decoded.height, QualityMode.NITIDO)
             decoded.flush()
 
             val outStream = ByteArrayOutputStream(rawBytes.size * 2)
@@ -118,7 +118,7 @@ object MangaImageEnhancer {
         src: BufferedImage,
         targetW: Int,
         targetH: Int,
-        quality: QualityMode = QualityMode.ULTRA_HD,
+        quality: QualityMode = QualityMode.NITIDO,
     ): BufferedImage {
         val tw = targetW.coerceAtLeast(1)
         val th = targetH.coerceAtLeast(1)
@@ -208,7 +208,7 @@ object MangaImageEnhancer {
         src: BufferedImage,
         targetW: Int,
         targetH: Int,
-        quality: QualityMode = QualityMode.ULTRA_HD,
+        quality: QualityMode = QualityMode.NITIDO,
         filter: ColorFilterMode = ColorFilterMode.NONE,
     ): BufferedImage {
         val scaled = scale(src, targetW, targetH, quality)

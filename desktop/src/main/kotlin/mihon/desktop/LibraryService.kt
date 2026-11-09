@@ -457,7 +457,7 @@ class LibraryService(
                     imageUrls.forEachIndexed { idx, imgUrl ->
                         onProgress(idx + 1, imageUrls.size)
                         queueItem.progress = if (installEnhance != MangaImageEnhancer.InstallEnhanceMode.OFF) {
-                            "${idx + 1} / ${imageUrls.size} págs (Ultra HD)"
+                            "${idx + 1} / ${imageUrls.size} págs (Traço Nitido)"
                         } else {
                             "${idx + 1} / ${imageUrls.size} págs"
                         }
@@ -473,11 +473,6 @@ class LibraryService(
                                 else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                             )
                             .header("Referer", if (isMangaDex) "https://mangadex.org/" else "${source.baseUrl}/")
-                            .apply {
-                                if (source.baseUrl.contains("hentaidatia")) {
-                                    header("Cookie", "tia_idade_confirmada=1")
-                                }
-                            }
                             .build()
                         val rawBytes = httpClient.newCall(req).execute().use { resp ->
                             if (!resp.isSuccessful) throw IOException("Falha HTTP ${resp.code} na página ${idx + 1}")

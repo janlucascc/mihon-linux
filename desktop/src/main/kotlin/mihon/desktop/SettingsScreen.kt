@@ -869,14 +869,14 @@ class AntiGravitySettingsScreen(
         val realtimeCard = SettingsGroupCard()
 
         val savedQuality = runCatching {
-            val qStr = readerPrefs.get("quality", "ULTRA_HD")
-            if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.ULTRA_HD
-        }.getOrDefault(MangaImageEnhancer.QualityMode.ULTRA_HD)
+            val qStr = readerPrefs.get("quality", "NITIDO")
+            if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.NITIDO
+        }.getOrDefault(MangaImageEnhancer.QualityMode.NITIDO)
 
         val qualityPill = SegmentedPillSelector(
             options = listOf(
                 MangaImageEnhancer.QualityMode.BILINEAR to "Bilinear",
-                MangaImageEnhancer.QualityMode.ULTRA_HD to "Ultra HD",
+                MangaImageEnhancer.QualityMode.NITIDO to "Traço Nitido",
             ),
             initialValue = savedQuality,
         ) { chosen ->
@@ -886,7 +886,7 @@ class AntiGravitySettingsScreen(
         realtimeCard.addRow(
             createSettingsRow(
                 title = "Qualidade de Renderização",
-                subtitle = "O modo Ultra HD refina o traço escuro de nanquim e remove artefatos de compressão JPEG.",
+                subtitle = "O modo Traço Nitido refina o traço escuro de nanquim e remove artefatos de compressão JPEG.",
                 rightControl = qualityPill,
             ),
         )
@@ -901,7 +901,7 @@ class AntiGravitySettingsScreen(
         realtimeCard.addRow(
             createSettingsRow(
                 title = "Laboratório de Comparação Visual",
-                subtitle = "Compare lado a lado o resultado Original, Bilinear e Ultra HD em uma página real.",
+                subtitle = "Compare lado a lado o resultado Original, Bilinear e Traço Nitido em uma página real.",
                 rightControl = btnTestLab,
             ),
         )
