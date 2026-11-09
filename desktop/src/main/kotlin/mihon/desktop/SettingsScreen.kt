@@ -26,12 +26,15 @@ import javax.swing.ButtonGroup
 import javax.swing.Icon
 import javax.swing.JComboBox
 import javax.swing.JComponent
+import javax.swing.JDialog
+import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JToggleButton
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 
 /**
  * AntiGravity-inspired Segmented Pill Selector (e.g., [ Queue | Send Immediately ] or [ External Browser | Built-in Browser ]).
@@ -833,6 +836,114 @@ class AntiGravitySettingsScreen(
             ),
         )
         page.add(spreadCard)
+        page.add(Box.createVerticalStrut(24))
+
+        addSectionHeader(
+            page,
+            "Atalhos de Teclado Personalizáveis",
+            "Clique sobre qualquer atalho para definir uma nova tecla de controle do leitor.",
+        )
+        val shortcutsCard = SettingsGroupCard()
+
+        fun showKeyBindingDialog(action: ReaderAction, onUpdated: () -> Unit) {
+            val currentKeys = ReaderAction.getDisplayString(action)
+            val parentWindow = SwingUtilities.getWindowAncestor(this)
+            val dialog = if (parentWindow is java.awt.Frame) {
+                JDialog(parentWindow, "Definir Atalho: ${action.title}", true)
+            } else if (parentWindow is java.awt.Dialog) {
+                JDialog(parentWindow, "Definir Atalho: ${action.title}", true)
+            } else {
+                JDialog()
+            }
+            dialog.title = "Definir Atalho: ${action.title}"
+            dialog.isModal = true
+            dialog.setSize(420, 200)
+            dialog.setLocationRelativeTo(this)
+
+            val p = JPanel(BorderLayout(16, 16)).apply {
+                background = Theme.BG_SURFACE
+                border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+            }
+            val lblPrompt = JLabel("Pressione a tecla desejada para '${action.title}'...").apply {
+                font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
+                foreground = Theme.TEXT_PRIMARY
+            }
+            val lblCurrent = JLabel("Atalho atual: $currentKeys").apply {
+                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+                foreground = Theme.TEXT_MUTED
+            }
+            val center = JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                add(lblPrompt)
+                add(Box.createVerticalStrut(6))
+                add(lblCurrent)
+            }
+            p.add(center, BorderLayout.CENTER)
+
+            val btnReset = JButton("Restaurar Padrão").apply {
+                isFocusable = false
+                addActionListener {
+                    ReaderAction.setKeyCodes(action, action.defaultKeyCodes)
+                    onUpdated()
+                    dialog.dispose()
+                }
+            }
+            val btnCancel = JButton("Cancelar").apply {
+                isFocusable = false
+                addActionListener { dialog.dispose() }
+            }
+            val btnBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                isOpaque = false
+                add(btnReset)
+                add(btnCancel)
+            }
+            p.add(btnBar, BorderLayout.SOUTH)
+
+            dialog.addKeyListener(object : java.awt.event.KeyAdapter() {
+                override fun keyPressed(e: java.awt.event.KeyEvent) {
+                    if (e.keyCode != java.awt.event.KeyEvent.VK_ESCAPE) {
+                        ReaderAction.setKeyCodes(action, listOf(e.keyCode))
+                        onUpdated()
+                        dialog.dispose()
+                    }
+                }
+            })
+            dialog.isFocusable = true
+            dialog.add(p)
+            dialog.isVisible = true
+        }
+
+        ReaderAction.entries.forEach { action ->
+            val btnKey = JButton(ReaderAction.getDisplayString(action)).apply {
+                font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_CARD
+                isFocusPainted = false
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
+                    BorderFactory.createEmptyBorder(6, 12, 6, 12),
+                )
+                addActionListener {
+                    showKeyBindingDialog(action) {
+                        text = ReaderAction.getDisplayString(action)
+                    }
+                }
+            }
+            themeUpdaters.add {
+                btnKey.foreground = Theme.TEXT_PRIMARY
+                btnKey.background = Theme.BG_CARD
+            }
+            shortcutsCard.addRow(
+                createSettingsRow(
+                    title = action.title,
+                    subtitle = action.description,
+                    rightControl = btnKey,
+                ),
+            )
+        }
+        page.add(shortcutsCard)
 
         return page
     }

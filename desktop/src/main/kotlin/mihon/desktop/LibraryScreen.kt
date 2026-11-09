@@ -69,6 +69,15 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var currentSort: Sort = Sort.TITLE
     private val filterField = JTextField(20).apply {
         putClientProperty("JTextField.placeholderText", "Pesquisar na biblioteca…")
+        putClientProperty("JComponent.roundRect", true)
+        font = Theme.FONT_UI.deriveFont(13f)
+        foreground = Theme.TEXT_PRIMARY
+        background = Theme.BG_CARD
+        caretColor = Theme.ACCENT
+        border = BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
+            BorderFactory.createEmptyBorder(6, 12, 6, 12),
+        )
         isVisible = false
     }
 
@@ -167,15 +176,29 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
 
         val btnFilter = m3HeaderIconButton(ModernIcons.filter(20) { Theme.TEXT_PRIMARY }, "Filtros e exibição") { anchor ->
-            val popup = JPopupMenu()
+            val popup = JPopupMenu().apply {
+                background = Theme.BG_SURFACE
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
+                    BorderFactory.createEmptyBorder(6, 6, 6, 6),
+                )
+            }
 
             val offlineItem = JCheckBoxMenuItem("Somente disponíveis offline", onlyDownloadedFilter).apply {
+                icon = ModernIcons.offline(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
                 addActionListener {
                     onlyDownloadedFilter = isSelected
                     applyFilter()
                 }
             }
             val compactItem = JCheckBoxMenuItem("Grade compacta (título sobre capa)", compactMode).apply {
+                icon = ModernIcons.library(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
                 addActionListener {
                     compactMode = isSelected
                     grid.fixedCellHeight = if (compactMode) COVER_H + 22 else CARD_H
@@ -188,14 +211,20 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             popup.addSeparator()
 
             val sortMenuLabel = JMenuItem("ORDENAR POR:").apply {
+                icon = ModernIcons.sort(14) { Theme.TEXT_MUTED }
                 isEnabled = false
-                font = font.deriveFont(Font.BOLD, 11f)
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
+                foreground = Theme.TEXT_MUTED
+                background = Theme.BG_SURFACE
             }
             popup.add(sortMenuLabel)
 
             val sortGroup = ButtonGroup()
             Sort.entries.forEach { sort ->
                 val rdo = JRadioButtonMenuItem(sort.label, sort == currentSort).apply {
+                    font = Theme.FONT_UI.deriveFont(13f)
+                    foreground = Theme.TEXT_PRIMARY
+                    background = Theme.BG_SURFACE
                     addActionListener {
                         currentSort = sort
                         applyFilter()
@@ -205,22 +234,37 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 popup.add(rdo)
             }
 
-            popup.show(anchor, 0, anchor.height)
+            popup.show(anchor, 0, anchor.height + 4)
         }
 
         val btnOverflow = m3HeaderIconButton(ModernIcons.moreVert(20) { Theme.TEXT_PRIMARY }, "Mais opções") { anchor ->
-            val popup = JPopupMenu()
-            popup.add(JMenuItem("↻ Atualizar biblioteca").apply {
+            val popup = JPopupMenu().apply {
+                background = Theme.BG_SURFACE
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
+                    BorderFactory.createEmptyBorder(6, 6, 6, 6),
+                )
+            }
+            popup.add(JMenuItem("Atualizar biblioteca", ModernIcons.sync(16) { Theme.TEXT_PRIMARY }).apply {
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
                 addActionListener { checkUpdatesForAll() }
             })
             popup.addSeparator()
-            popup.add(JMenuItem("📦 Adicionar arquivo (.cbz / .zip)...").apply {
+            popup.add(JMenuItem("Adicionar arquivo (.cbz / .zip)...", ModernIcons.downloads(16) { Theme.TEXT_PRIMARY }).apply {
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
                 addActionListener { importLocal(directories = false) }
             })
-            popup.add(JMenuItem("📁 Adicionar pasta...").apply {
+            popup.add(JMenuItem("Adicionar pasta de mangás...", ModernIcons.library(16) { Theme.TEXT_PRIMARY }).apply {
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
                 addActionListener { importLocal(directories = true) }
             })
-            popup.show(anchor, 0, anchor.height)
+            popup.show(anchor, 0, anchor.height + 4)
         }
 
         val titleLabel = JLabel("Biblioteca").apply {
@@ -464,10 +508,16 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     /**
      * Port of Mihon's `LibraryTabs.kt` (`PrimaryScrollableTabRow` + `TabText(text, badgeCount)`).
+     * Supports click-and-drag reordering and right-click GooeyContextMenu.
      */
     private inner class LibraryTabsBar : JPanel() {
         private var hoveredTab = -1
         private val tabBounds = mutableListOf<Pair<Long, java.awt.Rectangle>>()
+
+        private var draggingCatId: Long? = null
+        private var dragStartX = 0
+        private var isDragging = false
+        private var dropTargetIndex: Int? = null
 
         init {
             background = Theme.BG_SURFACE
@@ -481,10 +531,71 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         repaint()
                     }
                 }
+
+                override fun mouseDragged(e: MouseEvent) {
+                    val catId = draggingCatId ?: return
+                    if (!isDragging) {
+                        if (kotlin.math.abs(e.x - dragStartX) > 8) {
+                            isDragging = true
+                            cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
+                        }
+                    }
+                    if (isDragging) {
+                        val entries = LibraryCategory.entries
+                        // Find closest index among movable categories (index >= 1)
+                        var target = entries.size - 1
+                        for (i in 1 until entries.size) {
+                            val r = tabBounds.getOrNull(i)?.second
+                            if (r != null) {
+                                if (e.x < r.x + r.width / 2) {
+                                    target = i
+                                    break
+                                }
+                            }
+                        }
+                        dropTargetIndex = target.coerceIn(1, entries.size - 1)
+                        repaint()
+                    }
+                }
             })
             addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) {
+                    val hit = tabBounds.firstOrNull { it.second.contains(e.point) } ?: return
+                    if (SwingUtilities.isLeftMouseButton(e) && hit.first != LibraryCategory.ALL) {
+                        draggingCatId = hit.first
+                        dragStartX = e.x
+                        isDragging = false
+                        dropTargetIndex = null
+                    }
+                }
+
+                override fun mouseReleased(e: MouseEvent) {
+                    val catId = draggingCatId
+                    val target = dropTargetIndex
+                    val wasDragging = isDragging
+                    draggingCatId = null
+                    isDragging = false
+                    dropTargetIndex = null
+                    cursor = Cursor.getDefaultCursor()
+
+                    if (wasDragging && catId != null && target != null) {
+                        LibraryCategory.reorderCategory(catId, target)
+                        repaint()
+                        return
+                    }
+
+                    if (!wasDragging && SwingUtilities.isLeftMouseButton(e)) {
+                        val hit = tabBounds.firstOrNull { it.second.contains(e.point) } ?: return
+                        if (activeCategoryStatus != hit.first) {
+                            activeCategoryStatus = hit.first
+                            repaint()
+                            applyFilter()
+                        }
+                    }
+                }
+
                 override fun mouseExited(e: MouseEvent) {
-                    if (hoveredTab != -1) {
+                    if (hoveredTab != -1 && !isDragging) {
                         hoveredTab = -1
                         repaint()
                     }
@@ -495,11 +606,6 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     if (SwingUtilities.isRightMouseButton(e)) {
                         showCategoryGooeyMenu(hit.first, e.x, e.y)
                         return
-                    }
-                    if (activeCategoryStatus != hit.first) {
-                        activeCategoryStatus = hit.first
-                        repaint()
-                        applyFilter()
                     }
                 }
             })
@@ -514,7 +620,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val items = mutableListOf<GooeyContextMenu.GooeyMenuItem>()
 
             if (catId != LibraryCategory.ALL) {
-                if (currentIdx > 1) { // can move left
+                // Extremity left: Move left (index = 0 maps to leftmost arc angle)
+                if (currentIdx > 1) {
                     items.add(
                         GooeyContextMenu.GooeyMenuItem(
                             id = "move_left",
@@ -525,17 +632,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         }
                     )
                 }
-                if (currentIdx < entries.size - 1) { // can move right
-                    items.add(
-                        GooeyContextMenu.GooeyMenuItem(
-                            id = "move_right",
-                            label = "Mover para Direita",
-                            iconType = GooeyContextMenu.IconType.MOVE_RIGHT,
-                        ) {
-                            LibraryCategory.moveCategory(catId, 1)
-                        }
-                    )
-                }
+
+                // Center actions
                 items.add(
                     GooeyContextMenu.GooeyMenuItem(
                         id = "rename",
@@ -552,27 +650,40 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         }
                     }
                 )
+                items.add(
+                    GooeyContextMenu.GooeyMenuItem(
+                        id = "remove",
+                        label = "Excluir Categoria",
+                        iconType = GooeyContextMenu.IconType.REMOVE,
+                        isDanger = true,
+                    ) {
+                        val confirm = JOptionPane.showConfirmDialog(
+                            this@LibraryScreen,
+                            "Deseja excluir a categoria '$catTitle'?",
+                            "Excluir Categoria",
+                            JOptionPane.YES_NO_OPTION,
+                        )
+                        if (confirm == JOptionPane.YES_OPTION) {
+                            if (activeCategoryStatus == catId) {
+                                activeCategoryStatus = LibraryCategory.ALL
+                            }
+                            LibraryCategory.removeCategory(catId)
+                        }
+                    }
+                )
+
+                // Extremity right: Move right (last index maps to rightmost arc angle)
+                if (currentIdx < entries.size - 1) {
                     items.add(
                         GooeyContextMenu.GooeyMenuItem(
-                            id = "remove",
-                            label = "Excluir Categoria",
-                            iconType = GooeyContextMenu.IconType.REMOVE,
-                            isDanger = true,
+                            id = "move_right",
+                            label = "Mover para Direita",
+                            iconType = GooeyContextMenu.IconType.MOVE_RIGHT,
                         ) {
-                            val confirm = JOptionPane.showConfirmDialog(
-                                this@LibraryScreen,
-                                "Deseja excluir a categoria '$catTitle'?",
-                                "Excluir Categoria",
-                                JOptionPane.YES_NO_OPTION,
-                            )
-                            if (confirm == JOptionPane.YES_OPTION) {
-                                if (activeCategoryStatus == catId) {
-                                    activeCategoryStatus = LibraryCategory.ALL
-                                }
-                                LibraryCategory.removeCategory(catId)
-                            }
+                            LibraryCategory.moveCategory(catId, 1)
                         }
                     )
+                }
             }
 
             if (items.isNotEmpty()) {
@@ -637,6 +748,12 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 if (active) {
                     g2.color = Theme.ACCENT
                     g2.fillRoundRect(x + 10, h - 3, tabW - 20, 3, 3, 3)
+                }
+
+                // Drag indicator line
+                if (isDragging && dropTargetIndex == idx) {
+                    g2.color = Theme.ACCENT
+                    g2.fillRoundRect(x - 2, 6, 4, h - 12, 2, 2)
                 }
 
                 x += tabW + 4

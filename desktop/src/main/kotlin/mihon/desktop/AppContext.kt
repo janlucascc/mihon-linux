@@ -314,6 +314,11 @@ class AppContext(
         extensionListeners.forEach { it.invoke() }
     }
 
+    fun unregisterExtension(ext: ExtensionSource) {
+        extensions.removeIf { it.id == ext.id || it.baseUrl.equals(ext.baseUrl, ignoreCase = true) }
+        extensionListeners.forEach { it.invoke() }
+    }
+
     fun sourceFor(sourceId: Long): ExtensionSource? =
         extensions.firstOrNull { it.id == sourceId }
 }

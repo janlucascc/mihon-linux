@@ -108,10 +108,15 @@ class LibraryServiceTest {
     }
 
     @Test
-    fun `removeFromLibrary deletes manga and its chapters`() = runBlocking {
+    fun `removeFromLibrary unfavorites manga while preserving history data`() = runBlocking {
         val manga = service.addLocal(cbz("Gone.cbz", 2))
         service.removeFromLibrary(manga.id)
         assertTrue(service.library().isEmpty())
+        // Chapters and manga record are preserved for reading history & statistics
+        assertEquals(1, service.chaptersOf(manga.id).size)
+
+        // Deleting completely removes from database
+        service.deleteMangaCompletely(manga.id)
         assertTrue(service.chaptersOf(manga.id).isEmpty())
     }
 

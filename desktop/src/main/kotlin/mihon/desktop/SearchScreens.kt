@@ -3,6 +3,7 @@ package mihon.desktop
 import mihon.source.ExtensionSource
 import mihon.source.MangaResult
 import mihon.source.UrlExtensionGenerator
+import java.io.File
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -28,6 +29,8 @@ import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
+import javax.swing.JMenuItem
 import javax.swing.JScrollPane
 import javax.swing.JTextField
 import javax.swing.ListCellRenderer
@@ -694,6 +697,20 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 }
             }
         }
+
+        // Context menu on right click / click to toggle or remove extension
+        list.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mousePressed(e: java.awt.event.MouseEvent) {
+                if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger) {
+                    val idx = list.locationToIndex(e.point)
+                    if (idx >= 0 && list.getCellBounds(idx, idx)?.contains(e.point) == true) {
+                        list.selectedIndex = idx
+                        val ext = model.get(idx)
+                        showExtensionContextMenu(ext, e.x, e.y)
+                    }
+                }
+            }
+        })
         val scroll = JScrollPane(list).apply {
             border = null
             background = Theme.BG_APP
@@ -724,6 +741,77 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             list.repaint()
             repaint()
         }
+    }
+
+    private fun showExtensionContextMenu(ext: ExtensionSource, x: Int, y: Int) {
+        val popup = JPopupMenu().apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
+                BorderFactory.createEmptyBorder(6, 6, 6, 6),
+            )
+        }
+
+        val itemDisable = JMenuItem("Desativar extensão", ModernIcons.offline(16) { Theme.TEXT_PRIMARY }).apply {
+            font = Theme.FONT_UI.deriveFont(13f)
+            foreground = Theme.TEXT_PRIMARY
+            background = Theme.BG_SURFACE
+            addActionListener {
+                disableExtension(ext)
+            }
+        }
+        val itemRemove = JMenuItem("Remover extensão", ModernIcons.trash(16) { Theme.DANGER }).apply {
+            font = Theme.FONT_UI.deriveFont(13f)
+            foreground = Theme.DANGER
+            background = Theme.BG_SURFACE
+            addActionListener {
+                removeExtension(ext)
+            }
+        }
+
+        popup.add(itemDisable)
+        popup.addSeparator()
+        popup.add(itemRemove)
+        popup.show(list, x, y)
+    }
+
+    private fun disableExtension(ext: ExtensionSource) {
+        val sourcesDir = File(System.getProperty("user.home"), ".mihon/sources")
+        val jsonFiles = sourcesDir.listFiles { f: File -> f.extension.equals("json", ignoreCase = true) }?.toList().orEmpty()
+        val target = jsonFiles.firstOrNull { f ->
+            f.name.contains(ext.name, ignoreCase = true) ||
+            f.readText().contains(ext.baseUrl, ignoreCase = true)
+        }
+
+        if (target != null) {
+            val disabledFile = File(sourcesDir, "${target.name}.disabled")
+            target.renameTo(disabledFile)
+        }
+        ctx.unregisterExtension(ext)
+        ctx.setStatus("Extensão '${ext.name}' desativada.")
+    }
+
+    private fun removeExtension(ext: ExtensionSource) {
+        val ok = JOptionPane.showConfirmDialog(
+            this,
+            "Tem certeza que deseja remover a extensão '${ext.name}'?",
+            "Remover Extensão",
+            JOptionPane.YES_NO_OPTION,
+        )
+        if (ok != JOptionPane.YES_OPTION) return
+
+        val sourcesDir = File(System.getProperty("user.home"), ".mihon/sources")
+        val jsonFiles = sourcesDir.listFiles { f: File ->
+            f.extension.equals("json", ignoreCase = true) || f.name.endsWith(".json.disabled")
+        }?.toList().orEmpty()
+        val target = jsonFiles.firstOrNull { f ->
+            f.name.contains(ext.name, ignoreCase = true) ||
+            f.readText().contains(ext.baseUrl, ignoreCase = true)
+        }
+
+        target?.delete()
+        ctx.unregisterExtension(ext)
+        ctx.setStatus("Extensão '${ext.name}' removida com sucesso.")
     }
 
     fun refreshModel() {

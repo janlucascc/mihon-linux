@@ -105,6 +105,17 @@ object LibraryCategory {
         saveCategories(current)
     }
 
+    fun reorderCategory(id: Long, targetIndex: Int) {
+        val current = entries.toMutableList()
+        val index = current.indexOfFirst { it.first == id }
+        if (index <= 0) return // Cannot move 'Todos' or not found
+        val validTarget = targetIndex.coerceIn(1, current.size - 1)
+        if (index == validTarget) return
+        val item = current.removeAt(index)
+        current.add(validTarget, item)
+        saveCategories(current)
+    }
+
     fun removeCategory(id: Long) {
         if (id == ALL) return
         val current = entries
@@ -528,7 +539,17 @@ class LibraryService(
         }
     }
 
-    suspend fun removeFromLibrary(mangaId: Long) = mangas.delete(mangaId)
+    suspend fun removeFromLibrary(mangaId: Long) {
+        val current = mangas.getMangaById(mangaId) ?: return
+        mangas.update(
+            current.copy(
+                favorite = false,
+                favoriteAt = null,
+            ),
+        )
+    }
+
+    suspend fun deleteMangaCompletely(mangaId: Long) = mangas.delete(mangaId)
 
     suspend fun setCategory(mangaId: Long, categoryStatus: Long) {
         val current = mangas.getMangaById(mangaId) ?: return

@@ -859,8 +859,8 @@ class ReaderWindow(
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 markUserInteraction()
-                when (e.keyCode) {
-                    KeyEvent.VK_A -> {
+                when {
+                    ReaderAction.matches(ReaderAction.TOGGLE_AUTO_SCROLL, e.keyCode) -> {
                         if (!isWebtoon) {
                             mode = ReadMode.WEBTOON
                             modeBox.selectedIndex = mode.ordinal
@@ -871,51 +871,51 @@ class ReaderWindow(
                         }
                         autoScroll.toggle()
                     }
-                    KeyEvent.VK_SPACE -> {
+                    e.keyCode == KeyEvent.VK_SPACE -> {
                         if (isWebtoon || autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.toggle()
                         } else {
                             next()
                         }
                     }
-                    KeyEvent.VK_RIGHT, KeyEvent.VK_PAGE_DOWN -> next()
-                    KeyEvent.VK_LEFT, KeyEvent.VK_PAGE_UP -> prev()
-                    KeyEvent.VK_DOWN -> {
-                        if (autoScroll.state != AutoScrollState.STOPPED) {
-                            autoScroll.adjustSpeed(1)
-                        } else {
-                            scrollBy(64)
-                        }
-                    }
-                    KeyEvent.VK_UP -> {
-                        if (autoScroll.state != AutoScrollState.STOPPED) {
-                            autoScroll.adjustSpeed(-1)
-                        } else {
-                            scrollBy(-64)
-                        }
-                    }
-                    KeyEvent.VK_HOME -> goTo(0)
-                    KeyEvent.VK_END -> goTo(pageCount - 1)
-                    KeyEvent.VK_H, KeyEvent.VK_M -> toggleHud()
-                    KeyEvent.VK_PLUS, KeyEvent.VK_EQUALS, KeyEvent.VK_ADD -> if (e.isControlDown) adjustZoom(1.15)
-                    KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> if (e.isControlDown) adjustZoom(0.87)
-                    KeyEvent.VK_0 -> if (e.isControlDown) resetZoom()
-                    KeyEvent.VK_OPEN_BRACKET -> {
-                        if (autoScroll.state != AutoScrollState.STOPPED) {
-                            autoScroll.adjustSpeed(-1)
-                        } else if (onPrevChapter != null) {
-                            onPrevChapter?.invoke()
-                        }
-                    }
-                    KeyEvent.VK_CLOSE_BRACKET -> {
+                    ReaderAction.matches(ReaderAction.NEXT_PAGE, e.keyCode) -> next()
+                    ReaderAction.matches(ReaderAction.PREV_PAGE, e.keyCode) -> prev()
+                    ReaderAction.matches(ReaderAction.NEXT_CHAPTER, e.keyCode) -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(1)
                         } else if (onNextChapter != null) {
                             onNextChapter?.invoke()
                         }
                     }
-                    KeyEvent.VK_F11 -> toggleFullscreen()
-                    KeyEvent.VK_ESCAPE -> {
+                    ReaderAction.matches(ReaderAction.PREV_CHAPTER, e.keyCode) -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(-1)
+                        } else if (onPrevChapter != null) {
+                            onPrevChapter?.invoke()
+                        }
+                    }
+                    ReaderAction.matches(ReaderAction.TOGGLE_HUD, e.keyCode) -> toggleHud()
+                    ReaderAction.matches(ReaderAction.TOGGLE_FULLSCREEN, e.keyCode) -> toggleFullscreen()
+                    ReaderAction.matches(ReaderAction.ZOOM_IN, e.keyCode) -> adjustZoom(1.15)
+                    ReaderAction.matches(ReaderAction.ZOOM_OUT, e.keyCode) -> adjustZoom(0.87)
+                    ReaderAction.matches(ReaderAction.ZOOM_RESET, e.keyCode) -> resetZoom()
+                    e.keyCode == KeyEvent.VK_DOWN -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(1)
+                        } else {
+                            scrollBy(64)
+                        }
+                    }
+                    e.keyCode == KeyEvent.VK_UP -> {
+                        if (autoScroll.state != AutoScrollState.STOPPED) {
+                            autoScroll.adjustSpeed(-1)
+                        } else {
+                            scrollBy(-64)
+                        }
+                    }
+                    e.keyCode == KeyEvent.VK_HOME -> goTo(0)
+                    e.keyCode == KeyEvent.VK_END -> goTo(pageCount - 1)
+                    e.keyCode == KeyEvent.VK_ESCAPE -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.stop()
                         } else if (fullscreen) {
