@@ -552,7 +552,6 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         }
                     }
                 )
-                if (catId != LibraryCategory.READING && catId != LibraryCategory.COMPLETED && catId != LibraryCategory.PLAN_TO_READ) {
                     items.add(
                         GooeyContextMenu.GooeyMenuItem(
                             id = "remove",
@@ -574,7 +573,6 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                             }
                         }
                     )
-                }
             }
 
             if (items.isNotEmpty()) {

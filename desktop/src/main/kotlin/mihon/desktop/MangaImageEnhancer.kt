@@ -41,8 +41,8 @@ object MangaImageEnhancer {
     }
 
     enum class InstallOutputFormat(val ext: String, val label: String) {
-        JPEG_HQ("jpg", "JPEG Alta Qualidade (92% — Menor espaço em disco)"),
-        PNG_LOSSLESS("png", "PNG Sem Perdas (100% — Fidelidade absoluta de estúdio)"),
+        JPEG_HQ("jpg", "JPEG Alta Qualidade (QUALIDADE 92%)"),
+        PNG_LOSSLESS("png", "PNG Sem PerdaS (QUALIDADE 100%)"),
     }
 
     enum class ColorFilterMode(val label: String) {

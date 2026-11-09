@@ -541,6 +541,69 @@ object ModernIcons {
             }
         }
 
+    /**
+     * Bookmark / reading ribbon icon.
+     */
+    fun bookmark(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val p = Path2D.Float().apply {
+                    moveTo(5.5f, 4.0f)
+                    lineTo(18.5f, 4.0f)
+                    lineTo(18.5f, 20.0f)
+                    lineTo(12.0f, 15.5f)
+                    lineTo(5.5f, 20.0f)
+                    closePath()
+                }
+                g2.draw(p)
+            }
+        }
+
+    /**
+     * Book open outline icon (for reading category).
+     */
+    fun bookOpen(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val left = Path2D.Float().apply {
+                    moveTo(12f, 6.0f)
+                    quadTo(7.5f, 4.5f, 3.5f, 5.5f)
+                    lineTo(3.5f, 18.0f)
+                    quadTo(7.5f, 17.0f, 12f, 18.5f)
+                    closePath()
+                }
+                val right = Path2D.Float().apply {
+                    moveTo(12f, 6.0f)
+                    quadTo(16.5f, 4.5f, 20.5f, 5.5f)
+                    lineTo(20.5f, 18.0f)
+                    quadTo(16.5f, 17.0f, 12f, 18.5f)
+                    closePath()
+                }
+                g2.draw(left)
+                g2.draw(right)
+                g2.drawLine(12, 6, 12, 18)
+            }
+        }
+
+    /**
+     * Check circle outline icon (for completed category).
+     */
+    fun checkCircle(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.draw(Ellipse2D.Float(3.0f, 3.0f, 18.0f, 18.0f))
+                val p = Path2D.Float().apply {
+                    moveTo(7.5f, 12.0f)
+                    lineTo(10.5f, 15.0f)
+                    lineTo(16.5f, 9.0f)
+                }
+                g2.draw(p)
+            }
+        }
+
     fun close(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
         object : BaseVectorIcon(size, color) {
             override fun paintVector(g2: Graphics2D, color: Color) {

@@ -187,9 +187,9 @@ class CategoriesDialog(
                         val count = if (catId == LibraryCategory.ALL) total else (counts[catId] ?: 0)
                         val icon = when (catId) {
                             LibraryCategory.ALL -> ModernIcons.library(18) { Theme.TEXT_PRIMARY }
-                            LibraryCategory.READING -> ModernIcons.play(15) { Theme.ACCENT }
-                            LibraryCategory.COMPLETED -> ModernIcons.check(17) { Theme.SUCCESS }
-                            LibraryCategory.PLAN_TO_READ -> ModernIcons.tag(18) { Theme.TEXT_MUTED }
+                            LibraryCategory.READING -> ModernIcons.bookOpen(18) { Theme.ACCENT }
+                            LibraryCategory.COMPLETED -> ModernIcons.checkCircle(18) { Theme.SUCCESS }
+                            LibraryCategory.PLAN_TO_READ -> ModernIcons.bookmark(18) { Theme.TEXT_MUTED }
                             else -> ModernIcons.tag(18) { Theme.TEXT_PRIMARY }
                         }
 
@@ -252,7 +252,7 @@ class CategoriesDialog(
                                     })
                                 }
 
-                                if (catId != LibraryCategory.ALL && catId != LibraryCategory.READING && catId != LibraryCategory.COMPLETED && catId != LibraryCategory.PLAN_TO_READ) {
+                                if (catId != LibraryCategory.ALL) {
                                     add(createIconButton(ModernIcons.trash(15) { Theme.DANGER }, "Excluir categoria") {
                                         val confirm = JOptionPane.showConfirmDialog(
                                             this@CategoriesDialog,

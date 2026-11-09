@@ -716,21 +716,6 @@ class AntiGravitySettingsScreen(
                 rightControl = themeBox,
             ),
         )
-
-        val btnCustomColors = ModernButton(
-            text = "Personalizar Cores...",
-            icon = ModernIcons.sparkles(14) { Theme.TEXT_PRIMARY },
-            variant = ModernButton.Variant.SURFACE,
-        ).apply {
-            addActionListener { onOpenCustomThemeDialog() }
-        }
-        themeCard.addRow(
-            createSettingsRow(
-                title = "Editor de Paleta Customizada",
-                subtitle = "Ajuste manualmente as cores de fundo, barra lateral, cartões e destaque.",
-                rightControl = btnCustomColors,
-            ),
-        )
         page.add(themeCard)
         page.add(Box.createVerticalStrut(24))
 

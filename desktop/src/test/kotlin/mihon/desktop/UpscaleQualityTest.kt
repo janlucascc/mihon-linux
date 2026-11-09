@@ -15,7 +15,7 @@ class UpscaleQualityTest {
 
         val rawBytes = sampleFile.readBytes()
         val origImg = ImageIO.read(sampleFile)
-        println("=== INÍCIO DO TESTE DE QUALIDADE DE IMAGEM ===")
+        println("=== TESTE DE QUALIDADE DE IMAGEM ===")
         println("Dimensões Originais: ${origImg.width} x ${origImg.height} (${rawBytes.size / 1024} KB)")
 
         // 1. Process Traço Nitido mantendo a resolução padrão (sem upscaling forçado)

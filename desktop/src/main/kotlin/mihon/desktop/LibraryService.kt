@@ -106,7 +106,7 @@ object LibraryCategory {
     }
 
     fun removeCategory(id: Long) {
-        if (id == ALL || id == READING) return
+        if (id == ALL) return
         val current = entries
         val updated = current.filter { it.first != id }
         saveCategories(updated)
