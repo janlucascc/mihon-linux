@@ -441,121 +441,669 @@ class TextRegionDetector(
                 if (darkRatio !in 0.003f..0.60f) continue
                 if (textMaxX - textMinX + 1 < 4 || textMaxY - textMinY + 1 < 4) continue
 
-                val textSpanW = (textMaxX - textMinX + 1).coerceAtLeast(1)
-                val textSpanH = (textMaxY - textMinY + 1).coerceAtLeast(1)
-                val minBodyChordW = maxOf(minChordW, (textSpanW * 0.72f).toInt())
-
-                var chordMinY = textMinY
-                var chordMaxY = textMaxY
-                for (py in minY..maxY) {
-                    val ry = py - minY
-                    if (rowMaxX[ry] >= rowMinX[ry] && (rowMaxX[ry] - rowMinX[ry] + 1) >= minChordW) {
-                        if (py < chordMinY) chordMinY = py
-                        if (py > chordMaxY) chordMaxY = py
-                    }
-                }
-                var chordMinX = textMinX
-                var chordMaxX = textMaxX
-                for (px in minX..maxX) {
-                    val rx = px - minX
-                    if (colMaxY[rx] >= colMinY[rx] && (colMaxY[rx] - colMinY[rx] + 1) >= minChordH) {
-                        if (px < chordMinX) chordMinX = px
-                        if (px > chordMaxX) chordMaxX = px
-                    }
-                }
-
-                // Expand smoothly within the verified clean oval cavity around the text so short/off-center
-                // dialogue centers naturally inside the speech bubble without entering tails or hair leaks.
-                val edgeGuard = maxOf(3, minOf(bw, bh) / 28).coerceAtMost(7)
-                val largeLeakRisk = touchCount >= 2 || areaFraction > 0.07f || (touchCount == 1 && fillRatio < 0.55f)
-                val maxExpandY = if (largeLeakRisk) {
-                    maxOf(8, (textSpanH * 0.25f).toInt()).coerceAtMost(24)
-                } else {
-                    maxOf(18, (bh * 0.28f).toInt()).coerceAtMost(96)
-                }
-                val maxExpandX = if (largeLeakRisk) {
-                    maxOf(8, (textSpanW * 0.25f).toInt()).coerceAtMost(28)
-                } else {
-                    maxOf(18, (bw * 0.25f).toInt()).coerceAtMost(96)
-                }
-
-                fun isCleanWhiteRow(py: Int): Boolean {
-                    val ry = py - minY
-                    if (ry !in 1 until (bh - 1)) return false
-                    val rMin = rowMinX[ry]
-                    val rMax = rowMaxX[ry]
-                    if (rMax - rMin + 1 < minBodyChordW) return false
-                    if (rMin > textMaxX || rMax < textMinX) return false
-                    val xS = maxOf(minX + 1, rMin + edgeGuard)
-                    val xE = minOf(maxX - 1, rMax - edgeGuard)
-                    if (xS > xE) return false
-                    val pyOff = py * workW
-                    var darkCount = 0
-                    for (px in xS..xE) {
-                        if ((gray[pyOff + px].toInt() and 0xFF) <= darkThresh) {
-                            darkCount++
-                            if (darkCount > 2) return false
-                        }
-                    }
-                    return true
-                }
-
-                var cavMinY = textMinY
-                var stepUp = 0
-                while (stepUp < maxExpandY && cavMinY - 1 > minY + edgeGuard && isCleanWhiteRow(cavMinY - 1)) {
-                    cavMinY--
-                    stepUp++
-                }
-                var cavMaxY = textMaxY
-                var stepDown = 0
-                while (stepDown < maxExpandY && cavMaxY + 1 < maxY - edgeGuard && isCleanWhiteRow(cavMaxY + 1)) {
-                    cavMaxY++
-                    stepDown++
-                }
-
-                // Measure the inner horizontal chord envelope across the expanded vertical band
-                var bandMinX = minX + edgeGuard
-                var bandMaxX = maxX - edgeGuard
-                for (py in cavMinY..cavMaxY) {
-                    val ry = py - minY
-                    val rMin = (rowMinX[ry] + edgeGuard).coerceAtMost(textMinX)
-                    val rMax = (rowMaxX[ry] - edgeGuard).coerceAtLeast(textMaxX)
-                    if (rMin > bandMinX) bandMinX = rMin
-                    if (rMax < bandMaxX) bandMaxX = rMax
-                }
-
-                val padX = maxOf(4, (bw * 0.06f).toInt()).coerceAtMost(10)
-                val padY = maxOf(4, (bh * 0.06f).toInt()).coerceAtMost(10)
-                val targetMinX = maxOf(textMinX - maxExpandX, bandMinX)
-                val targetMaxX = minOf(textMaxX + maxExpandX, bandMaxX)
-                val cropMinX = minOf(textMinX - padX, targetMinX)
-                    .coerceAtLeast(minOf(textMinX, chordMinX))
-                    .coerceAtLeast(minX)
-                val cropMaxX = maxOf(textMaxX + padX, targetMaxX)
-                    .coerceAtMost(maxOf(textMaxX, chordMaxX))
-                    .coerceAtMost(maxX)
-                val cropMinY = minOf(textMinY - padY, cavMinY)
-                    .coerceAtLeast(minOf(textMinY, chordMinY))
-                    .coerceAtLeast(minY)
-                val cropMaxY = maxOf(textMaxY + padY, cavMaxY)
-                    .coerceAtMost(maxOf(textMaxY, chordMaxY))
-                    .coerceAtMost(maxY)
-
-                if (cropMaxX <= cropMinX || cropMaxY <= cropMinY) continue
-
-                val rect = NormalizedRect(
-                    x = cropMinX.toFloat() / workW,
-                    y = cropMinY.toFloat() / workH,
-                    width = (cropMaxX - cropMinX + 1).toFloat() / workW,
-                    height = (cropMaxY - cropMinY + 1).toFloat() / workH,
-                ).clamped()
-                if (rect.isEmpty) continue
-
-                val conf = (0.85f + 0.13f * ((fillRatio - 0.30f) / 0.70f).coerceIn(0f, 1f)).coerceIn(0.85f, 0.98f)
-                results.add(CandidateBox(rect, conf, fromBubblePass = true))
+                emitSplitOrSingleBubbleRegions(
+                    gray = gray,
+                    workW = workW,
+                    workH = workH,
+                    queue = queue,
+                    pixelCount = pixelCount,
+                    compMinX = minX,
+                    compMaxX = maxX,
+                    compMinY = minY,
+                    compMaxY = maxY,
+                    compRowMinX = rowMinX,
+                    compRowMaxX = rowMaxX,
+                    compColMinY = colMinY,
+                    compColMaxY = colMaxY,
+                    darkThresh = darkThresh,
+                    minChordW = minChordW,
+                    minChordH = minChordH,
+                    textMinX = textMinX,
+                    textMaxX = textMaxX,
+                    textMinY = textMinY,
+                    textMaxY = textMaxY,
+                    fillRatio = fillRatio,
+                    touchCount = touchCount,
+                    areaFraction = areaFraction,
+                    results = results,
+                )
             }
         }
         return results
+    }
+
+    private fun emitSplitOrSingleBubbleRegions(
+        gray: ByteArray,
+        workW: Int,
+        workH: Int,
+        queue: IntArray,
+        pixelCount: Int,
+        compMinX: Int,
+        compMaxX: Int,
+        compMinY: Int,
+        compMaxY: Int,
+        compRowMinX: IntArray,
+        compRowMaxX: IntArray,
+        compColMinY: IntArray,
+        compColMaxY: IntArray,
+        darkThresh: Int,
+        minChordW: Int,
+        minChordH: Int,
+        textMinX: Int,
+        textMaxX: Int,
+        textMinY: Int,
+        textMaxY: Int,
+        fillRatio: Float,
+        touchCount: Int,
+        areaFraction: Float,
+        results: MutableList<CandidateBox>,
+    ) {
+        val bw = compMaxX - compMinX + 1
+        val bh = compMaxY - compMinY + 1
+        val localTotal = bw * bh
+
+        // Build local component occupancy mask and flood-fill external artwork/outline from local box perimeter
+        val inComp = BooleanArray(localTotal)
+        for (i in 0 until pixelCount) {
+            val idx = queue[i]
+            val rx = (idx % workW) - compMinX
+            val ry = (idx / workW) - compMinY
+            inComp[ry * bw + rx] = true
+        }
+        val outsideArt = BooleanArray(localTotal)
+        val artQueue = IntArray(localTotal)
+        var aqHead = 0
+        var aqTail = 0
+        for (rx in 0 until bw) {
+            val topIdx = rx
+            if (!inComp[topIdx] && !outsideArt[topIdx]) {
+                outsideArt[topIdx] = true
+                artQueue[aqTail++] = topIdx
+            }
+            val botIdx = (bh - 1) * bw + rx
+            if (!inComp[botIdx] && !outsideArt[botIdx]) {
+                outsideArt[botIdx] = true
+                artQueue[aqTail++] = botIdx
+            }
+        }
+        for (ry in 1 until (bh - 1)) {
+            val leftIdx = ry * bw
+            if (!inComp[leftIdx] && !outsideArt[leftIdx]) {
+                outsideArt[leftIdx] = true
+                artQueue[aqTail++] = leftIdx
+            }
+            val rightIdx = ry * bw + (bw - 1)
+            if (!inComp[rightIdx] && !outsideArt[rightIdx]) {
+                outsideArt[rightIdx] = true
+                artQueue[aqTail++] = rightIdx
+            }
+        }
+        while (aqHead < aqTail) {
+            val idx = artQueue[aqHead++]
+            val rx = idx % bw
+            val ry = idx / bw
+            if (rx > 0) {
+                val n = idx - 1
+                if (!inComp[n] && !outsideArt[n]) {
+                    outsideArt[n] = true; artQueue[aqTail++] = n
+                }
+            }
+            if (rx + 1 < bw) {
+                val n = idx + 1
+                if (!inComp[n] && !outsideArt[n]) {
+                    outsideArt[n] = true; artQueue[aqTail++] = n
+                }
+            }
+            if (ry > 0) {
+                val n = idx - bw
+                if (!inComp[n] && !outsideArt[n]) {
+                    outsideArt[n] = true; artQueue[aqTail++] = n
+                }
+            }
+            if (ry + 1 < bh) {
+                val n = idx + bw
+                if (!inComp[n] && !outsideArt[n]) {
+                    outsideArt[n] = true; artQueue[aqTail++] = n
+                }
+            }
+        }
+
+        // Extract 8-connected interior ink components inside local bounding box
+        val inkVisited = BooleanArray(localTotal)
+        val inkQueue = IntArray(localTotal)
+        val charSeeds = mutableListOf<Pair<CharComponent, IntArray>>()
+
+        for (ry in 1 until (bh - 1)) {
+            val py = compMinY + ry
+            val rMinLocal = compRowMinX[ry] - compMinX
+            val rMaxLocal = compRowMaxX[ry] - compMinX
+            if (rMaxLocal - rMinLocal + 1 < minChordW) continue
+            val xS = maxOf(1, rMinLocal + 2)
+            val xE = minOf(bw - 2, rMaxLocal - 2)
+            if (xS > xE) continue
+            for (rx in xS..xE) {
+                val lIdx = ry * bw + rx
+                if (inComp[lIdx] || outsideArt[lIdx] || inkVisited[lIdx]) continue
+                if (py <= compColMinY[rx] + 1 || py >= compColMaxY[rx] - 1) continue
+                if ((compColMaxY[rx] - compColMinY[rx] + 1) < minChordH) continue
+                if ((gray[py * workW + (compMinX + rx)].toInt() and 0xFF) > darkThresh) continue
+
+                inkVisited[lIdx] = true
+                var h = 0
+                var t = 0
+                inkQueue[t++] = lIdx
+                var cMinX = rx
+                var cMaxX = rx
+                var cMinY = ry
+                var cMaxY = ry
+                while (h < t) {
+                    val cur = inkQueue[h++]
+                    val cx = cur % bw
+                    val cy = cur / bw
+                    if (cx < cMinX) cMinX = cx
+                    if (cx > cMaxX) cMaxX = cx
+                    if (cy < cMinY) cMinY = cy
+                    if (cy > cMaxY) cMaxY = cy
+                    for (ny in (cy - 1).coerceAtLeast(1)..(cy + 1).coerceAtMost(bh - 2)) {
+                        val nPy = compMinY + ny
+                        for (nx in (cx - 1).coerceAtLeast(1)..(cx + 1).coerceAtMost(bw - 2)) {
+                            val nIdx = ny * bw + nx
+                            if (inComp[nIdx] || outsideArt[nIdx] || inkVisited[nIdx]) continue
+                            if ((gray[nPy * workW + (compMinX + nx)].toInt() and 0xFF) > darkThresh) continue
+                            inkVisited[nIdx] = true
+                            inkQueue[t++] = nIdx
+                        }
+                    }
+                }
+                if (t >= 2 && (cMaxX - cMinX + 1) <= bw * 0.65f && (cMaxY - cMinY + 1) <= bh * 0.65f) {
+                    val pixelsCopy = inkQueue.copyOf(t)
+                    charSeeds.add(CharComponent(cMinX, cMinY, cMaxX, cMaxY, t) to pixelsCopy)
+                }
+            }
+        }
+
+        if (charSeeds.size < 2) {
+            expandAndEmitBubbleBox(
+                gray = gray, workW = workW,
+                minX = compMinX, maxX = compMaxX, minY = compMinY, maxY = compMaxY,
+                rowMinX = compRowMinX, rowMaxX = compRowMaxX, colMinY = compColMinY, colMaxY = compColMaxY,
+                darkThresh = darkThresh, minChordW = minChordW, minChordH = minChordH,
+                tMinX = textMinX, tMaxX = textMaxX, tMinY = textMinY, tMaxY = textMaxY,
+                fillRatio = fillRatio, touchCount = touchCount, areaFraction = areaFraction,
+                results = results,
+            )
+            return
+        }
+
+        // Step 1: Group adjacent character blobs into tight horizontal lines or vertical columns
+        data class InkGroup(
+            var minX: Int,
+            var minY: Int,
+            var maxX: Int,
+            var maxY: Int,
+            var lineH: Float,
+            var darkPixels: Int,
+            val blobPixels: MutableList<IntArray>,
+        ) {
+            val width: Int get() = maxX - minX + 1
+            val height: Int get() = maxY - minY + 1
+            val centerX: Float get() = (minX + maxX) * 0.5f
+            val centerY: Float get() = (minY + maxY) * 0.5f
+        }
+
+        val groups = charSeeds.map { (ch, pix) ->
+            InkGroup(ch.minX, ch.minY, ch.maxX, ch.maxY, ch.height.toFloat(), ch.pixelCount, mutableListOf(pix))
+        }.toMutableList()
+
+        // Precompute interior span helpers for bubble neck / artwork intrusion tests
+        fun corridorCrossesOutsideArt(x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
+            val steps = maxOf(kotlin.math.abs(x1 - x0), kotlin.math.abs(y1 - y0)).toInt().coerceAtLeast(1)
+            for (s in 0..steps) {
+                val t = s.toFloat() / steps
+                val rx = (x0 + (x1 - x0) * t).roundToInt().coerceIn(0, bw - 1)
+                val ry = (y0 + (y1 - y0) * t).roundToInt().coerceAtLeast(0).coerceAtMost(bh - 1)
+                if (outsideArt[ry * bw + rx]) return true
+            }
+            return false
+        }
+
+        // Merge same-line characters first (never jumping across external artwork or bubble borders)
+        var lineChanged = true
+        while (lineChanged) {
+            lineChanged = false
+            outer@ for (i in 0 until groups.size) {
+                for (j in i + 1 until groups.size) {
+                    val a = groups[i]
+                    val b = groups[j]
+                    val minH = minOf(a.height, b.height).coerceAtLeast(1)
+                    val maxH = maxOf(a.height, b.height).coerceAtLeast(1)
+                    val dyC = kotlin.math.abs(a.centerY - b.centerY)
+                    val hGap = maxOf(b.minX - a.maxX, a.minX - b.maxX)
+                    val sameLine = maxH.toFloat() / minH <= 2.6f && dyC <= minH * 0.72f && hGap <= maxH * 2.2f
+
+                    val minW = minOf(a.width, b.width).coerceAtLeast(1)
+                    val maxW = maxOf(a.width, b.width).coerceAtLeast(1)
+                    val dxC = kotlin.math.abs(a.centerX - b.centerX)
+                    val vGap = maxOf(b.minY - a.maxY, a.minY - b.maxY)
+                    val sameCol = maxW.toFloat() / minW <= 2.6f && dxC <= minW * 0.72f && vGap <= maxW * 1.8f
+
+                    if ((sameLine || sameCol) && !corridorCrossesOutsideArt(a.centerX, a.centerY, b.centerX, b.centerY)) {
+                        a.minX = minOf(a.minX, b.minX)
+                        a.minY = minOf(a.minY, b.minY)
+                        a.maxX = maxOf(a.maxX, b.maxX)
+                        a.maxY = maxOf(a.maxY, b.maxY)
+                        a.lineH = maxOf(a.lineH, b.lineH)
+                        a.darkPixels += b.darkPixels
+                        a.blobPixels.addAll(b.blobPixels)
+                        groups.removeAt(j)
+                        lineChanged = true
+                        break@outer
+                    }
+                }
+            }
+        }
+
+        // Precompute interior span helpers for bubble neck / artwork intrusion tests
+        fun longestInteriorRowSpan(ry: Int, xLow: Int, xHigh: Int): Int {
+            var best = 0
+            var cur = 0
+            val off = ry * bw
+            for (rx in xLow.coerceAtLeast(0)..xHigh.coerceAtMost(bw - 1)) {
+                if (!outsideArt[off + rx]) {
+                    cur++
+                    if (cur > best) best = cur
+                } else {
+                    cur = 0
+                }
+            }
+            return best
+        }
+
+        fun longestInteriorColSpan(rx: Int, yLow: Int, yHigh: Int): Int {
+            var best = 0
+            var cur = 0
+            for (ry in yLow.coerceAtLeast(0)..yHigh.coerceAtMost(bh - 1)) {
+                if (!outsideArt[ry * bw + rx]) {
+                    cur++
+                    if (cur > best) best = cur
+                } else {
+                    cur = 0
+                }
+            }
+            return best
+        }
+
+        fun belongsToSameBubble(a: InkGroup, b: InkGroup): Boolean {
+            val uMinX = minOf(a.minX, b.minX)
+            val uMaxX = maxOf(a.maxX, b.maxX)
+            val uMinY = minOf(a.minY, b.minY)
+            val uMaxY = maxOf(a.maxY, b.maxY)
+
+            val hGap = maxOf(b.minX - a.maxX, a.minX - b.maxX)
+            val vGap = maxOf(b.minY - a.maxY, a.minY - b.maxY)
+            val refLineH = maxOf(a.lineH, b.lineH).coerceAtLeast(6f)
+            if (vGap > refLineH * 2.1f || hGap > refLineH * 2.4f) return false
+
+            if (corridorCrossesOutsideArt(a.centerX, a.centerY, b.centerX, b.centerY)) return false
+
+            var outCount = 0
+            val uArea = (uMaxX - uMinX + 1) * (uMaxY - uMinY + 1)
+            for (ry in uMinY..uMaxY) {
+                val off = ry * bw
+                for (rx in uMinX..uMaxX) {
+                    if (outsideArt[off + rx]) outCount++
+                }
+            }
+            val outFrac = outCount.toFloat() / uArea.coerceAtLeast(1)
+            val horizOverlap = (minOf(a.maxX, b.maxX) - maxOf(a.minX, b.minX) + 1).coerceAtLeast(0)
+            val minGW = minOf(a.width, b.width).coerceAtLeast(1)
+            val vertOverlap = (minOf(a.maxY, b.maxY) - maxOf(a.minY, b.minY) + 1).coerceAtLeast(0)
+            val minGH = minOf(a.height, b.height).coerceAtLeast(1)
+
+            // Diagonal / L-shaped bubble intersection (one corner notch filled with external sleeve/art)
+            if (horizOverlap < minGW * 0.35f && vertOverlap < minGH * 0.35f && outFrac > 0.08f) return false
+            if (outFrac > 0.16f) return false
+
+            // Check horizontal waist pinch between vertically stacked groups
+            val yLow = a.centerY.roundToInt().coerceIn(0, bh - 1)
+            val yHigh = b.centerY.roundToInt().coerceIn(0, bh - 1)
+            val yStart = minOf(yLow, yHigh)
+            val yEnd = maxOf(yLow, yHigh)
+            if (vGap > minOf(a.lineH, b.lineH) * 0.25f && yEnd - yStart >= 4) {
+                val searchX0 = (uMinX - 8).coerceAtLeast(0)
+                val searchX1 = (uMaxX + 8).coerceAtMost(bw - 1)
+                val spanA = longestInteriorRowSpan(yStart, searchX0, searchX1)
+                val spanB = longestInteriorRowSpan(yEnd, searchX0, searchX1)
+                val minEndSpan = minOf(spanA, spanB)
+                if (minEndSpan > 0) {
+                    var minBridge = Int.MAX_VALUE
+                    for (ry in yStart..yEnd) {
+                        val sp = longestInteriorRowSpan(ry, searchX0, searchX1)
+                        if (sp < minBridge) minBridge = sp
+                    }
+                    if (minBridge < minEndSpan * 0.60f) return false
+                }
+            }
+
+            // Check vertical waist pinch between horizontally adjacent groups
+            val xLow = a.centerX.roundToInt().coerceIn(0, bw - 1)
+            val xHigh = b.centerX.roundToInt().coerceIn(0, bw - 1)
+            val xStart = minOf(xLow, xHigh)
+            val xEnd = maxOf(xLow, xHigh)
+            if (hGap > minOf(a.lineH, b.lineH) * 0.30f && xEnd - xStart >= 4) {
+                val searchY0 = (uMinY - 8).coerceAtLeast(0)
+                val searchY1 = (uMaxY + 8).coerceAtMost(bh - 1)
+                val spanA = longestInteriorColSpan(xStart, searchY0, searchY1)
+                val spanB = longestInteriorColSpan(xEnd, searchY0, searchY1)
+                val minEndSpan = minOf(spanA, spanB)
+                if (minEndSpan > 0) {
+                    var minBridge = Int.MAX_VALUE
+                    for (rx in xStart..xEnd) {
+                        val sp = longestInteriorColSpan(rx, searchY0, searchY1)
+                        if (sp < minBridge) minBridge = sp
+                    }
+                    if (minBridge < minEndSpan * 0.60f) return false
+                }
+            }
+
+            return true
+        }
+
+        // Step 2: Merge lines inside the same convex bubble cavity
+        var groupChanged = true
+        while (groupChanged) {
+            groupChanged = false
+            outerG@ for (i in 0 until groups.size) {
+                for (j in i + 1 until groups.size) {
+                    if (belongsToSameBubble(groups[i], groups[j])) {
+                        val a = groups[i]
+                        val b = groups[j]
+                        a.minX = minOf(a.minX, b.minX)
+                        a.minY = minOf(a.minY, b.minY)
+                        a.maxX = maxOf(a.maxX, b.maxX)
+                        a.maxY = maxOf(a.maxY, b.maxY)
+                        a.lineH = maxOf(a.lineH, b.lineH)
+                        a.darkPixels += b.darkPixels
+                        a.blobPixels.addAll(b.blobPixels)
+                        groups.removeAt(j)
+                        groupChanged = true
+                        break@outerG
+                    }
+                }
+            }
+        }
+
+        val significantGroups = groups.filter { it.darkPixels >= 6 && (it.width >= 6 || it.height >= 6) }
+        if (significantGroups.size <= 1) {
+            expandAndEmitBubbleBox(
+                gray = gray, workW = workW,
+                minX = compMinX, maxX = compMaxX, minY = compMinY, maxY = compMaxY,
+                rowMinX = compRowMinX, rowMaxX = compRowMaxX, colMinY = compColMinY, colMaxY = compColMaxY,
+                darkThresh = darkThresh, minChordW = minChordW, minChordH = minChordH,
+                tMinX = textMinX, tMaxX = textMaxX, tMinY = textMinY, tMaxY = textMaxY,
+                fillRatio = fillRatio, touchCount = touchCount, areaFraction = areaFraction,
+                results = results,
+            )
+            return
+        }
+
+        // Step 3: Multi-source geodesic Voronoi partition inside inComp to split connected lobes at their neck
+        val owner = IntArray(localTotal) { -1 }
+        val geoQueue = IntArray(localTotal)
+        var gqHead = 0
+        var gqTail = 0
+
+        for ((gIdx, grp) in significantGroups.withIndex()) {
+            for (pixArr in grp.blobPixels) {
+                for (pIdx in pixArr) {
+                    val cx = pIdx % bw
+                    val cy = pIdx / bw
+                    for (ny in (cy - 1).coerceAtLeast(0)..(cy + 1).coerceAtMost(bh - 1)) {
+                        for (nx in (cx - 1).coerceAtLeast(0)..(cx + 1).coerceAtMost(bw - 1)) {
+                            val nIdx = ny * bw + nx
+                            if (inComp[nIdx] && owner[nIdx] == -1) {
+                                owner[nIdx] = gIdx
+                                geoQueue[gqTail++] = nIdx
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        while (gqHead < gqTail) {
+            val cur = geoQueue[gqHead++]
+            val gId = owner[cur]
+            val rx = cur % bw
+            val ry = cur / bw
+            if (rx > 0) {
+                val n = cur - 1
+                if (inComp[n] && owner[n] == -1) {
+                    owner[n] = gId; geoQueue[gqTail++] = n
+                }
+            }
+            if (rx + 1 < bw) {
+                val n = cur + 1
+                if (inComp[n] && owner[n] == -1) {
+                    owner[n] = gId; geoQueue[gqTail++] = n
+                }
+            }
+            if (ry > 0) {
+                val n = cur - bw
+                if (inComp[n] && owner[n] == -1) {
+                    owner[n] = gId; geoQueue[gqTail++] = n
+                }
+            }
+            if (ry + 1 < bh) {
+                val n = cur + bw
+                if (inComp[n] && owner[n] == -1) {
+                    owner[n] = gId; geoQueue[gqTail++] = n
+                }
+            }
+        }
+
+        for ((gIdx, grp) in significantGroups.withIndex()) {
+            var lMinX = grp.minX
+            var lMaxX = grp.maxX
+            var lMinY = grp.minY
+            var lMaxY = grp.maxY
+            for (ry in 0 until bh) {
+                val off = ry * bw
+                for (rx in 0 until bw) {
+                    if (owner[off + rx] == gIdx) {
+                        if (rx < lMinX) lMinX = rx
+                        if (rx > lMaxX) lMaxX = rx
+                        if (ry < lMinY) lMinY = ry
+                        if (ry > lMaxY) lMaxY = ry
+                    }
+                }
+            }
+            val lbW = (lMaxX - lMinX + 1).coerceAtLeast(1)
+            val lbH = (lMaxY - lMinY + 1).coerceAtLeast(1)
+            val lRowMinX = IntArray(lbH) { Int.MAX_VALUE }
+            val lRowMaxX = IntArray(lbH) { Int.MIN_VALUE }
+            val lColMinY = IntArray(lbW) { Int.MAX_VALUE }
+            val lColMaxY = IntArray(lbW) { Int.MIN_VALUE }
+            var lobePix = 0
+            for (ry in lMinY..lMaxY) {
+                val off = ry * bw
+                for (rx in lMinX..lMaxX) {
+                    val o = owner[off + rx]
+                    val inTextCore = !outsideArt[off + rx] &&
+                        rx in grp.minX..grp.maxX && ry in grp.minY..grp.maxY
+                    if (o == gIdx || inTextCore) {
+                        val px = compMinX + rx
+                        val py = compMinY + ry
+                        val wy = rx - lMinX
+                        val wz = ry - lMinY
+                        if (px < lRowMinX[wz]) lRowMinX[wz] = px
+                        if (px > lRowMaxX[wz]) lRowMaxX[wz] = px
+                        if (py < lColMinY[wy]) lColMinY[wy] = py
+                        if (py > lColMaxY[wy]) lColMaxY[wy] = py
+                        if (o == gIdx) lobePix++
+                    }
+                }
+            }
+            val lobeFill = (lobePix.toFloat() / (lbW * lbH)).coerceIn(0.30f, 1f)
+            expandAndEmitBubbleBox(
+                gray = gray, workW = workW,
+                minX = compMinX + lMinX, maxX = compMinX + lMaxX,
+                minY = compMinY + lMinY, maxY = compMinY + lMaxY,
+                rowMinX = lRowMinX, rowMaxX = lRowMaxX,
+                colMinY = lColMinY, colMaxY = lColMaxY,
+                darkThresh = darkThresh,
+                minChordW = maxOf(4, (lbW * 0.14f).toInt()),
+                minChordH = maxOf(4, (lbH * 0.14f).toInt()),
+                tMinX = compMinX + grp.minX, tMaxX = compMinX + grp.maxX,
+                tMinY = compMinY + grp.minY, tMaxY = compMinY + grp.maxY,
+                fillRatio = lobeFill,
+                touchCount = touchCount,
+                areaFraction = (lbW * lbH).toFloat() / (workW * workH),
+                results = results,
+            )
+        }
+    }
+
+    private fun expandAndEmitBubbleBox(
+        gray: ByteArray,
+        workW: Int,
+        minX: Int,
+        maxX: Int,
+        minY: Int,
+        maxY: Int,
+        rowMinX: IntArray,
+        rowMaxX: IntArray,
+        colMinY: IntArray,
+        colMaxY: IntArray,
+        darkThresh: Int,
+        minChordW: Int,
+        minChordH: Int,
+        tMinX: Int,
+        tMaxX: Int,
+        tMinY: Int,
+        tMaxY: Int,
+        fillRatio: Float,
+        touchCount: Int,
+        areaFraction: Float,
+        results: MutableList<CandidateBox>,
+    ) {
+        val workH = gray.size / workW
+        val bw = (maxX - minX + 1).coerceAtLeast(1)
+        val bh = (maxY - minY + 1).coerceAtLeast(1)
+        val textSpanW = (tMaxX - tMinX + 1).coerceAtLeast(1)
+        val textSpanH = (tMaxY - tMinY + 1).coerceAtLeast(1)
+        val minBodyChordW = maxOf(minChordW, (textSpanW * 0.72f).toInt())
+
+        var chordMinY = tMinY
+        var chordMaxY = tMaxY
+        for (py in minY..maxY) {
+            val ry = py - minY
+            if (rowMaxX[ry] >= rowMinX[ry] && (rowMaxX[ry] - rowMinX[ry] + 1) >= minChordW) {
+                if (py < chordMinY) chordMinY = py
+                if (py > chordMaxY) chordMaxY = py
+            }
+        }
+        var chordMinX = tMinX
+        var chordMaxX = tMaxX
+        for (px in minX..maxX) {
+            val rx = px - minX
+            if (colMaxY[rx] >= colMinY[rx] && (colMaxY[rx] - colMinY[rx] + 1) >= minChordH) {
+                if (px < chordMinX) chordMinX = px
+                if (px > chordMaxX) chordMaxX = px
+            }
+        }
+
+        // Expand smoothly within the verified clean oval cavity around the text so short/off-center
+        // dialogue centers naturally inside the speech bubble without entering tails or hair leaks.
+        val edgeGuard = maxOf(3, minOf(bw, bh) / 28).coerceAtMost(7)
+        val largeLeakRisk = touchCount >= 2 || areaFraction > 0.07f || (touchCount == 1 && fillRatio < 0.55f)
+        val maxExpandY = if (largeLeakRisk) {
+            maxOf(8, (textSpanH * 0.25f).toInt()).coerceAtMost(24)
+        } else {
+            maxOf(18, (bh * 0.28f).toInt()).coerceAtMost(96)
+        }
+        val maxExpandX = if (largeLeakRisk) {
+            maxOf(8, (textSpanW * 0.25f).toInt()).coerceAtMost(28)
+        } else {
+            maxOf(18, (bw * 0.25f).toInt()).coerceAtMost(96)
+        }
+
+        fun isCleanWhiteRow(py: Int): Boolean {
+            val ry = py - minY
+            if (ry !in 1 until (bh - 1)) return false
+            val rMin = rowMinX[ry]
+            val rMax = rowMaxX[ry]
+            if (rMax - rMin + 1 < minBodyChordW) return false
+            if (rMin > tMaxX || rMax < tMinX) return false
+            val xS = maxOf(minX + 1, rMin + edgeGuard)
+            val xE = minOf(maxX - 1, rMax - edgeGuard)
+            if (xS > xE) return false
+            val pyOff = py * workW
+            var darkCount = 0
+            for (px in xS..xE) {
+                if ((gray[pyOff + px].toInt() and 0xFF) <= darkThresh) {
+                    darkCount++
+                    if (darkCount > 2) return false
+                }
+            }
+            return true
+        }
+
+        var cavMinY = tMinY
+        var stepUp = 0
+        while (stepUp < maxExpandY && cavMinY - 1 > minY + edgeGuard && isCleanWhiteRow(cavMinY - 1)) {
+            cavMinY--
+            stepUp++
+        }
+        var cavMaxY = tMaxY
+        var stepDown = 0
+        while (stepDown < maxExpandY && cavMaxY + 1 < maxY - edgeGuard && isCleanWhiteRow(cavMaxY + 1)) {
+            cavMaxY++
+            stepDown++
+        }
+
+        // Measure the inner horizontal chord envelope across the expanded vertical band
+        var bandMinX = minX + edgeGuard
+        var bandMaxX = maxX - edgeGuard
+        for (py in cavMinY..cavMaxY) {
+            val ry = py - minY
+            if (rowMinX[ry] <= rowMaxX[ry]) {
+                val rMin = (rowMinX[ry] + edgeGuard).coerceAtMost(tMinX)
+                val rMax = (rowMaxX[ry] - edgeGuard).coerceAtLeast(tMaxX)
+                if (rMin > bandMinX) bandMinX = rMin
+                if (rMax < bandMaxX) bandMaxX = rMax
+            }
+        }
+
+        val padX = maxOf(4, (bw * 0.06f).toInt()).coerceAtMost(10)
+        val padY = maxOf(4, (bh * 0.06f).toInt()).coerceAtMost(10)
+        val targetMinX = maxOf(tMinX - maxExpandX, bandMinX)
+        val targetMaxX = minOf(tMaxX + maxExpandX, bandMaxX)
+        val cropMinX = minOf(tMinX - padX, targetMinX)
+            .coerceAtLeast(minOf(tMinX, chordMinX))
+            .coerceAtLeast(minX)
+        val cropMaxX = maxOf(tMaxX + padX, targetMaxX)
+            .coerceAtMost(maxOf(tMaxX, chordMaxX))
+            .coerceAtMost(maxX)
+        val cropMinY = minOf(tMinY - padY, cavMinY)
+            .coerceAtLeast(minOf(tMinY, chordMinY))
+            .coerceAtLeast(minY)
+        val cropMaxY = maxOf(tMaxY + padY, cavMaxY)
+            .coerceAtMost(maxOf(tMaxY, chordMaxY))
+            .coerceAtMost(maxY)
+
+        if (cropMaxX <= cropMinX || cropMaxY <= cropMinY) return
+
+        val rect = NormalizedRect(
+            x = cropMinX.toFloat() / workW,
+            y = cropMinY.toFloat() / workH,
+            width = (cropMaxX - cropMinX + 1).toFloat() / workW,
+            height = (cropMaxY - cropMinY + 1).toFloat() / workH,
+        ).clamped()
+        if (rect.isEmpty) return
+
+        val conf = (0.85f + 0.13f * ((fillRatio - 0.30f) / 0.70f).coerceIn(0f, 1f)).coerceIn(0.85f, 0.98f)
+        results.add(CandidateBox(rect, conf, fromBubblePass = true))
     }
 
     private fun detectStrokeClusters(

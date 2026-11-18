@@ -70,25 +70,60 @@ class ZipArchiveReader(
         }
     }
 
-    @Throws(IOException::class)
-    override fun getPageStream(page: ArchivePage): InputStream {
+    private fun openRawEntryStream(page: ArchivePage): InputStream {
         ensureOpen()
-        synchronized(zipFile) {
-            val entry = zipFile.getEntry(page.path)
-                ?: throw NoSuchElementException("Page entry not found in archive: ${page.path}")
-            return zipFile.getInputStream(entry)
-                ?: throw IOException("Failed to obtain input stream for entry: ${page.path}")
-        }
+        val entry = zipFile.getEntry(page.path)
+            ?: throw NoSuchElementException("Page entry not found in archive: ${page.path}")
+        return zipFile.getInputStream(entry)
+            ?: throw IOException("Failed to obtain input stream for entry: ${page.path}")
+    }
+
+    @Throws(IOException::class)
+    override fun getPageStream(page: ArchivePage): InputStream = synchronized(zipFile) {
+        LockedZipEntryStream(openRawEntryStream(page))
     }
 
     @Throws(IOException::class)
     override fun getPageBytes(page: ArchivePage): ByteArray = synchronized(zipFile) {
-        getPageStream(page).use { it.readAllBytes() }
+        openRawEntryStream(page).use { it.readAllBytes() }
     }
 
     override fun close() {
-        if (isClosed.compareAndSet(false, true)) {
-            zipFile.close()
+        synchronized(zipFile) {
+            if (isClosed.compareAndSet(false, true)) {
+                zipFile.close()
+            }
+        }
+    }
+
+    private inner class LockedZipEntryStream(
+        private val raw: InputStream,
+    ) : InputStream() {
+        override fun read(): Int = synchronized(zipFile) {
+            ensureOpen()
+            raw.read()
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = synchronized(zipFile) {
+            ensureOpen()
+            raw.read(b, off, len)
+        }
+
+        override fun skip(n: Long): Long = synchronized(zipFile) {
+            ensureOpen()
+            raw.skip(n)
+        }
+
+        override fun available(): Int = synchronized(zipFile) {
+            if (isClosed.get()) 0 else raw.available()
+        }
+
+        override fun close() {
+            synchronized(zipFile) {
+                if (!isClosed.get()) {
+                    raw.close()
+                }
+            }
         }
     }
 }

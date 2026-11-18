@@ -272,4 +272,70 @@ class LensOverlayRendererTest {
         }
         assertTrue(uniformRedCount >= 30, "Expected uniform red block text to retain red hue, got $uniformRedCount")
     }
+
+    @Test
+    fun `preserves surrounding red artwork and curved outline while erasing corner-hugging interior text`() {
+        val page = BufferedImage(320, 240, BufferedImage.TYPE_INT_ARGB).apply {
+            val g = createGraphics()
+            // Upper-left red sleeve artwork + brown background outside bubble
+            g.color = Color(98, 68, 65)
+            g.fillRect(0, 0, width, height)
+            g.color = Color(205, 34, 30)
+            g.fillRect(0, 0, 150, 110)
+
+            // Speech bubble oval with white interior and thin black border
+            g.color = Color.WHITE
+            g.fillOval(26, 20, 268, 200)
+            g.color = Color.BLACK
+            g.stroke = java.awt.BasicStroke(3f)
+            g.drawOval(26, 20, 268, 200)
+
+            // Original English text spanning close to the lower-right inner oval boundary
+            g.font = Font("SansSerif", Font.BOLD, 16)
+            g.drawString("FINALLY MADE", 95, 75)
+            g.drawString("TO BECOME ONE", 88, 120)
+            g.drawString("WITH DUZE", 130, 185)
+            g.dispose()
+        }
+
+        val bounds = NormalizedRect(0.05f, 0.05f, 0.90f, 0.88f)
+        val result = PageTranslationResult(
+            pageIndex = 0,
+            generation = 1L,
+            sourceWidth = 320,
+            sourceHeight = 240,
+            blocks = listOf(
+                TranslatedBlock(
+                    bounds = bounds,
+                    originalText = "FINALLY MADE TO BECOME ONE WITH DUZE",
+                    translatedText = "FINALMENTE FEITO PARA SE TORNAR UM COM DUZE",
+                ),
+            ),
+            status = TranslationStatus.READY,
+        )
+
+        val rendered = LensOverlayRenderer.renderPageWithOverlay(page, result)
+
+        // Upper-left red sleeve pixels outside the oval must remain untouched (no square step leak!)
+        for (y in 18..40) {
+            for (x in 18..36) {
+                val origRgb = page.getRGB(x, y)
+                val outRgb = rendered.getRGB(x, y)
+                if (((origRgb shr 16) and 0xFF) > 180 && ((origRgb shr 8) and 0xFF) < 60) {
+                    assertEquals(origRgb, outRgb, "Red sleeve outside bubble at ($x, $y) must remain intact")
+                }
+            }
+        }
+
+        // Bottom-right corner of the bubble interior around 'DUZE' (x=175..225, y=180..192) must not retain unmasked background text streaks
+        val darkRemnantsAtLowerEdge = (180..188).sumOf { y ->
+            (130..215).count { x ->
+                val rgb = rendered.getRGB(x, y)
+                val lum = 0.299 * ((rgb shr 16) and 0xFF) + 0.587 * ((rgb shr 8) and 0xFF) + 0.114 * (rgb and 0xFF)
+                lum < 90.0
+            }
+        }
+        // Only rendered Portuguese text (not full unmasked original English block outside mask) should remain
+        assertTrue(darkRemnantsAtLowerEdge < 140, "Expected bottom-right original 'WITH DUZE' to be masked cleanly inside oval")
+    }
 }

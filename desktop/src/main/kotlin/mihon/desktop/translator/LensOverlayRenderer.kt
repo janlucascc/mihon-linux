@@ -267,7 +267,10 @@ object LensOverlayRenderer {
                             originalText = block.originalText,
                             targetRect = Rectangle(0, 0, targetRect.width, targetRect.height),
                             isDarkBackground = blurredPatch.isDarkBackground,
-                            isOvalBubble = blurredPatch.isOvalBubble,
+                            rowSafeMinX = blurredPatch.rowSafeMinX,
+                            rowSafeMaxX = blurredPatch.rowSafeMaxX,
+                            safeTopY = blurredPatch.safeTopY,
+                            safeBotY = blurredPatch.safeBotY,
                             colorProfile = blurredPatch.colorProfile,
                         )
                     } finally {
@@ -304,7 +307,10 @@ object LensOverlayRenderer {
     private class BlurredPatchResult(
         val image: BufferedImage,
         val isDarkBackground: Boolean,
-        val isOvalBubble: Boolean,
+        val rowSafeMinX: IntArray?,
+        val rowSafeMaxX: IntArray?,
+        val safeTopY: Int,
+        val safeBotY: Int,
         val colorProfile: TextColorProfile,
     )
 
@@ -380,37 +386,136 @@ object LensOverlayRenderer {
         val tintB = if (bgSamples > 0) (bgSumB / bgSamples).toInt().coerceIn(0, 255) else (if (isDarkBg) 31 else 250)
         val tintLum = 0.299f * tintR + 0.587f * tintG + 0.114f * tintB
 
-        // Detect curved speech bubble outline per quadrant so curved borders/hair are preserved
-        // while open composite bubble lobes still cover corner glyphs completely.
-        val cx = targetW * 0.5f
-        val cy = targetH * 0.5f
-        val rx = max(1f, cx)
-        val ry = max(1f, cy)
-        val cornerTotal = IntArray(4)
-        val cornerDark = IntArray(4)
-        if (!isDarkBg && tintLum >= 195f && targetW >= 36 && targetH >= 28) {
-            for (y in 0 until targetH) {
-                val dyNorm = abs((y + 0.5f - cy) / ry).pow(2.65f)
-                val rowOff = y * targetW
-                val bottomBit = if (y >= cy) 2 else 0
-                for (x in 0 until targetW) {
-                    val dist = (abs((x + 0.5f - cx) / rx).pow(2.65f) + dyNorm).pow(1f / 2.65f)
-                    if (dist >= 0.94f) {
-                        val quad = bottomBit or (if (x >= cx) 1 else 0)
-                        val px = pixels[rowOff + x]
-                        val lum = 0.299f * ((px shr 16) and 0xFF) +
-                            0.587f * ((px shr 8) and 0xFF) +
-                            0.114f * (px and 0xFF)
-                        cornerTotal[quad]++
-                        if (lum < tintLum - 38f) cornerDark[quad]++
-                    }
+        // Detect exterior artwork and bubble outline connected to the patch perimeter so curved bubble
+        // borders and nearby character sleeves are preserved smoothly without arbitrary quadrant steps.
+        val totalPx = targetW * targetH
+        val outsideMask = BooleanArray(totalPx)
+        var outsideCount = 0
+        if (!isDarkBg && tintLum >= 198f && targetW >= 24 && targetH >= 20) {
+            val isBorderOrArt = BooleanArray(totalPx)
+            for (i in 0 until totalPx) {
+                val px = pixels[i]
+                val r = (px shr 16) and 0xFF
+                val g = (px shr 8) and 0xFF
+                val b = px and 0xFF
+                val lum = 0.299f * r + 0.587f * g + 0.114f * b
+                val chroma = max(r, max(g, b)) - min(r, min(g, b))
+                if (lum < tintLum - 38f || (chroma >= 36 && lum < tintLum - 16f)) {
+                    isBorderOrArt[i] = true
                 }
             }
+
+            val visited = BooleanArray(totalPx)
+            val queue = IntArray(totalPx)
+            val cornerX = max(4, (targetW * 0.24f).roundToInt())
+            val cornerY = max(4, (targetH * 0.24f).roundToInt())
+            val largeMiddleWedge = max(48, (totalPx * 0.03f).roundToInt())
+
+            fun tryFloodPerimeterComponent(seedIdx: Int) {
+                if (visited[seedIdx] || !isBorderOrArt[seedIdx]) return
+                visited[seedIdx] = true
+                var qHead = 0
+                var qTail = 0
+                queue[qTail++] = seedIdx
+                var touchesCornerZone = false
+                while (qHead < qTail) {
+                    val cur = queue[qHead++]
+                    val x = cur % targetW
+                    val y = cur / targetW
+                    if (((y == 0 || y == targetH - 1) && (x <= cornerX || x >= targetW - 1 - cornerX)) ||
+                        ((x == 0 || x == targetW - 1) && (y <= cornerY || y >= targetH - 1 - cornerY))
+                    ) {
+                        touchesCornerZone = true
+                    }
+                    if (x > 0) {
+                        val n = cur - 1
+                        if (!visited[n] && isBorderOrArt[n]) {
+                            visited[n] = true; queue[qTail++] = n
+                        }
+                    }
+                    if (x + 1 < targetW) {
+                        val n = cur + 1
+                        if (!visited[n] && isBorderOrArt[n]) {
+                            visited[n] = true; queue[qTail++] = n
+                        }
+                    }
+                    if (y > 0) {
+                        val n = cur - targetW
+                        if (!visited[n] && isBorderOrArt[n]) {
+                            visited[n] = true; queue[qTail++] = n
+                        }
+                    }
+                    if (y + 1 < targetH) {
+                        val n = cur + targetW
+                        if (!visited[n] && isBorderOrArt[n]) {
+                            visited[n] = true; queue[qTail++] = n
+                        }
+                    }
+                }
+                val accept = (touchesCornerZone && qTail >= 6) || qTail >= largeMiddleWedge
+                if (accept && outsideCount + qTail <= totalPx * 0.62f) {
+                    for (k in 0 until qTail) {
+                        outsideMask[queue[k]] = true
+                    }
+                    outsideCount += qTail
+                }
+            }
+
+            for (x in 0 until targetW) {
+                tryFloodPerimeterComponent(x)
+                tryFloodPerimeterComponent((targetH - 1) * targetW + x)
+            }
+            for (y in 1 until (targetH - 1)) {
+                tryFloodPerimeterComponent(y * targetW)
+                tryFloodPerimeterComponent(y * targetW + (targetW - 1))
+            }
         }
-        val quadOval = BooleanArray(4) { q ->
-            cornerTotal[q] >= 4 && cornerDark[q].toFloat() / cornerTotal[q] >= 0.22f
+        val hasContourMask = outsideCount >= 6
+
+        var rowSafeMinX: IntArray? = null
+        var rowSafeMaxX: IntArray? = null
+        var safeTopY = 0
+        var safeBotY = targetH - 1
+        if (hasContourMask) {
+            val sMinX = IntArray(targetH) { targetW }
+            val sMaxX = IntArray(targetH) { -1 }
+            val minUsableRowW = max(12, (targetW * 0.25f).roundToInt())
+            var foundFirstRow = false
+            for (y in 0 until targetH) {
+                val off = y * targetW
+                var bestLen = 0
+                var bestL = targetW
+                var bestR = -1
+                var curLen = 0
+                var curL = 0
+                for (x in 0 until targetW) {
+                    if (!outsideMask[off + x]) {
+                        if (curLen == 0) curL = x
+                        curLen++
+                        if (curLen > bestLen) {
+                            bestLen = curLen
+                            bestL = curL
+                            bestR = x
+                        }
+                    } else {
+                        curLen = 0
+                    }
+                }
+                sMinX[y] = bestL
+                sMaxX[y] = bestR
+                if (bestLen >= minUsableRowW) {
+                    if (!foundFirstRow) {
+                        safeTopY = y
+                        foundFirstRow = true
+                    }
+                    safeBotY = y
+                }
+            }
+            if (foundFirstRow && safeBotY - safeTopY + 1 >= 12) {
+                rowSafeMinX = sMinX
+                rowSafeMaxX = sMaxX
+            }
         }
-        val isOvalBubble = quadOval.any { it }
 
         val origPixels = pixels.copyOf()
         val colorProfile = extractTextColorProfile(
@@ -422,7 +527,7 @@ object LensOverlayRenderer {
             tintB = tintB,
             tintLum = tintLum,
             isDarkBg = isDarkBg,
-            quadOval = quadOval,
+            outsideMask = if (hasContourMask) outsideMask else null,
         )
 
         // 3-pass separable box blur (approximates Gaussian blur) to obliterate original glyph edges
@@ -434,7 +539,7 @@ object LensOverlayRenderer {
             boxBlurVertical(temp, current, targetW, targetH, radius)
         }
 
-        // Blend blurred pixels cleanly with sampled background tint and per-quadrant oval/rounded masking
+        // Blend blurred pixels cleanly with sampled background tint and contour-aware soft masking
         val tintW = when {
             !isDarkBg && tintLum >= 232f -> 0.96f
             !isDarkBg && tintLum >= 205f -> 0.90f
@@ -442,12 +547,32 @@ object LensOverlayRenderer {
         }
         val blurW = 1f - tintW
 
-        val cornerR = min(min(targetW, targetH) * 0.16f, 12f)
-        val featherPx = if (min(targetW, targetH) > 10) (1.8f / min(cx, cy)).coerceIn(0.03f, 0.14f) else 0.10f
+        val contourDist = if (hasContourMask) {
+            IntArray(totalPx) { idx -> if (outsideMask[idx]) 0 else 3 }.also { dist ->
+                for (stepDist in 1..2) {
+                    val prev = stepDist - 1
+                    for (y in 0 until targetH) {
+                        val off = y * targetW
+                        for (x in 0 until targetW) {
+                            val idx = off + x
+                            if (dist[idx] <= prev) continue
+                            val touchesPrev =
+                                (x > 0 && dist[idx - 1] == prev) ||
+                                    (x + 1 < targetW && dist[idx + 1] == prev) ||
+                                    (y > 0 && dist[idx - targetW] == prev) ||
+                                    (y + 1 < targetH && dist[idx + targetW] == prev)
+                            if (touchesPrev) dist[idx] = stepDist
+                        }
+                    }
+                }
+            }
+        } else {
+            null
+        }
+
+        val cornerR = min(min(targetW, targetH) * 0.12f, 8f)
 
         for (y in 0 until targetH) {
-            val dyPow = if (isOvalBubble) abs((y + 0.5f - cy) / ry).pow(2.65f) else 0f
-            val bottomBit = if (y >= cy) 2 else 0
             for (x in 0 until targetW) {
                 val i = y * targetW + x
                 val px = current[i]
@@ -455,12 +580,17 @@ object LensOverlayRenderer {
                 val bg = ((px shr 8) and 0xFF) * blurW + tintG * tintW
                 val bb = (px and 0xFF) * blurW + tintB * tintW
 
-                val quad = bottomBit or (if (x >= cx) 1 else 0)
-                val maskAlpha = if (quadOval[quad]) {
-                    val normDist = (abs((x + 0.5f - cx) / rx).pow(2.65f) + dyPow).pow(1f / 2.65f)
-                    ((0.97f - normDist) / featherPx).coerceIn(0f, 1f)
+                val rectCov = roundedRectCoverage(x + 0.5f, y + 0.5f, targetW.toFloat(), targetH.toFloat(), cornerR)
+                val maskAlpha = if (contourDist != null) {
+                    val contourCov = when (contourDist[i]) {
+                        0 -> 0f
+                        1 -> 0.28f
+                        2 -> 0.70f
+                        else -> 1f
+                    }
+                    min(contourCov, rectCov)
                 } else {
-                    roundedRectCoverage(x + 0.5f, y + 0.5f, targetW.toFloat(), targetH.toFloat(), cornerR)
+                    rectCov
                 }
                 val opx = origPixels[i]
                 val or = (opx shr 16) and 0xFF
@@ -479,7 +609,7 @@ object LensOverlayRenderer {
         }
 
         patch.setRGB(0, 0, targetW, targetH, current, 0, targetW)
-        return BlurredPatchResult(patch, isDarkBg, isOvalBubble, colorProfile)
+        return BlurredPatchResult(patch, isDarkBg, rowSafeMinX, rowSafeMaxX, safeTopY, safeBotY, colorProfile)
     }
 
     private fun extractTextColorProfile(
@@ -491,7 +621,7 @@ object LensOverlayRenderer {
         tintB: Int,
         tintLum: Float,
         isDarkBg: Boolean,
-        quadOval: BooleanArray,
+        outsideMask: BooleanArray?,
     ): TextColorProfile {
         val defaultBase = if (isDarkBg) Color(255, 255, 255) else Color(16, 17, 24)
         if (w < 8 || h < 8 || origPixels.size < w * h) {
@@ -506,25 +636,21 @@ object LensOverlayRenderer {
             return TextColorProfile(defaultBase, emptyList())
         }
 
-        val cx = w * 0.5f
-        val cy = h * 0.5f
-        val rx = max(1f, cx)
-        val ry = max(1f, cy)
-        val anyOval = quadOval.any { it }
-
         val rowHasFg = BooleanArray(h)
         val rowDist = FloatArray(w * h)
 
         for (y in y1..y2) {
-            val dyNorm = if (anyOval) abs((y + 0.5f - cy) / ry).pow(2.65f) else 0f
-            val bottomBit = if (y >= cy) 2 else 0
             val off = y * w
             for (x in x1..x2) {
-                if (anyOval) {
-                    val quad = bottomBit or (if (x >= cx) 1 else 0)
-                    if (quadOval[quad]) {
-                        val normDist = (abs((x + 0.5f - cx) / rx).pow(2.65f) + dyNorm).pow(1f / 2.65f)
-                        if (normDist >= 0.86f) continue
+                if (outsideMask != null) {
+                    val idx = off + x
+                    if (outsideMask[idx] ||
+                        (x > 0 && outsideMask[idx - 1]) ||
+                        (x + 1 < w && outsideMask[idx + 1]) ||
+                        (y > 0 && outsideMask[idx - w]) ||
+                        (y + 1 < h && outsideMask[idx + w])
+                    ) {
+                        continue
                     }
                 }
                 val px = origPixels[off + x]
@@ -831,17 +957,63 @@ object LensOverlayRenderer {
         originalText: String,
         targetRect: Rectangle,
         isDarkBackground: Boolean,
-        isOvalBubble: Boolean = false,
+        rowSafeMinX: IntArray?,
+        rowSafeMaxX: IntArray?,
+        safeTopY: Int,
+        safeBotY: Int,
         colorProfile: TextColorProfile,
     ) {
-        val padFracX = if (isOvalBubble) 0.10f else 0.05f
-        val padFracY = if (isOvalBubble) 0.09f else 0.05f
-        val padX = (targetRect.width * padFracX).roundToInt().coerceIn(2, 18)
-        val padY = (targetRect.height * padFracY).roundToInt().coerceIn(2, 18)
-        val innerW = (targetRect.width - padX * 2).coerceAtLeast(4)
-        val innerH = (targetRect.height - padY * 2).coerceAtLeast(4)
+        val safeMinXArr = rowSafeMinX
+        val safeMaxXArr = rowSafeMaxX
+        val hasSafeMask = safeMinXArr != null && safeMaxXArr != null && safeBotY > safeTopY
+        val padFracX = if (hasSafeMask) 0.055f else 0.05f
+        val padFracY = if (hasSafeMask) 0.055f else 0.05f
+        val padX = (targetRect.width * padFracX).roundToInt().coerceIn(2, 16)
+        val padY = (targetRect.height * padFracY).roundToInt().coerceIn(2, 16)
+        val padEdge = max(3, min(targetRect.width, targetRect.height) / 26).coerceAtMost(8)
 
-        val maxFont = min(innerW, innerH).coerceIn(6, 44)
+        val safeBoxTop = if (hasSafeMask) {
+            max(targetRect.y + padY, targetRect.y + safeTopY + padEdge).coerceAtMost(targetRect.y + targetRect.height - 4)
+        } else {
+            targetRect.y + padY
+        }
+        val safeBoxBot = if (hasSafeMask) {
+            min(targetRect.y + targetRect.height - padY, targetRect.y + safeBotY - padEdge).coerceAtLeast(safeBoxTop + 4)
+        } else {
+            targetRect.y + targetRect.height - padY
+        }
+        val innerH = (safeBoxBot - safeBoxTop).coerceAtLeast(4)
+
+        val coreCenterX: Int
+        val coreWrapW: Int
+        if (hasSafeMask) {
+            val midStart = (safeTopY + ((safeBotY - safeTopY) * 0.20f).roundToInt()).coerceIn(0, targetRect.height - 1)
+            val midEnd = (safeBotY - ((safeBotY - safeTopY) * 0.20f).roundToInt()).coerceIn(midStart, targetRect.height - 1)
+            val widths = ArrayList<Int>(midEnd - midStart + 1)
+            val centers = ArrayList<Int>(midEnd - midStart + 1)
+            for (y in midStart..midEnd) {
+                val l = safeMinXArr[y]
+                val r = safeMaxXArr[y]
+                if (r >= l) {
+                    widths.add((r - l + 1 - padEdge * 2).coerceAtLeast(4))
+                    centers.add((l + r) / 2)
+                }
+            }
+            if (widths.isNotEmpty()) {
+                widths.sort()
+                centers.sort()
+                coreWrapW = widths[widths.size / 2].coerceIn(4, (targetRect.width - padX * 2).coerceAtLeast(4))
+                coreCenterX = targetRect.x + centers[centers.size / 2]
+            } else {
+                coreWrapW = (targetRect.width - padX * 2).coerceAtLeast(4)
+                coreCenterX = targetRect.x + targetRect.width / 2
+            }
+        } else {
+            coreWrapW = (targetRect.width - padX * 2).coerceAtLeast(4)
+            coreCenterX = targetRect.x + targetRect.width / 2
+        }
+
+        val maxFont = min(coreWrapW, innerH).coerceIn(6, 44)
         val minFont = 6
 
         val cleanedText = text.replace("\r\n", "\n").replace('\r', '\n').trim()
@@ -853,17 +1025,39 @@ object LensOverlayRenderer {
 
         val paraWordColors = resolveWordColorsForBlock(originalText, wordParagraphs, colorProfile)
 
-        fun ovalAllowedLineWidth(lineIdx: Int, lineCount: Int, lineH: Int): Int {
-            if (!isOvalBubble || lineCount <= 1) return innerW
+        fun safeBandSpan(bandTopY: Int, bandBotY: Int): Pair<Int, Int> {
+            if (!hasSafeMask) {
+                return (targetRect.x + padX) to (targetRect.x + targetRect.width - padX)
+            }
+            val y0 = (bandTopY - targetRect.y).coerceIn(0, targetRect.height - 1)
+            val y1 = (bandBotY - targetRect.y).coerceIn(y0, targetRect.height - 1)
+            var minL = targetRect.x + padX
+            var maxR = targetRect.x + targetRect.width - padX
+            for (y in y0..y1) {
+                val rl = safeMinXArr[y]
+                val rr = safeMaxXArr[y]
+                if (rr >= rl) {
+                    val safeL = targetRect.x + rl + padEdge
+                    val safeR = targetRect.x + rr - padEdge
+                    if (safeL > minL) minL = safeL
+                    if (safeR < maxR) maxR = safeR
+                }
+            }
+            return if (maxR - minL >= 4) {
+                minL to maxR
+            } else {
+                (targetRect.x + padX) to (targetRect.x + targetRect.width - padX)
+            }
+        }
+
+        fun allowedLineWidth(lineIdx: Int, lineCount: Int, lineH: Int): Int {
+            if (!hasSafeMask) return coreWrapW
             val totalBlockH = lineCount * lineH
-            val blockTop = targetRect.y + padY + ((innerH - totalBlockH) / 2).coerceAtLeast(0)
-            val lineCenterY = blockTop + lineIdx * lineH + lineH * 0.5f
-            val boxCenterY = targetRect.y + targetRect.height * 0.5f
-            val halfH = max(1f, targetRect.height * 0.5f)
-            val ny = ((lineCenterY - boxCenterY) / halfH).coerceIn(-0.96f, 0.96f)
-            val chordScale = (1f - abs(ny).pow(2.2f)).coerceAtLeast(0.18f).pow(0.45f)
-            val boxChordW = (targetRect.width * chordScale - padX * 1.8f).roundToInt()
-            return min(innerW, boxChordW).coerceAtLeast(4)
+            val blockTop = safeBoxTop + ((innerH - totalBlockH) / 2).coerceAtLeast(0)
+            val lTop = blockTop + lineIdx * lineH
+            val lBot = lTop + lineH - 1
+            val (sL, sR) = safeBandSpan(lTop, lBot)
+            return min(coreWrapW, (sR - sL).coerceAtLeast(4))
         }
 
         data class WrappedResult(
@@ -872,17 +1066,17 @@ object LensOverlayRenderer {
             val usedWrapW: Int,
         )
 
-        fun fitBalancedLines(fm: FontMetrics, allowWordBreak: Boolean): WrappedResult {
-            val greedy = wrapWordParagraphsToWidth(wordParagraphs, fm, innerW, allowWordBreak = allowWordBreak)
+        fun fitBalancedLines(fm: FontMetrics, wrapLimitW: Int, allowWordBreak: Boolean): WrappedResult {
+            val greedy = wrapWordParagraphsToWidth(wordParagraphs, fm, wrapLimitW, allowWordBreak = allowWordBreak)
             if (greedy.size <= 1) {
                 val cols = if (paraWordColors != null) ArrayList<List<Color>>(greedy.size) else null
-                val finalLines = wrapWordParagraphsToWidth(wordParagraphs, fm, innerW, allowWordBreak, paraWordColors, cols)
-                return WrappedResult(finalLines, cols, innerW)
+                val finalLines = wrapWordParagraphsToWidth(wordParagraphs, fm, wrapLimitW, allowWordBreak, paraWordColors, cols)
+                return WrappedResult(finalLines, cols, wrapLimitW)
             }
             var lo = (wordParagraphs.maxOfOrNull { p -> p.maxOfOrNull { fm.stringWidth(it) } ?: 0 } ?: 4)
-                .coerceIn(4, innerW)
-            var hi = innerW
-            var bestW = innerW
+                .coerceIn(4, wrapLimitW)
+            var hi = wrapLimitW
+            var bestW = wrapLimitW
             while (lo <= hi) {
                 val mid = (lo + hi) / 2
                 val candidate = wrapWordParagraphsToWidth(wordParagraphs, fm, mid, allowWordBreak = allowWordBreak)
@@ -909,11 +1103,11 @@ object LensOverlayRenderer {
             val candidateFont = BASE_FONT.deriveFont(Font.BOLD, size.toFloat())
             val fm = g2.getFontMetrics(candidateFont)
             val lineHeight = max(fm.ascent + 1, (fm.height * 0.86f).roundToInt())
-            val wrapped = fitBalancedLines(fm, allowWordBreak = size == minFont)
+            val wrapped = fitBalancedLines(fm, coreWrapW, allowWordBreak = size == minFont)
             val lines = wrapped.lines
             val totalH = lines.size * lineHeight
             val fitsHorizontal = lines.isNotEmpty() && lines.indices.all { idx ->
-                val maxWForLine = ovalAllowedLineWidth(idx, lines.size, lineHeight)
+                val maxWForLine = allowedLineWidth(idx, lines.size, lineHeight)
                 fm.stringWidth(lines[idx]) <= maxWForLine
             }
             val fits = lines.isNotEmpty() && totalH <= innerH && fitsHorizontal
@@ -951,10 +1145,10 @@ object LensOverlayRenderer {
 
         val totalBlockH = visibleLines.size * lineHeight
         val visualOffset = ((chosenFm.ascent - chosenFm.descent) / 2f).roundToInt()
-        val rawStartY = targetRect.y + padY + ((innerH - totalBlockH) / 2).coerceAtLeast(0) +
+        val rawStartY = safeBoxTop + ((innerH - totalBlockH) / 2).coerceAtLeast(0) +
             ((lineHeight / 2) + visualOffset).coerceIn(chosenFm.ascent - 2, chosenFm.ascent + 4)
-        val maxSafeStartY = targetRect.y + targetRect.height - chosenFm.descent - 1 - (visibleLines.size - 1) * lineHeight
-        val startY = rawStartY.coerceIn(targetRect.y + chosenFm.ascent, maxOf(targetRect.y + chosenFm.ascent, maxSafeStartY))
+        val maxSafeStartY = safeBoxBot - chosenFm.descent - 1 - (visibleLines.size - 1) * lineHeight
+        val startY = rawStartY.coerceIn(safeBoxTop + chosenFm.ascent, maxOf(safeBoxTop + chosenFm.ascent, maxSafeStartY))
 
         val baseColor = colorProfile.baseColor
         val haloColor = if (isDarkBackground) Color(14, 15, 22, 220) else Color(255, 255, 255, 230)
@@ -962,8 +1156,12 @@ object LensOverlayRenderer {
 
         for ((idx, line) in visibleLines.withIndex()) {
             val lineW = chosenFm.stringWidth(line)
-            val drawX = targetRect.x + ((targetRect.width - lineW) / 2)
             val drawY = startY + idx * lineHeight
+            val (sL, sR) = safeBandSpan(drawY - chosenFm.ascent, drawY + chosenFm.descent)
+            val idealX = coreCenterX - lineW / 2
+            val minSafeX = sL
+            val maxSafeX = (sR - lineW).coerceAtLeast(minSafeX)
+            val drawX = idealX.coerceIn(minSafeX, maxSafeX)
             val tokenColors = chosenLineColors?.getOrNull(idx)
             val lineTokens = if (tokenColors != null) line.split(' ') else emptyList()
 

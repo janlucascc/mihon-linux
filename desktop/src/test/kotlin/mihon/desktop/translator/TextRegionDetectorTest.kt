@@ -338,4 +338,51 @@ class TextRegionDetectorTest {
         val faceRegions = detector.detectRegions(facePage)
         assertTrue(faceRegions.isEmpty(), "Expected 0 false regions on pale character face artwork, got $faceRegions")
     }
+
+    @Test
+    fun `splits touching L-shaped speech bubbles sharing an open white neck without invading character artwork`() {
+        val page = newPage(600, 820, Color(98, 68, 65))
+        val g = page.createGraphics()
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+
+        // Character red robe artwork nestled directly above the second bubble and right of the first bubble
+        g.color = Color(195, 35, 32)
+        g.fillRoundRect(295, 220, 210, 285, 40, 40)
+
+        // Left bubble + bottom-right bubble sharing an open borderless white neck at (245..285, 485..530)
+        g.color = Color.WHITE
+        g.fillOval(60, 250, 220, 280)
+        g.fillOval(225, 480, 315, 220)
+        g.fillOval(215, 460, 90, 75) // Smooth white overlap bridge between the two bubbles
+
+        // Outer black outline leaving interior neck open
+        g.color = Color.BLACK
+        g.stroke = BasicStroke(3f)
+        g.drawArc(60, 250, 220, 280, 35, 275)
+        g.drawArc(225, 480, 315, 220, -230, 315)
+
+        g.font = Font(Font.SANS_SERIF, Font.BOLD, 20)
+        g.drawString("WHY MUST", 112, 350)
+        g.drawString("THERE BE", 115, 382)
+        g.drawString("CHAINS?!", 118, 414)
+
+        g.drawString("FINALLY I HAVE", 300, 555)
+        g.drawString("MADE CELESTIAL", 295, 587)
+        g.drawString("ONE WITH DUZE", 302, 620)
+        g.dispose()
+
+        val regions = detector.detectRegions(page)
+        assertTrue(regions.size >= 2, "Expected L-shaped touching bubbles to split into >= 2 regions, got $regions")
+
+        val leftRegion = regions.minByOrNull { it.bounds.centerX }!!
+        val rightRegion = regions.maxByOrNull { it.bounds.centerX }!!
+        val leftPx = leftRegion.bounds.toPixelRect(600, 820)
+        val rightPx = rightRegion.bounds.toPixelRect(600, 820)
+
+        assertTrue(leftPx.x + leftPx.width < 340, "Left bubble must not expand across red sleeve: $leftPx")
+        assertTrue(leftPx.y + leftPx.height < 560, "Left bubble must stay separated from bottom bubble: $leftPx")
+        assertTrue(rightPx.x >= 200 && rightPx.y >= 440, "Bottom-right bubble must stay localized: $rightPx")
+        assertTrue(rightPx.y + rightPx.height >= 625, "Bottom-right bubble must cover lower text line: $rightPx")
+    }
 }
