@@ -171,6 +171,15 @@ class ReaderRegressionTest {
                 win.keyListeners.forEach { it.keyPressed(rightArrow) }
 
                 assertTrue(hBar.value > beforeVal, "VK_RIGHT while horizontally scrollable should pan right first")
+
+                // Live zoom percentage button should reflect zoom (> 100%) and return to 100% on reset
+                val zoomBtns = collectButtons(win.contentPane)
+                val zoomedBtn = zoomBtns.firstOrNull { it.text.matches(Regex("\\d+%")) && it.text != "100%" }
+                    ?: throw AssertionError("Top HUD zoom button should update dynamically past 100%")
+
+                val resetZoomKey = KeyEvent(win, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, KeyEvent.VK_0, '0')
+                win.keyListeners.forEach { it.keyPressed(resetZoomKey) }
+                assertEquals("100%", zoomedBtn.text, "Zoom button should return to 100% on reset")
             }
         } finally {
             window?.let { w ->
@@ -178,6 +187,15 @@ class ReaderRegressionTest {
             }
             if (prevMode == null) prefs.remove("mode") else prefs.put("mode", prevMode)
         }
+    }
+
+    private fun collectButtons(container: java.awt.Container): List<javax.swing.AbstractButton> {
+        val out = mutableListOf<javax.swing.AbstractButton>()
+        for (c in container.components) {
+            if (c is javax.swing.AbstractButton) out.add(c)
+            if (c is java.awt.Container) out.addAll(collectButtons(c))
+        }
+        return out
     }
 
     @Test

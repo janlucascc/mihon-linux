@@ -607,8 +607,12 @@ class ReaderWindow(
         isFocusable = false
         isOpaque = false
         addChangeListener {
-            if (!updatingSlider && !valueIsAdjusting) {
-                goTo(value - 1)
+            if (!updatingSlider) {
+                if (valueIsAdjusting) {
+                    pageLabel.text = "Página $value/$pageCount"
+                } else {
+                    goTo(value - 1)
+                }
             }
         }
     }
@@ -649,6 +653,8 @@ class ReaderWindow(
         isFocusable = false
         toolTipText = "Rolagem suave contínua mãos-livres (Espaço ou A)"
     }
+    private var endOfChapterTimer: Timer? = null
+
     private val autoScroll: AutoScrollController = AutoScrollController(
         scroll = scroll,
         onStateChanged = { state, speed ->
@@ -660,8 +666,11 @@ class ReaderWindow(
         },
         onReachedEnd = {
             if (onNextChapter != null) {
-                val timer = Timer(1200) {
-                    onNextChapter?.invoke()
+                endOfChapterTimer?.stop()
+                endOfChapterTimer = Timer(1200) {
+                    if (!closed) {
+                        onNextChapter?.invoke()
+                    }
                 }.apply { isRepeats = false; start() }
             }
         },
@@ -676,6 +685,34 @@ class ReaderWindow(
     // Bookmark state
     private val bookmarksByPage = mutableMapOf<Int, List<Bookmark>>()
     private var bookmarksLoaded = false
+
+    private val bookmarkHudBtn = ModernIconButton(
+        icon = ModernIcons.bookmark(15) { Color.WHITE },
+        tip = "Adicionar / remover bookmark (B)",
+        sizePx = 28,
+        cornerRadius = 8f,
+        darkOverlay = true,
+    ).apply {
+        isVisible = chapterId > 0 && onToggleBookmark != null
+        addActionListener {
+            val toggleBm = onToggleBookmark ?: return@addActionListener
+            if (chapterId > 0) {
+                val added = toggleBm(chapterId, currentPage)
+                showToast(if (added) "Bookmark adicionado na página ${currentPage + 1}" else "Bookmark removido da página ${currentPage + 1}")
+                loadBookmarksForCurrentChapter()
+            }
+        }
+    }
+
+    private val zoomResetBtn = ModernButton(
+        text = "100%",
+        variant = ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
+        isFocusable = false
+        toolTipText = "Redefinir zoom (100%)"
+        addActionListener { resetZoom() }
+    }
 
     // Google Lens Simultaneous Translator state
     var translatorEnabled: Boolean = TranslatorPreferences.load().enabledByDefault
@@ -1115,6 +1152,7 @@ class ReaderWindow(
             add(splitBtn)
             add(autoScrollBtn)
             add(translatorBtn)
+            add(bookmarkHudBtn)
             add(
                 ModernIconButton(
                     icon = ModernIcons.zoomOut(15) { Color.WHITE },
@@ -1124,17 +1162,7 @@ class ReaderWindow(
                     darkOverlay = true,
                 ).apply { addActionListener { adjustZoom(0.85) } },
             )
-            add(
-                ModernButton(
-                    text = "100%",
-                    variant = ModernButton.Variant.HUD,
-                    compact = true,
-                ).apply {
-                    isFocusable = false
-                    toolTipText = "Redefinir zoom (100%)"
-                    addActionListener { resetZoom() }
-                },
-            )
+            add(zoomResetBtn)
             add(
                 ModernIconButton(
                     icon = ModernIcons.zoomIn(15) { Color.WHITE },
@@ -1504,6 +1532,8 @@ class ReaderWindow(
                 MemoryManager.removeLimitListener(memoryLimitListener)
                 runCatching { translatorController.close() }
                 autoScroll.stop()
+                endOfChapterTimer?.stop()
+                endOfChapterTimer = null
                 hoverResumeTimer.stop()
                 progressTimer.stop()
                 activeReadingHeartbeatTimer.stop()
@@ -1563,6 +1593,8 @@ class ReaderWindow(
         newOnShowBookmarks: ((Long, String, Int, (Int) -> Unit) -> Unit)? = null,
     ) {
         autoScroll.stop()
+        endOfChapterTimer?.stop()
+        endOfChapterTimer = null
         hoverResumeTimer.stop()
         progressTimer.stop()
         flushProgress(reportedPage)
@@ -1613,6 +1645,7 @@ class ReaderWindow(
 
         btnPrevChapter.isVisible = newPrevChapter != null
         btnNextChapter.isVisible = newNextChapter != null
+        bookmarkHudBtn.isVisible = newChapterId > 0 && newOnToggleBookmark != null
 
         webtoon.resetForNewChapter(pageCount)
         paged.invalidateCache()
@@ -1711,13 +1744,19 @@ class ReaderWindow(
         }
     }
 
+    private fun updateZoomLabel() {
+        zoomResetBtn.text = "${kotlin.math.round(zoomFactor * 100.0).toInt()}%"
+    }
+
     private fun adjustZoom(factor: Double) {
         zoomFactor = (zoomFactor * factor).coerceIn(0.4, 3.5)
+        updateZoomLabel()
         if (isWebtoon) webtoon.relayout() else { paged.revalidate(); paged.repaint() }
     }
 
     private fun resetZoom() {
         zoomFactor = 1.0
+        updateZoomLabel()
         if (isWebtoon) webtoon.relayout() else { paged.revalidate(); paged.repaint() }
     }
 

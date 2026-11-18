@@ -38,6 +38,7 @@ import java.util.prefs.Preferences
  */
 class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
+    private val detailsPrefs = Preferences.userRoot().node("mihon-linux")
     private var manga: Manga? = null
     private var chapters: List<Chapter> = emptyList()
     private var resumeChapter: Chapter? = null
@@ -45,7 +46,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     @Volatile private var openingChapterId: Long? = null
     private var cancelStreamingTask: (() -> Unit)? = null
     private var filterMode = 0 // 0 = All, 1 = Unread, 2 = Downloaded
-    private var reverseOrder = false
+    private var reverseOrder = detailsPrefs.getBoolean("details_reverse_order", false)
 
     private val header = object : JPanel(BorderLayout(22, 0)) {
         init {
@@ -71,13 +72,25 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
     private val filterCombo = JComboBox(arrayOf("Todos os capítulos", "Apenas não lidos", "Apenas baixados"))
     private val sortOrderBtn = ModernButton(
-        text = "Ordem",
-        icon = ModernIcons.sort(14) { Theme.TEXT_PRIMARY },
+        text = if (reverseOrder) "Mais antigos" else "Mais recentes",
+        icon = if (reverseOrder) ModernIcons.arrowUp(14) { Theme.TEXT_PRIMARY } else ModernIcons.arrowDown(14) { Theme.TEXT_PRIMARY },
         variant = ModernButton.Variant.SURFACE,
     ).apply {
+        toolTipText = "Inverter ordem dos capítulos"
         addActionListener {
             reverseOrder = !reverseOrder
+            detailsPrefs.putBoolean("details_reverse_order", reverseOrder)
+            updateSortOrderButton()
             applyChapterListFilter()
+        }
+    }
+
+    private fun updateSortOrderButton() {
+        sortOrderBtn.text = if (reverseOrder) "Mais antigos" else "Mais recentes"
+        sortOrderBtn.icon = if (reverseOrder) {
+            ModernIcons.arrowUp(14) { Theme.TEXT_PRIMARY }
+        } else {
+            ModernIcons.arrowDown(14) { Theme.TEXT_PRIMARY }
         }
     }
     private val catPicker = JComboBox(
@@ -480,7 +493,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             add(sourceLinkHtml)
             add("${chapters.size} cap.")
             if (unreadCount > 0) add("$unreadCount não lido(s)")
-            if (downloadedCount > 0) add("<span style='color:#2e9e6b;font-weight:bold'>$downloadedCount salvo(s) offline</span>")
+            if (downloadedCount > 0) add("<span style='color:${Theme.SUCCESS.toHex()};font-weight:bold'>$downloadedCount salvo(s) offline</span>")
             manga.genre?.take(4)?.forEach { add(escapeHtml(it)) }
         }.joinToString(" &nbsp;│&nbsp; ")
 
@@ -642,6 +655,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 cancelStreamingTask = null
 
                 if (isCancelled || !wasOpening) {
+                    runCatching { result.getOrNull()?.close() }
                     return@background
                 }
 
