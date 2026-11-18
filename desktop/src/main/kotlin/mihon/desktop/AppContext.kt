@@ -6,6 +6,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import mihon.core.archive.ArchiveReaderFactory
 import mihon.core.archive.ImageDecoder
+import mihon.domain.track.TrackerRepository
 import mihon.source.ExtensionSource
 import okhttp3.Dispatcher
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -123,7 +124,7 @@ object Theme {
             Color(255, 255, 255, 40),
             Color(0xFA, 0xFA, 0xFA),
             Color(0xD1, 0xD5, 0xDB),
-            Color(0x9C, 0xA3, 0xF),
+            Color(0x9C, 0xA3, 0xAF),
         ),
         MIDNIGHT_BLUE(
             "Midnight Navy (Azul Noturno)",
@@ -185,6 +186,10 @@ object Theme {
 
     fun addListener(listener: (Boolean) -> Unit) {
         listeners.add(listener)
+    }
+
+    fun removeListener(listener: (Boolean) -> Unit) {
+        listeners.remove(listener)
     }
 
     fun applyPreset(preset: ThemePreset) {
@@ -272,6 +277,8 @@ class AppContext(
     extensions: List<ExtensionSource>,
     val covers: CoverCache,
     val setStatus: (String) -> Unit,
+    val trackerRepository: TrackerRepository? = null,
+    val coroutineScope: CoroutineScope? = null,
 ) {
     val extensions: MutableList<ExtensionSource> = extensions.toMutableList()
     lateinit var navigator: Navigator
@@ -285,6 +292,10 @@ class AppContext(
         offlineFilterListeners.add(listener)
     }
 
+    fun removeOfflineFilterListener(listener: (Boolean) -> Unit) {
+        offlineFilterListeners.remove(listener)
+    }
+
     fun setOfflineFilter(value: Boolean) {
         if (onlyOfflineFilter != value) {
             onlyOfflineFilter = value
@@ -293,7 +304,13 @@ class AppContext(
     }
 
     fun addThemeListener(listener: (Boolean) -> Unit) {
+        themeListeners.add(listener)
         Theme.addListener(listener)
+    }
+
+    fun removeThemeListener(listener: (Boolean) -> Unit) {
+        themeListeners.remove(listener)
+        Theme.removeListener(listener)
     }
 
     fun notifyThemeChanged(isDark: Boolean) {
@@ -302,6 +319,10 @@ class AppContext(
 
     fun addExtensionListener(listener: () -> Unit) {
         extensionListeners.add(listener)
+    }
+
+    fun removeExtensionListener(listener: () -> Unit) {
+        extensionListeners.remove(listener)
     }
 
     fun registerExtension(ext: ExtensionSource) {
@@ -516,9 +537,9 @@ class CoverCache(
                 val urlCachedFile = if (hasRemoteThumb) File(cacheDir, "url_" + sha1(thumbUrl!!)) else null
 
                 val cachedImg = when {
-                    cachedFile.exists() -> runCatching { ImageIO.read(cachedFile) }.getOrNull()
+                    cachedFile.exists() -> runCatching { readCachedImageFile(cachedFile) }.getOrNull()
                         ?.takeIf { it.width == COVER_W && it.height == COVER_H }
-                    urlCachedFile != null && urlCachedFile.exists() -> runCatching { ImageIO.read(urlCachedFile) }.getOrNull()
+                    urlCachedFile != null && urlCachedFile.exists() -> runCatching { readCachedImageFile(urlCachedFile) }.getOrNull()
                         ?.takeIf { it.width == COVER_W && it.height == COVER_H }
                     else -> null
                 }
@@ -551,7 +572,7 @@ class CoverCache(
                 val hash = sha1(cleanUrl)
                 val cachedFile = File(cacheDir, "url_$hash.png")
                 val cachedImg = if (cachedFile.exists()) {
-                    runCatching { ImageIO.read(cachedFile) }.getOrNull()
+                    runCatching { readCachedImageFile(cachedFile) }.getOrNull()
                         ?.takeIf { it.width == COVER_W && it.height == COVER_H }
                 } else {
                     null
@@ -643,6 +664,23 @@ class CoverCache(
         }
     }.getOrNull()
 
+    /**
+     * Reads a cached image file bypassing global ImageIO provider SPI synchronization lock contention.
+     */
+    private fun readCachedImageFile(file: File): BufferedImage? = runCatching {
+        javax.imageio.ImageIO.createImageInputStream(file).use { iis ->
+            val readers = javax.imageio.ImageIO.getImageReaders(iis)
+            if (!readers.hasNext()) return@use null
+            val reader = readers.next()
+            try {
+                reader.setInput(iis, true, true)
+                reader.read(0)
+            } finally {
+                reader.dispose()
+            }
+        }
+    }.getOrNull()
+
     /** Center-crops to COVER_W x COVER_H with crisp Tankobon book spine highlight and hairline border. */
     private fun scaleAndRound(src: BufferedImage): BufferedImage {
         val scale = maxOf(COVER_W.toDouble() / src.width, COVER_H.toDouble() / src.height)
@@ -671,15 +709,22 @@ class CoverCache(
         val out = BufferedImage(COVER_W, COVER_H, BufferedImage.TYPE_INT_ARGB)
         val g = out.createGraphics()
         setupQuality(g)
-        g.color = Color(0x18, 0x18, 0x1E)
+        g.paint = GradientPaint(
+            0f, 0f, Color(0x1E, 0x20, 0x2A),
+            COVER_W.toFloat(), COVER_H.toFloat(), Color(0x12, 0x13, 0x18),
+        )
         g.fillRoundRect(0, 0, COVER_W, COVER_H, COVER_ARC, COVER_ARC)
 
-        g.color = Color(242, 239, 233, 55)
-        g.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 38f)
+        // Subtle decorative inner ring
+        g.color = Color(255, 255, 255, 16)
+        g.drawOval(COVER_W / 2 - 36, COVER_H / 2 - 42, 72, 72)
+
+        g.color = Color(242, 239, 233, 85)
+        g.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 34f)
         val fm = g.fontMetrics
         g.drawString(initials, (COVER_W - fm.stringWidth(initials)) / 2, (COVER_H + fm.ascent) / 2 - 8)
 
-        g.color = Color(242, 239, 233, 28)
+        g.color = Color(255, 255, 255, 34)
         g.drawRoundRect(0, 0, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
         g.dispose()
         return out

@@ -124,7 +124,7 @@ object MangaImageEnhancer {
         val th = targetH.coerceAtLeast(1)
         if (src.width == tw && src.height == th && quality == QualityMode.BILINEAR) return src
 
-        if (quality == QualityMode.BILINEAR) {
+        if (quality == QualityMode.BILINEAR || src.width.toLong() * src.height > 8_000_000L || tw.toLong() * th > 8_000_000L) {
             return scaleImageFast(src, tw, th)
         }
 

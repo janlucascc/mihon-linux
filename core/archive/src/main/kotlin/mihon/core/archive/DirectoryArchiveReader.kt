@@ -96,6 +96,14 @@ class DirectoryArchiveReader(
         return ImageIO.read(file)
     }
 
+    @Throws(IOException::class)
+    override fun getPageImage(page: ArchivePage, maxDim: Int): BufferedImage? {
+        ensureOpen()
+        if (maxDim <= 0) return getPageImage(page)
+        val file = getPageFile(page)
+        return ImageDecoder.decode(file.readBytes(), maxDim)
+    }
+
     override fun close() {
         isClosed.set(true)
     }

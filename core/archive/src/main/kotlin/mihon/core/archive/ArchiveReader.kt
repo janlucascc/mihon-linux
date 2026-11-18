@@ -5,11 +5,21 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import javax.imageio.ImageIO
+import kotlin.concurrent.thread
 
 object ImageDecoder {
-    fun decode(bytes: ByteArray): BufferedImage? {
+    
+    /** Configurable timeout for ImageMagick conversion (in seconds). */
+    const val IMAGEMAGICK_TIMEOUT_SECONDS = 10
+
+    fun decode(bytes: ByteArray, maxDim: Int = 0): BufferedImage? {
         if (bytes.isEmpty()) return null
+        if (maxDim > 0) {
+            val sampled = decodeWithSubsampling(bytes, maxDim)
+            if (sampled != null) return sampled
+        }
         runCatching { ImageIO.read(ByteArrayInputStream(bytes)) }.getOrNull()?.let { return it }
         // Fallback for AVIF/JXL/corrupted via ImageMagick with deadlock protection
         return runCatching {
@@ -20,15 +30,63 @@ object ImageDecoder {
                 else -> "-"
             }
             val proc = ProcessBuilder("magick", formatHint, "png:-").start()
+            
+            // Read stdout WHILE writing stdin to avoid deadlock (two threads)
             val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
                 proc.inputStream.use { it.readAllBytes() }
             }
-            proc.outputStream.use { it.write(bytes) }
-            val outBytes = stdoutFuture.get(4, java.util.concurrent.TimeUnit.SECONDS)
-            proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-            if (outBytes != null && outBytes.isNotEmpty()) ImageIO.read(ByteArrayInputStream(outBytes)) else null
+            
+            // Write input to stdin in a separate thread
+            val stdinFuture = java.util.concurrent.CompletableFuture.runAsync {
+                proc.outputStream.use { it.write(bytes) }
+            }
+            
+            try {
+                val outBytes = stdoutFuture.get(IMAGEMAGICK_TIMEOUT_SECONDS.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+                stdinFuture.get(IMAGEMAGICK_TIMEOUT_SECONDS.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+                proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                if (outBytes != null && outBytes.isNotEmpty()) ImageIO.read(ByteArrayInputStream(outBytes)) else null
+            } catch (e: java.util.concurrent.TimeoutException) {
+                proc.destroyForcibly()
+                throw IOException("ImageMagick conversion timed out after ${IMAGEMAGICK_TIMEOUT_SECONDS}s", e)
+            } finally {
+                // Ensure process is cleaned up even on exceptions
+                if (proc.isAlive) {
+                    proc.destroyForcibly()
+                }
+            }
         }.getOrNull()
     }
+
+    private fun decodeWithSubsampling(bytes: ByteArray, maxDim: Int): BufferedImage? = runCatching {
+        ImageIO.createImageInputStream(ByteArrayInputStream(bytes)).use { input ->
+            val readers = ImageIO.getImageReaders(input)
+            if (!readers.hasNext()) return@runCatching null
+            val reader = readers.next()
+            try {
+                reader.setInput(input, true, true)
+                val w = reader.getWidth(0)
+                val h = reader.getHeight(0)
+                // For tall Webtoon strips (h >> w), subsample relative to horizontal width so vertical length
+                // never crushes readable comic dialogue down into low-resolution pixel blocks.
+                val targetRef = when {
+                    h > w * 2.2 -> w
+                    w > h * 2.2 -> minOf(w, h)
+                    else -> maxOf(w, h)
+                }
+                val param = reader.defaultReadParam
+                if (targetRef > maxDim * 1.5) {
+                    val sample = (targetRef / maxDim).coerceAtLeast(1)
+                    if (sample > 1) {
+                        param.setSourceSubsampling(sample, sample, 0, 0)
+                    }
+                }
+                reader.read(0, param)
+            } finally {
+                reader.dispose()
+            }
+        }
+    }.getOrNull()
 
     /**
      * Fast header inspection for JPEG/PNG/GIF/BMP via ImageIO and WebP (RIFF VP8/VP8L/VP8X)
@@ -163,6 +221,9 @@ interface ArchiveReader : AutoCloseable {
      */
     @Throws(IOException::class)
     fun getPageImage(page: ArchivePage): BufferedImage? = ImageDecoder.decode(getPageBytes(page))
+
+    @Throws(IOException::class)
+    fun getPageImage(page: ArchivePage, maxDim: Int): BufferedImage? = ImageDecoder.decode(getPageBytes(page), maxDim)
 
     /**
      * Closes underlying file handles and releases system resources.

@@ -153,16 +153,20 @@ class UpscaleComparisonDialog(
                     font = font.deriveFont(Font.BOLD, 12f)
                     foreground = Theme.TEXT_SECONDARY
                 }
-                val btnRun = JButton("⚡ Recalcular").apply {
-                    font = font.deriveFont(Font.BOLD, 12.5f)
-                    putClientProperty("JButton.buttonType", "roundRect")
-                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                val btnRun = ModernButton(
+                    text = "Recalcular",
+                    icon = ModernIcons.bolt(14) { Color.WHITE },
+                    variant = ModernButton.Variant.PRIMARY,
+                ).apply {
                     addActionListener {
                         val selected = mangaSelector.selectedItem as? SampleOption
                         if (selected != null) runComparison(selected)
                     }
                 }
-                val btnClose = JButton("Fechar").apply {
+                val btnClose = ModernButton(
+                    text = "Fechar",
+                    variant = ModernButton.Variant.SURFACE,
+                ).apply {
                     addActionListener { dispose() }
                 }
 
@@ -353,11 +357,12 @@ class UpscaleComparisonDialog(
         val zoomCropOrig = scaleImageFast(cropOrig, cropW * 2, cropH * 2)
         val zoomCropHd = scaleImageFast(cropHd, cropW * 2, cropH * 2)
 
-        tabs.addTab("🔍 Comparador Split (Lado a Lado)", createSplitPanel(zoomCropOrig, zoomCropHd))
+        tabs.addTab("Comparador Split (Lado a Lado)", ModernIcons.search(14) { Theme.TEXT_PRIMARY }, createSplitPanel(zoomCropOrig, zoomCropHd))
 
         // 2. Traço Nitido (Página Completa)
         tabs.addTab(
-            "✨ Traço Nitido (Traço Nítido)",
+            "Traço Nítido",
+            ModernIcons.sparkles(14) { Theme.ACCENT_HOVER },
             createImageViewer(
                 data.ultraHdImg,
                 "Traço Nitido (Linhas de nanquim reconstruídas + Contraste dinâmico) — ${data.ultraHdImg.width}x${data.ultraHdImg.height} px",
@@ -366,7 +371,8 @@ class UpscaleComparisonDialog(
 
         // 3. Original (Scanlator Bruta)
         tabs.addTab(
-            "🖼️ Original (Scan Bruta)",
+            "Original (Scan Bruta)",
+            ModernIcons.bookOpen(14) { Theme.TEXT_SECONDARY },
             createImageViewer(
                 orig,
                 "Original da Scanlator (1x) — ${orig.width}x${orig.height} px (${data.originalBytes.size / 1024} KB)",
@@ -374,7 +380,7 @@ class UpscaleComparisonDialog(
         )
 
         // 4. Guia Técnico
-        tabs.addTab("📊 Resumo Técnico", createBenchmarkPanel(data))
+        tabs.addTab("Resumo Técnico", ModernIcons.statistics(14) { Theme.TEXT_PRIMARY }, createBenchmarkPanel(data))
 
         statusLabel.text = "Exibindo '${data.mangaTitle}' — ${data.chapterName} (${data.pageName})"
     }
@@ -389,11 +395,16 @@ class UpscaleComparisonDialog(
                     BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
                     BorderFactory.createEmptyBorder(8, 16, 8, 16),
                 )
-                val left = JLabel("🔍 Comparação de Traços e Nitidez (Recorte com Zoom de Inspeção)").apply {
+                val left = JLabel(
+                    "Comparação de Traços e Nitidez (Recorte com Zoom de Inspeção)",
+                    ModernIcons.search(14) { Theme.TEXT_PRIMARY },
+                    SwingConstants.LEFT,
+                ).apply {
+                    iconTextGap = 8
                     font = font.deriveFont(Font.BOLD, 12.5f)
                     foreground = Theme.TEXT_PRIMARY
                 }
-                val right = JLabel("⬅ Esquerda: Original da Scanlator  │  Direita: Traço Nitido ➡").apply {
+                val right = JLabel("Esquerda: Original da Scanlator  │  Direita: Traço Nítido").apply {
                     font = font.deriveFont(Font.BOLD, 12f)
                     foreground = Theme.ACCENT_HOVER
                 }

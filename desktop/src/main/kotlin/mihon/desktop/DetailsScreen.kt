@@ -42,15 +42,28 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var chapters: List<Chapter> = emptyList()
     private var resumeChapter: Chapter? = null
     private var updatingCategory = false
-    private var hoveredRow = -1
-    private var openingChapterId: Long? = null
+    @Volatile private var openingChapterId: Long? = null
     private var cancelStreamingTask: (() -> Unit)? = null
     private var filterMode = 0 // 0 = All, 1 = Unread, 2 = Downloaded
     private var reverseOrder = false
 
-    private val header = JPanel(BorderLayout(22, 0)).apply {
-        background = Theme.BG_SURFACE
-        border = BorderFactory.createEmptyBorder(18, 24, 18, 24)
+    private val header = object : JPanel(BorderLayout(22, 0)) {
+        init {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val base = Theme.BG_SURFACE
+            val glow = blendUiColor(base, Theme.ACCENT, if (Theme.isDark) 0.08f else 0.05f)
+            g2.paint = java.awt.GradientPaint(0f, 0f, glow, 0f, height.toFloat(), base)
+            g2.fillRect(0, 0, width, height)
+            g2.color = Theme.BORDER_SUBTLE
+            g2.drawLine(0, height - 1, width, height - 1)
+            g2.dispose()
+        }
     }
     private val chapterHeaderLabel = JLabel("0 capítulos").apply {
         foreground = Theme.TEXT_PRIMARY
@@ -76,6 +89,14 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         variant = ModernButton.Variant.SURFACE,
     ).apply {
         addActionListener { toggleFavorite() }
+    }
+    private val btnTrack = ModernButton(
+        text = "Rastrear",
+        icon = ModernIcons.sync(14) { Theme.TEXT_PRIMARY },
+        variant = ModernButton.Variant.SURFACE,
+    ).apply {
+        toolTipText = "Vincular e sincronizar progresso com AniList, MyAnimeList ou Rastreador Local"
+        addActionListener { openTrackerDialog() }
     }
     private val btnContinue = ModernButton(
         text = "Continuar Leitura",
@@ -104,6 +125,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val listModel = DefaultListModel<Chapter>()
     private val chapterList = JList(listModel)
     private val rowRenderer = ChapterRowCard()
+    private val hoverAnimator = GridHoverAnimator(chapterList)
+    private var themeListener: ((Boolean) -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -123,7 +146,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 isDownloading = downloading
                 lastPage = ch.lastPageRead
                 selectedState = selected
-                hoveredState = index == hoveredRow
+                hoverProgress = hoverAnimator.progressFor(index)
             }
         }
         chapterList.addMouseMotionListener(object : MouseMotionAdapter() {
@@ -131,21 +154,12 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 val idx = chapterList.locationToIndex(e.point)
                 val valid = if (idx >= 0 && chapterList.getCellBounds(idx, idx)?.contains(e.point) == true) idx else -1
                 chapterList.cursor = if (valid >= 0) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
-                if (valid != hoveredRow) {
-                    val prev = hoveredRow
-                    hoveredRow = valid
-                    if (prev >= 0) chapterList.getCellBounds(prev, prev)?.let { chapterList.repaint(it) }
-                    if (valid >= 0) chapterList.getCellBounds(valid, valid)?.let { chapterList.repaint(it) }
-                }
+                hoverAnimator.setHovered(valid)
             }
         })
         chapterList.addMouseListener(object : MouseAdapter() {
             override fun mouseExited(e: MouseEvent) {
-                if (hoveredRow != -1) {
-                    val prev = hoveredRow
-                    hoveredRow = -1
-                    chapterList.getCellBounds(prev, prev)?.let { chapterList.repaint(it) }
-                }
+                hoverAnimator.setHovered(-1)
             }
 
             override fun mouseClicked(e: MouseEvent) {
@@ -221,12 +235,21 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     val miMarkUnread = JMenuItem("Marcar selecionados como não lidos").apply {
                         addActionListener { markSelected(false) }
                     }
+                    val miExport = JMenuItem("Exportar selecionados (PDF / EPUB)…", ModernIcons.downloads(14) { Theme.TEXT_PRIMARY }).apply {
+                        addActionListener { exportSelected() }
+                    }
+                    val miTrack = JMenuItem("Configurar Rastreamento (AniList / MAL)…", ModernIcons.sync(14) { Theme.TEXT_PRIMARY }).apply {
+                        addActionListener { openTrackerDialog() }
+                    }
                     val miRemove = JMenuItem("Remover da biblioteca", ModernIcons.trash(14) { Color(0xE0, 0x55, 0x65) }).apply {
                         foreground = Color(0xE0, 0x55, 0x65)
                         addActionListener { removeCurrent() }
                     }
                     add(miMarkRead)
                     add(miMarkUnread)
+                    addSeparator()
+                    add(miExport)
+                    add(miTrack)
                     addSeparator()
                     add(miRemove)
                 }
@@ -306,10 +329,10 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         add(top, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
 
-        ctx.addThemeListener {
+        val listener = { _: Boolean ->
             background = Theme.BG_APP
             top.background = Theme.BG_APP
-            header.background = Theme.BG_SURFACE
+            header.repaint()
             actions.background = Theme.BG_APP
             bottomBar.background = Theme.BG_APP
             chapterHeaderBar.background = Theme.BG_APP
@@ -322,8 +345,15 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             chapterList.repaint()
             repaint()
         }
+        themeListener = listener
+        ctx.addThemeListener(listener)
 
         updateContinueButtonStyle()
+    }
+
+    fun dispose() {
+        hoverAnimator.stop()
+        themeListener?.let { ctx.removeThemeListener(it) }
     }
 
     private fun updateContinueButtonStyle() {
@@ -359,6 +389,15 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 )
             )
         }
+
+        gooeyItems.add(
+            GooeyContextMenu.GooeyMenuItem(
+                id = "export_pdf_epub",
+                label = "Exportar capítulo (PDF / EPUB)…",
+                iconType = GooeyContextMenu.IconType.DOWNLOAD,
+                onClick = { exportSelected() }
+            )
+        )
 
         gooeyItems.add(
             GooeyContextMenu.GooeyMenuItem(
@@ -401,7 +440,30 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private fun renderHeader(manga: Manga) {
         header.removeAll()
-        header.add(JLabel(ctx.covers.get(manga.id, manga.title)), BorderLayout.WEST)
+        val coverIcon = ctx.covers.get(manga.id, manga.title)
+        val coverHolder = object : JPanel() {
+            init {
+                isOpaque = false
+                preferredSize = Dimension(coverIcon.iconWidth + 8, coverIcon.iconHeight + 8)
+            }
+
+            override fun paintComponent(g: Graphics) {
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val cw = coverIcon.iconWidth
+                val ch = coverIcon.iconHeight
+                g2.color = Color(0, 0, 0, if (Theme.isDark) 115 else 38)
+                g2.fillRoundRect(3, 5, cw + 2, ch + 2, 10, 10)
+                val oldClip = g2.clip
+                g2.clip = java.awt.geom.RoundRectangle2D.Float(4f, 3f, cw.toFloat(), ch.toFloat(), 8f, 8f)
+                coverIcon.paintIcon(this, g2, 4, 3)
+                g2.clip = oldClip
+                g2.color = Theme.BORDER_SUBTLE
+                g2.drawRoundRect(4, 3, cw - 1, ch - 1, 8, 8)
+                g2.dispose()
+            }
+        }
+        header.add(coverHolder, BorderLayout.WEST)
         val sourceName = if (manga.isLocal) "Arquivo local" else (ctx.sourceFor(manga.source)?.name ?: "Fonte online")
         val statusBadge = LibraryCategory.labelOf(manga.status)
         val unreadCount = chapters.count { !it.read }
@@ -418,7 +480,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             add(sourceLinkHtml)
             add("${chapters.size} cap.")
             if (unreadCount > 0) add("$unreadCount não lido(s)")
-            if (downloadedCount > 0) add("<span style='color:#2e9e6b'>⬇ $downloadedCount salvos offline</span>")
+            if (downloadedCount > 0) add("<span style='color:#2e9e6b;font-weight:bold'>$downloadedCount salvo(s) offline</span>")
             manga.genre?.take(4)?.forEach { add(escapeHtml(it)) }
         }.joinToString(" &nbsp;│&nbsp; ")
 
@@ -450,11 +512,21 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 }
             }
         }
+        val trackRec = TrackerService.getRecord(manga.id)
+        if (trackRec != null) {
+            btnTrack.text = "Rastreado: Cap. ${trackRec.lastChapterRead}"
+            btnTrack.variant = ModernButton.Variant.FAVORITE
+        } else {
+            btnTrack.text = "Rastrear"
+            btnTrack.variant = ModernButton.Variant.SURFACE
+        }
+
         val heroActions = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
             isOpaque = false
             border = BorderFactory.createEmptyBorder(8, -10, 0, 0)
             add(btnContinue)
             add(btnFavorite)
+            add(btnTrack)
         }
         val centerCol = JPanel(BorderLayout(0, 6)).apply {
             isOpaque = false
@@ -513,72 +585,78 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private fun openChapter(current: Manga, chapter: Chapter) {
         // Prevent opening multiple chapters simultaneously or re-triggering while loading
+        // Atomic check-and-set to avoid race condition
         if (openingChapterId != null) {
             ctx.setStatus("Já existe um capítulo sendo aberto. Aguarde ou cancele…")
             return
         }
-
-        if (ctx.service.isChapterDownloaded(current, chapter)) {
-            openReaderFile(current, chapter, ctx.service.chapterCbzFile(current, chapter))
-            return
-        }
-        val source = ctx.sourceFor(current.source)
-        if (source == null) {
-            JOptionPane.showMessageDialog(this, "Fonte não encontrada para ler o capítulo.", "Erro", JOptionPane.ERROR_MESSAGE)
-            return
-        }
-
         openingChapterId = chapter.id
-        var isCancelled = false
-        cancelStreamingTask = {
-            isCancelled = true
-            openingChapterId = null
-            progressBar.isIndeterminate = false
-            progressBar.isVisible = false
-            btnCancelStreaming.isVisible = false
-            ctx.setStatus("Abertura do capítulo '${chapter.name}' cancelada.")
-        }
+        try {
+            if (ctx.service.isChapterDownloaded(current, chapter)) {
+                openReaderFile(current, chapter, ctx.service.chapterCbzFile(current, chapter))
+                return
+            }
+            val source = ctx.sourceFor(current.source)
+            if (source == null) {
+                JOptionPane.showMessageDialog(this, "Fonte não encontrada para ler o capítulo.", "Erro", JOptionPane.ERROR_MESSAGE)
+                return
+            }
 
-        // Open streaming reader directly without forcing full download
-        progressBar.value = 0
-        progressBar.string = "Obtendo páginas de '${chapter.name}'…"
-        progressBar.isIndeterminate = true
-        progressBar.isVisible = true
-        btnCancelStreaming.isVisible = true
-        ctx.setStatus("Carregando páginas de '${chapter.name}'…")
+            var isCancelled = false
+            cancelStreamingTask = {
+                isCancelled = true
+                openingChapterId = null
+                progressBar.isIndeterminate = false
+                progressBar.isVisible = false
+                btnCancelStreaming.isVisible = false
+                ctx.setStatus("Abertura do capítulo '${chapter.name}' cancelada.")
+            }
 
-        background({
-            val imageUrls = source.getChapterImages(chapter.url)
-            require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
-            val referer = if (source.name.contains("MangaDex", ignoreCase = true)) "https://mangadex.org/" else "${source.baseUrl}/"
-            val userAgent = if (source.name.contains("MangaDex", ignoreCase = true)) "MihonLinux/0.3 (Linux Desktop)" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            OnlineStreamArchiveReader(
-                sourceName = "${current.title} - ${chapter.name}",
-                imageUrls = imageUrls,
-                client = ctx.service.httpClient,
-                referer = referer,
-                userAgent = userAgent,
-                cookie = null,
-            )
-        }) { result ->
-            progressBar.isIndeterminate = false
-            progressBar.isVisible = false
-            btnCancelStreaming.isVisible = false
-            val wasOpening = openingChapterId == chapter.id
+            // Open streaming reader directly without forcing full download
+            progressBar.value = 0
+            progressBar.string = "Obtendo páginas de '${chapter.name}'…"
+            progressBar.isIndeterminate = true
+            progressBar.isVisible = true
+            btnCancelStreaming.isVisible = true
+            ctx.setStatus("Carregando páginas de '${chapter.name}'…")
+
+            background({
+                val imageUrls = source.getChapterImages(chapter.url)
+                require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
+                val referer = if (source.name.contains("MangaDex", ignoreCase = true)) "https://mangadex.org/" else "${source.baseUrl}/"
+                val userAgent = if (source.name.contains("MangaDex", ignoreCase = true)) "MihonLinux/0.3 (Linux Desktop)" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                OnlineStreamArchiveReader(
+                    sourceName = "${current.title} - ${chapter.name}",
+                    imageUrls = imageUrls,
+                    client = ctx.service.httpClient,
+                    referer = referer,
+                    userAgent = userAgent,
+                    cookie = null,
+                )
+            }) { result ->
+                progressBar.isIndeterminate = false
+                progressBar.isVisible = false
+                btnCancelStreaming.isVisible = false
+                val wasOpening = openingChapterId == chapter.id
+                openingChapterId = null
+                cancelStreamingTask = null
+
+                if (isCancelled || !wasOpening) {
+                    return@background
+                }
+
+                result.onSuccess { streamReader ->
+                    ctx.setStatus("Pronto para leitura: '${chapter.name}'")
+                    openReaderArchive(current, chapter, streamReader)
+                }.onFailure {
+                    ctx.setStatus("Erro ao abrir capítulo: ${it.message}")
+                    JOptionPane.showMessageDialog(this, "Falha ao carregar páginas do capítulo:\n${it.message}", "Erro", JOptionPane.ERROR_MESSAGE)
+                }
+            }
+        } catch (e: Exception) {
             openingChapterId = null
             cancelStreamingTask = null
-
-            if (isCancelled || !wasOpening) {
-                return@background
-            }
-
-            result.onSuccess { streamReader ->
-                ctx.setStatus("Pronto para leitura: '${chapter.name}'")
-                openReaderArchive(current, chapter, streamReader)
-            }.onFailure {
-                ctx.setStatus("Erro ao abrir capítulo: ${it.message}")
-                JOptionPane.showMessageDialog(this, "Falha ao carregar páginas do capítulo:\n${it.message}", "Erro", JOptionPane.ERROR_MESSAGE)
-            }
+            throw e
         }
     }
 
@@ -724,9 +802,15 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             progressBar.isVisible = false
             result.onSuccess { count ->
                 ctx.setStatus("$count capítulo(s) baixado(s) em ~/.mihon/downloads")
+                if (count == 1) {
+                    SystemTrayManager.notifyChapterDownloaded(current.title, targets.first().name)
+                } else {
+                    SystemTrayManager.notify("Capítulos baixados", "$count capítulos de ${current.title} salvos offline")
+                }
                 reloadChapters()
             }.onFailure {
                 ctx.setStatus("Falha no download: ${it.message}")
+                SystemTrayManager.notifyDownloadError(current.title, targets.firstOrNull()?.name ?: "Capítulo", it.message ?: "Erro desconhecido")
                 JOptionPane.showMessageDialog(this, "Erro durante download:\n${it.message}", "Erro", JOptionPane.ERROR_MESSAGE)
                 reloadChapters()
             }
@@ -740,6 +824,28 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             reloadChapters()
             ctx.setStatus("${targets.size} capítulo(s) atualizado(s)")
         }
+    }
+
+    private fun exportSelected() {
+        val current = manga ?: return
+        val targets = chapterList.selectedValuesList.ifEmpty {
+            listOfNotNull(resumeChapter ?: chapters.firstOrNull())
+        }
+        if (targets.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Nenhum capítulo disponível para exportar.")
+            return
+        }
+        val win = SwingUtilities.getWindowAncestor(this)
+        ExportChapterDialog(win, ctx, current, targets).isVisible = true
+    }
+
+    private fun openTrackerDialog() {
+        val current = manga ?: return
+        val maxRead = chapters.filter { it.read }.maxOfOrNull { it.chapterNumber.toInt() } ?: 0
+        val win = SwingUtilities.getWindowAncestor(this)
+        TrackerDialog(win, ctx, current, maxRead) {
+            renderHeader(current)
+        }.isVisible = true
     }
 
     private fun refreshRemoteChapters() {
@@ -815,7 +921,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         var isDownloading: Boolean = false
         var lastPage: Int = 0
         var selectedState: Boolean = false
-        var hoveredState: Boolean = false
+        var hoverProgress: Float = 0f
 
         init {
             isOpaque = false
@@ -830,9 +936,13 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val w = width - 16
             val h = height
 
-            if (selectedState || hoveredState) {
-                g2.color = if (selectedState) Theme.BG_CARD_HOVER else Theme.BG_SURFACE
-                g2.fillRoundRect(x, 2, w, h - 4, 6, 6)
+            if (selectedState) {
+                g2.color = Theme.BG_CARD_HOVER
+                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
+            } else if (hoverProgress > 0.01f) {
+                val hc = Theme.BG_SURFACE
+                g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress).toInt().coerceIn(0, 255))
+                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
             }
 
             // Hairline editorial bottom rule
@@ -845,22 +955,11 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 g2.fillRoundRect(x + 4, 12, 3, h - 24, 2, 2)
             }
 
-            // Tabular Monospace Index Number
-            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12f)
-            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.ACCENT_HOVER
-            val numStr = "%03d".format(chapterIndex)
-            g2.drawString(numStr, x + 18, (h / 2) + 5)
-
-            // Chapter Title
-            g2.font = font.deriveFont(if (isRead) Font.PLAIN else Font.BOLD, 13.5f)
-            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.TEXT_PRIMARY
-            g2.drawString(chapterTitle, x + 58, (h / 2) + 5)
-
-            // Right side status stamp
+            // Right side status stamp (drawn first to reserve space and prevent title overlap)
             var rightX = x + w - 14
             val pillText = when {
-                isDownloaded -> "✔ Salvo no disco"
-                isDownloading -> "⏳ Baixando…"
+                isDownloaded -> "Salvo no disco"
+                isDownloading -> "Baixando…"
                 else -> "Ler capítulo"
             }
             val pillBg = when {
@@ -873,14 +972,21 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 isDownloading -> Color(251, 191, 36)
                 else -> Theme.ACCENT_HOVER
             }
+            val pillIcon = when {
+                isDownloaded -> ModernIcons.check(12) { pillFg }
+                isDownloading -> ModernIcons.sync(12) { pillFg }
+                else -> ModernIcons.play(11) { pillFg }
+            }
             g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
             val pFm = g2.fontMetrics
-            val pw = pFm.stringWidth(pillText) + 16
+            val iconGap = pillIcon.iconWidth + 6
+            val pw = iconGap + pFm.stringWidth(pillText) + 18
             rightX -= pw
             g2.color = pillBg
-            g2.fillRoundRect(rightX, 13, pw, h - 26, 6, 6)
+            g2.fillRoundRect(rightX, 13, pw, h - 26, 8, 8)
+            pillIcon.paintIcon(this, g2, rightX + 9, (h - pillIcon.iconHeight) / 2)
             g2.color = pillFg
-            g2.drawString(pillText, rightX + 8, ((h - pFm.height) / 2) + pFm.ascent)
+            g2.drawString(pillText, rightX + 9 + iconGap, ((h - pFm.height) / 2) + pFm.ascent)
 
             if (isRead || lastPage > 0) {
                 val progText = if (isRead) "Lido" else "Parou na pág. ${lastPage + 1}"
@@ -890,6 +996,19 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 g2.color = if (!isRead && lastPage > 0) Theme.TEXT_SECONDARY else Theme.TEXT_MUTED
                 g2.drawString(progText, rightX, ((h - prFm.height) / 2) + prFm.ascent)
             }
+
+            // Tabular Monospace Index Number
+            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12f)
+            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.ACCENT_HOVER
+            val numStr = "%03d".format(chapterIndex)
+            g2.drawString(numStr, x + 18, (h / 2) + 5)
+
+            // Chapter Title (safely ellipsized before right status pills)
+            g2.font = font.deriveFont(if (isRead) Font.PLAIN else Font.BOLD, 13.5f)
+            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.TEXT_PRIMARY
+            val titleX = x + 58
+            val maxTitleW = (rightX - titleX - 16).coerceAtLeast(60)
+            g2.drawString(clipUiText(g2, chapterTitle, maxTitleW), titleX, (h / 2) + 5)
 
             g2.dispose()
         }

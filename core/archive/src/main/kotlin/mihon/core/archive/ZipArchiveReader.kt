@@ -10,6 +10,10 @@ import java.util.zip.ZipFile
 /**
  * Stream-based reader for `.cbz` and `.zip` manga archives.
  * Decompresses entries on-demand without writing temporary files to disk.
+ *
+ * @note This class is NOT thread-safe for concurrent calls to [getPageStream] and [getPageBytes].
+ *       Callers must ensure external synchronization if used from multiple threads.
+ *       See [ReaderWindow.readerLock] for the synchronization pattern used in the reader UI.
  */
 class ZipArchiveReader(
     private val file: File,
@@ -69,10 +73,17 @@ class ZipArchiveReader(
     @Throws(IOException::class)
     override fun getPageStream(page: ArchivePage): InputStream {
         ensureOpen()
-        val entry = zipFile.getEntry(page.path)
-            ?: throw NoSuchElementException("Page entry not found in archive: ${page.path}")
-        return zipFile.getInputStream(entry)
-            ?: throw IOException("Failed to obtain input stream for entry: ${page.path}")
+        synchronized(zipFile) {
+            val entry = zipFile.getEntry(page.path)
+                ?: throw NoSuchElementException("Page entry not found in archive: ${page.path}")
+            return zipFile.getInputStream(entry)
+                ?: throw IOException("Failed to obtain input stream for entry: ${page.path}")
+        }
+    }
+
+    @Throws(IOException::class)
+    override fun getPageBytes(page: ArchivePage): ByteArray = synchronized(zipFile) {
+        getPageStream(page).use { it.readAllBytes() }
     }
 
     override fun close() {

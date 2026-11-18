@@ -15,6 +15,8 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
 import javax.swing.DefaultListModel
 import javax.swing.JButton
@@ -49,6 +51,14 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         TITLE("Título (A-Z)"),
         UNREAD("Não lidos"),
         ADDED("Recentes"),
+        DOWNLOADED("Mais baixados"),
+        AUTHOR("Autor (A-Z)"),
+    }
+
+    private enum class DisplayMode(val label: String) {
+        COMFORTABLE_GRID("Grade confortável"),
+        COMPACT_GRID("Grade compacta (título sobre capa)"),
+        COMPACT_LIST("Lista compacta detalhada"),
     }
 
     private var all: List<Manga> = emptyList()
@@ -56,15 +66,28 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var downloadedByManga: Map<Long, Int> = emptyMap()
     private var hoveredIndex: Int = -1
     private var activeCategoryStatus: Long = LibraryCategory.ALL
-    private var compactMode: Boolean = false
+    private var displayMode: DisplayMode = DisplayMode.COMFORTABLE_GRID
+    private var unreadOnlyFilter: Boolean = false
+    private var completedOnlyFilter: Boolean = false
+    private var selectedGenreFilter: String? = null
+    private var selectedSourceFilter: Long? = null
     private var onlyDownloadedFilter: Boolean
         get() = ctx.onlyOfflineFilter
         set(v) { ctx.setOfflineFilter(v) }
 
     private val model = DefaultListModel<Manga>()
     private val grid = JList(model)
+    private val hoverAnimator = GridHoverAnimator(grid)
     private val cardPrototype = MangaPosterCard()
+    private val listRowPrototype = MangaListRowCard()
     private val tabsBar = LibraryTabsBar()
+    private val centerCards = java.awt.CardLayout()
+    private val centerContainer = JPanel(centerCards)
+    private val emptyIconLbl = JLabel(ModernIcons.library(56) { Theme.TEXT_MUTED })
+    private val emptyTitleLbl = JLabel("Sua biblioteca está vazia")
+    private val emptySubLbl = JLabel("Explore fontes online ou importe arquivos locais (.cbz/.zip) para começar.")
+    private val emptyActionBtn = ModernButton("Explorar Fontes", ModernIcons.browse(15) { Color.WHITE }, ModernButton.Variant.PRIMARY)
+    private var themeListener: ((Boolean) -> Unit)? = null
 
     private var currentSort: Sort = Sort.TITLE
     private val filterField = JTextField(20).apply {
@@ -82,16 +105,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private fun m3HeaderIconButton(icon: javax.swing.Icon, tip: String, onClick: (JButton) -> Unit): JButton {
-        return JButton(icon).apply {
+        return ModernIconButton(icon, tip, sizePx = 38).apply {
             foreground = Theme.TEXT_PRIMARY
-            background = Theme.BG_APP
-            isOpaque = false
-            isContentAreaFilled = false
-            isBorderPainted = false
-            isFocusPainted = false
-            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            toolTipText = tip
-            preferredSize = Dimension(38, 38)
             addActionListener { onClick(this) }
         }
     }
@@ -118,19 +133,16 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 val valid = if (idx >= 0 && grid.getCellBounds(idx, idx)?.contains(e.point) == true) idx else -1
                 grid.cursor = if (valid >= 0) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
                 if (valid != hoveredIndex) {
-                    val prev = hoveredIndex
                     hoveredIndex = valid
-                    if (prev >= 0) grid.getCellBounds(prev, prev)?.let { grid.repaint(it) }
-                    if (valid >= 0) grid.getCellBounds(valid, valid)?.let { grid.repaint(it) }
+                    hoverAnimator.setHovered(valid)
                 }
             }
         })
         grid.addMouseListener(object : MouseAdapter() {
             override fun mouseExited(e: MouseEvent) {
                 if (hoveredIndex != -1) {
-                    val prev = hoveredIndex
                     hoveredIndex = -1
-                    grid.getCellBounds(prev, prev)?.let { grid.repaint(it) }
+                    hoverAnimator.setHovered(-1)
                 }
             }
 
@@ -184,6 +196,15 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 )
             }
 
+            val filterHeader = JMenuItem("FILTRAR POR:").apply {
+                icon = ModernIcons.filter(14) { Theme.TEXT_MUTED }
+                isEnabled = false
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
+                foreground = Theme.TEXT_MUTED
+                background = Theme.BG_SURFACE
+            }
+            popup.add(filterHeader)
+
             val offlineItem = JCheckBoxMenuItem("Somente disponíveis offline", onlyDownloadedFilter).apply {
                 icon = ModernIcons.offline(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
                 font = Theme.FONT_UI.deriveFont(13f)
@@ -194,20 +215,100 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     applyFilter()
                 }
             }
-            val compactItem = JCheckBoxMenuItem("Grade compacta (título sobre capa)", compactMode).apply {
-                icon = ModernIcons.library(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
+            val unreadItem = JCheckBoxMenuItem("Apenas com capítulos não lidos", unreadOnlyFilter).apply {
+                icon = ModernIcons.checkCircle(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
                 font = Theme.FONT_UI.deriveFont(13f)
                 foreground = Theme.TEXT_PRIMARY
                 background = Theme.BG_SURFACE
                 addActionListener {
-                    compactMode = isSelected
-                    grid.fixedCellHeight = if (compactMode) COVER_H + 22 else CARD_H
-                    grid.revalidate()
-                    grid.repaint()
+                    unreadOnlyFilter = isSelected
+                    if (isSelected) completedOnlyFilter = false
+                    applyFilter()
+                }
+            }
+            val completedItem = JCheckBoxMenuItem("Apenas leitura em dia (0 não lidos)", completedOnlyFilter).apply {
+                icon = ModernIcons.check(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
+                font = Theme.FONT_UI.deriveFont(13f)
+                foreground = Theme.TEXT_PRIMARY
+                background = Theme.BG_SURFACE
+                addActionListener {
+                    completedOnlyFilter = isSelected
+                    if (isSelected) unreadOnlyFilter = false
+                    applyFilter()
                 }
             }
             popup.add(offlineItem)
-            popup.add(compactItem)
+            popup.add(unreadItem)
+            popup.add(completedItem)
+
+            // Dynamic Genre Submenu
+            val allGenres = all.flatMap { it.genre.orEmpty() }.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+            if (allGenres.isNotEmpty()) {
+                val genreMenu = javax.swing.JMenu("Gênero: ${selectedGenreFilter ?: "Todos"}").apply {
+                    font = Theme.FONT_UI.deriveFont(13f)
+                    foreground = Theme.TEXT_PRIMARY
+                    background = Theme.BG_SURFACE
+                }
+                genreMenu.add(JMenuItem("Todos os gêneros").apply {
+                    font = Theme.FONT_UI.deriveFont(13f)
+                    addActionListener {
+                        selectedGenreFilter = null
+                        applyFilter()
+                    }
+                })
+                genreMenu.addSeparator()
+                allGenres.take(25).forEach { gName ->
+                    genreMenu.add(JCheckBoxMenuItem(gName, selectedGenreFilter.equals(gName, ignoreCase = true)).apply {
+                        font = Theme.FONT_UI.deriveFont(13f)
+                        addActionListener {
+                            selectedGenreFilter = if (selectedGenreFilter.equals(gName, ignoreCase = true)) null else gName
+                            applyFilter()
+                        }
+                    })
+                }
+                popup.add(genreMenu)
+            }
+
+            if (onlyDownloadedFilter || unreadOnlyFilter || completedOnlyFilter || selectedGenreFilter != null || selectedSourceFilter != null) {
+                popup.add(JMenuItem("Limpar filtros ativos").apply {
+                    font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+                    foreground = Theme.DANGER
+                    background = Theme.BG_SURFACE
+                    addActionListener {
+                        onlyDownloadedFilter = false
+                        unreadOnlyFilter = false
+                        completedOnlyFilter = false
+                        selectedGenreFilter = null
+                        selectedSourceFilter = null
+                        applyFilter()
+                    }
+                })
+            }
+
+            popup.addSeparator()
+            val displayHeader = JMenuItem("MODO DE EXIBIÇÃO:").apply {
+                icon = ModernIcons.library(14) { Theme.TEXT_MUTED }
+                isEnabled = false
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
+                foreground = Theme.TEXT_MUTED
+                background = Theme.BG_SURFACE
+            }
+            popup.add(displayHeader)
+
+            val displayGroup = ButtonGroup()
+            DisplayMode.entries.forEach { mode ->
+                val rdo = JRadioButtonMenuItem(mode.label, mode == displayMode).apply {
+                    font = Theme.FONT_UI.deriveFont(13f)
+                    foreground = Theme.TEXT_PRIMARY
+                    background = Theme.BG_SURFACE
+                    addActionListener {
+                        applyDisplayMode(mode)
+                    }
+                }
+                displayGroup.add(rdo)
+                popup.add(rdo)
+            }
+
             popup.addSeparator()
 
             val sortMenuLabel = JMenuItem("ORDENAR POR:").apply {
@@ -300,12 +401,63 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 28
         }
+        emptyIconLbl.alignmentX = 0.5f
+        emptyTitleLbl.apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 18f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0.5f
+        }
+        emptySubLbl.apply {
+            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
+            foreground = Theme.TEXT_MUTED
+            alignmentX = 0.5f
+        }
+        emptyActionBtn.apply {
+            alignmentX = 0.5f
+            addActionListener {
+                if (all.isEmpty()) {
+                    ctx.navigator.openSourceCatalog(ctx.extensions.firstOrNull()?.name ?: "")
+                } else {
+                    filterField.text = ""
+                    onlyDownloadedFilter = false
+                    unreadOnlyFilter = false
+                    completedOnlyFilter = false
+                    selectedGenreFilter = null
+                    selectedSourceFilter = null
+                    activeCategoryStatus = LibraryCategory.ALL
+                    tabsBar.repaint()
+                    applyFilter()
+                }
+            }
+        }
+        val emptyBox = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(emptyIconLbl)
+            add(Box.createVerticalStrut(14))
+            add(emptyTitleLbl)
+            add(Box.createVerticalStrut(6))
+            add(emptySubLbl)
+            add(Box.createVerticalStrut(18))
+            add(emptyActionBtn)
+        }
+        val emptyWrap = JPanel(java.awt.GridBagLayout()).apply {
+            background = Theme.BG_APP
+            add(emptyBox)
+        }
+        centerContainer.background = Theme.BG_APP
+        centerContainer.add(scroll, "grid")
+        centerContainer.add(emptyWrap, "empty")
         add(topHeader, BorderLayout.NORTH)
-        add(scroll, BorderLayout.CENTER)
+        add(centerContainer, BorderLayout.CENTER)
 
-        ctx.addThemeListener {
+        val listener = { _: Boolean ->
             background = Theme.BG_APP
             grid.background = Theme.BG_APP
+            centerContainer.background = Theme.BG_APP
+            emptyWrap.background = Theme.BG_APP
+            emptyTitleLbl.foreground = Theme.TEXT_PRIMARY
+            emptySubLbl.foreground = Theme.TEXT_MUTED
             topAppBar.background = Theme.BG_APP
             topHeader.background = Theme.BG_APP
             tabsBar.background = Theme.BG_SURFACE
@@ -316,8 +468,16 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             grid.repaint()
+            emptyIconLbl.repaint()
             repaint()
         }
+        themeListener = listener
+        ctx.addThemeListener(listener)
+    }
+
+    fun dispose() {
+        hoverAnimator.stop()
+        themeListener?.let { ctx.removeThemeListener(it) }
     }
 
     private fun showContextMenu(manga: Manga, x: Int, y: Int) {
@@ -414,6 +574,32 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
+    private fun applyDisplayMode(mode: DisplayMode) {
+        displayMode = mode
+        when (mode) {
+            DisplayMode.COMFORTABLE_GRID -> {
+                grid.layoutOrientation = JList.HORIZONTAL_WRAP
+                grid.visibleRowCount = -1
+                grid.fixedCellWidth = CARD_W
+                grid.fixedCellHeight = CARD_H
+            }
+            DisplayMode.COMPACT_GRID -> {
+                grid.layoutOrientation = JList.HORIZONTAL_WRAP
+                grid.visibleRowCount = -1
+                grid.fixedCellWidth = CARD_W
+                grid.fixedCellHeight = COVER_H + 22
+            }
+            DisplayMode.COMPACT_LIST -> {
+                grid.layoutOrientation = JList.VERTICAL
+                grid.visibleRowCount = 0
+                grid.fixedCellWidth = -1
+                grid.fixedCellHeight = 64
+            }
+        }
+        grid.revalidate()
+        grid.repaint()
+    }
+
     private fun applyFilter() {
         val query = filterField.text.trim().lowercase()
         val cat = activeCategoryStatus
@@ -422,16 +608,43 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             Sort.TITLE -> compareBy { it.title.lowercase() }
             Sort.UNREAD -> compareByDescending<Manga> { unreadByManga[it.id] ?: 0 }.thenBy { it.title.lowercase() }
             Sort.ADDED -> compareByDescending { it.dateAdded }
+            Sort.DOWNLOADED -> compareByDescending<Manga> { downloadedByManga[it.id] ?: 0 }.thenBy { it.title.lowercase() }
+            Sort.AUTHOR -> compareBy<Manga> { (it.author ?: "zzzz").lowercase() }.thenBy { it.title.lowercase() }
         }
         val shown = all
-            .filter { (cat == LibraryCategory.ALL || it.status == cat) &&
-                (!onlyDownloadedFilter || (downloadedByManga[it.id] ?: 0) > 0) &&
-                (query.isEmpty() || it.title.lowercase().contains(query))
+            .filter { manga ->
+                val matchesCat = cat == LibraryCategory.ALL || manga.status == cat
+                val matchesOffline = !onlyDownloadedFilter || (downloadedByManga[manga.id] ?: 0) > 0
+                val matchesUnread = !unreadOnlyFilter || (unreadByManga[manga.id] ?: 0) > 0
+                val matchesCompleted = !completedOnlyFilter || (unreadByManga[manga.id] ?: 0) == 0
+                val matchesGenre = selectedGenreFilter == null ||
+                    manga.genre.orEmpty().any { it.trim().equals(selectedGenreFilter, ignoreCase = true) }
+                val matchesSource = selectedSourceFilter == null || manga.source == selectedSourceFilter
+                val matchesQuery = query.isEmpty() ||
+                    manga.title.lowercase().contains(query) ||
+                    manga.author?.lowercase()?.contains(query) == true
+                matchesCat && matchesOffline && matchesUnread && matchesCompleted && matchesGenre && matchesSource && matchesQuery
             }
             .sortedWith(comparator)
         model.clear()
         shown.forEach { model.addElement(it) }
-        if (query.isNotEmpty() || cat != LibraryCategory.ALL) {
+        if (shown.isEmpty()) {
+            if (all.isEmpty()) {
+                emptyTitleLbl.text = "Sua biblioteca está vazia"
+                emptySubLbl.text = "Explore fontes online ou importe arquivos locais (.cbz / .zip) pelo menu acima."
+                emptyActionBtn.text = "Explorar Fontes"
+                emptyActionBtn.isVisible = ctx.extensions.isNotEmpty()
+            } else {
+                emptyTitleLbl.text = "Nenhum mangá encontrado"
+                emptySubLbl.text = "Nenhum título corresponde aos filtros ou à categoria selecionada."
+                emptyActionBtn.text = "Limpar Filtros"
+                emptyActionBtn.isVisible = true
+            }
+            centerCards.show(centerContainer, "empty")
+        } else {
+            centerCards.show(centerContainer, "grid")
+        }
+        if (query.isNotEmpty() || cat != LibraryCategory.ALL || onlyDownloadedFilter || unreadOnlyFilter || completedOnlyFilter || selectedGenreFilter != null) {
             ctx.setStatus("${shown.size} de ${all.size} mangá(s)")
         }
     }
@@ -481,7 +694,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private fun renderCard(manga: Manga, index: Int, selected: Boolean): Component {
         val unread = unreadByManga[manga.id] ?: 0
         val downloaded = downloadedByManga[manga.id] ?: 0
-        val srcLabel = if (manga.isLocal) "📁 Local" else (ctx.sourceFor(manga.source)?.language?.uppercase() ?: "WEB")
+        val srcLabel = if (manga.isLocal) "LOCAL" else (ctx.sourceFor(manga.source)?.language?.uppercase() ?: "WEB")
         if (!ctx.covers.has(manga.id)) {
             ctx.covers.load(
                 manga,
@@ -492,6 +705,26 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 onLoaded = { grid.repaint() },
             )
         }
+        val hp = hoverAnimator.progressFor(index)
+        if (displayMode == DisplayMode.COMPACT_LIST) {
+            return listRowPrototype.apply {
+                coverIcon = ctx.covers.get(manga.id, manga.title)
+                titleText = manga.title
+                subtitleText = buildString {
+                    manga.author?.takeIf { it.isNotBlank() }?.let { append(it).append("  •  ") }
+                    append(LibraryCategory.labelOf(manga.status))
+                    manga.genre?.take(3)?.takeIf { it.isNotEmpty() }?.let {
+                        append("  •  ").append(it.joinToString(", "))
+                    }
+                }
+                sourceText = if (manga.isLocal) "Local" else (ctx.sourceFor(manga.source)?.name ?: "Online")
+                downloadsCount = downloaded
+                unreadCount = unread
+                selectedState = selected
+                hoveredState = index == hoveredIndex
+                hoverProgress = hp
+            }
+        }
         return cardPrototype.apply {
             coverIcon = ctx.covers.get(manga.id, manga.title)
             titleText = manga.title
@@ -500,24 +733,185 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             unreadBadgeCount = unread
             topLeftBadge = srcLabel
             topRightBadge = null
-            compactOverlayMode = compactMode
+            compactOverlayMode = (displayMode == DisplayMode.COMPACT_GRID)
             selectedState = selected
             hoveredState = index == hoveredIndex
+            hoverProgress = hp
+        }
+    }
+
+    /**
+     * Compact horizontal list row renderer for large libraries.
+     */
+    private class MangaListRowCard : JPanel() {
+        var coverIcon: javax.swing.ImageIcon? = null
+        var titleText: String = ""
+        var subtitleText: String = ""
+        var sourceText: String = ""
+        var downloadsCount: Int = 0
+        var unreadCount: Int = 0
+        var selectedState: Boolean = false
+        var hoveredState: Boolean = false
+        var hoverProgress: Float = 0f
+
+        init {
+            isOpaque = false
+            preferredSize = Dimension(400, 64)
+        }
+
+        private fun clipStr(g2: Graphics2D, text: String, maxW: Int): String {
+            if (maxW <= 12) return ""
+            val fm = g2.fontMetrics
+            if (fm.stringWidth(text) <= maxW) return text
+            var s = text
+            while (s.length > 1 && fm.stringWidth("$s…") > maxW) s = s.dropLast(1)
+            return "$s…"
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+
+            val hp = if (hoverProgress > 0f) hoverProgress.coerceIn(0f, 1f) else if (hoveredState) 1f else 0f
+            val w = width
+            val h = height
+            if (selectedState) {
+                g2.color = Theme.BG_CARD_HOVER
+                g2.fillRoundRect(4, 2, w - 8, h - 4, 10, 10)
+            } else if (hp > 0.02f) {
+                val hc = Theme.BG_CARD
+                g2.color = Color(hc.red, hc.green, hc.blue, (255 * hp).toInt().coerceIn(0, 255))
+                g2.fillRoundRect(4, 2, w - 8, h - 4, 10, 10)
+            }
+
+            // Bottom subtle divider
+            g2.color = Theme.BORDER_SUBTLE
+            g2.drawLine(14, h - 1, w - 14, h - 1)
+
+            // Mini cover (36x50)
+            val thumbW = 36
+            val thumbH = 50
+            val thumbX = 14
+            val thumbY = (h - thumbH) / 2
+            val icon = coverIcon
+            if (icon != null) {
+                g2.clip = java.awt.geom.RoundRectangle2D.Float(thumbX.toFloat(), thumbY.toFloat(), thumbW.toFloat(), thumbH.toFloat(), 6f, 6f)
+                g2.drawImage(icon.image, thumbX, thumbY, thumbW, thumbH, null)
+                g2.clip = null
+            } else {
+                g2.color = Theme.BG_SURFACE
+                g2.fillRoundRect(thumbX, thumbY, thumbW, thumbH, 6, 6)
+            }
+            g2.color = Color(255, 255, 255, 26)
+            g2.drawRoundRect(thumbX, thumbY, thumbW - 1, thumbH - 1, 6, 6)
+
+            // Right badges (Unread Pill + Downloaded + Source)
+            var rightX = w - 18
+            if (unreadCount > 0) {
+                val uStr = "$unreadCount"
+                g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
+                val fm = g2.fontMetrics
+                val pw = (fm.stringWidth(uStr) + 12).coerceAtLeast(22)
+                val ph = 20
+                rightX -= pw
+                val py = (h - ph) / 2
+                g2.color = Color.WHITE
+                g2.fillRoundRect(rightX, py, pw, ph, 10, 10)
+                g2.color = Color.BLACK
+                g2.drawString(uStr, rightX + (pw - fm.stringWidth(uStr)) / 2, py + ((ph - fm.height) / 2) + fm.ascent)
+                rightX -= 8
+            }
+
+            if (downloadsCount > 0) {
+                val pw = drawVectorDownloadPill(
+                    g2,
+                    downloadsCount,
+                    rightX,
+                    (h - 20) / 2,
+                    Color(0x1B, 0x3B, 0x2B),
+                    Color(0x52, 0xD1, 0x92),
+                    alignRight = true,
+                )
+                rightX -= pw + 10
+            }
+
+            if (sourceText.isNotBlank()) {
+                g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
+                val fm = g2.fontMetrics
+                val sw = fm.stringWidth(sourceText)
+                rightX -= sw
+                g2.color = Theme.TEXT_MUTED
+                g2.drawString(sourceText, rightX, (h - fm.height) / 2 + fm.ascent)
+                rightX -= 12
+            }
+
+            // Title & Subtitle safely ellipsized before badges
+            val textX = thumbX + thumbW + 14
+            val maxTextW = (rightX - textX).coerceAtLeast(40)
+            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
+            g2.color = Theme.TEXT_PRIMARY
+            g2.drawString(clipStr(g2, titleText, maxTextW), textX, 27)
+
+            g2.font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
+            g2.color = Theme.TEXT_MUTED
+            g2.drawString(clipStr(g2, subtitleText, maxTextW), textX, 46)
+
+            g2.dispose()
         }
     }
 
     /**
      * Port of Mihon's `LibraryTabs.kt` (`PrimaryScrollableTabRow` + `TabText(text, badgeCount)`).
-     * Supports click-and-drag reordering and right-click GooeyContextMenu.
+     * Supports smooth animated indicator sliding, click-and-drag reordering, and right-click GooeyContextMenu.
      */
     private inner class LibraryTabsBar : JPanel() {
         private var hoveredTab = -1
         private val tabBounds = mutableListOf<Pair<Long, java.awt.Rectangle>>()
+        private var animIndicatorX = -1f
+        private var animIndicatorW = -1f
+        private var indicatorTimer: javax.swing.Timer? = null
 
         private var draggingCatId: Long? = null
         private var dragStartX = 0
         private var isDragging = false
         private var dropTargetIndex: Int? = null
+
+        override fun removeNotify() {
+            indicatorTimer?.stop()
+            indicatorTimer = null
+            super.removeNotify()
+        }
+
+        private fun animateIndicatorTo(targetRect: java.awt.Rectangle) {
+            val targetX = (targetRect.x + 10).toFloat()
+            val targetW = (targetRect.width - 20).coerceAtLeast(16).toFloat()
+            if (animIndicatorX < 0f || animIndicatorW <= 0f) {
+                animIndicatorX = targetX
+                animIndicatorW = targetW
+                repaint()
+                return
+            }
+            val startX = animIndicatorX
+            val startW = animIndicatorW
+            val startTime = System.currentTimeMillis()
+            val durationMs = 170L
+            indicatorTimer?.stop()
+            indicatorTimer = javax.swing.Timer(14) { e ->
+                val rawT = ((System.currentTimeMillis() - startTime).toFloat() / durationMs).coerceIn(0f, 1f)
+                val inv = 1f - rawT
+                val eased = 1f - (inv * inv * inv)
+                animIndicatorX = startX + (targetX - startX) * eased
+                animIndicatorW = startW + (targetW - startW) * eased
+                repaint()
+                if (rawT >= 1f) {
+                    (e.source as? javax.swing.Timer)?.stop()
+                    animIndicatorX = targetX
+                    animIndicatorW = targetW
+                }
+            }.also { it.start() }
+        }
 
         init {
             background = Theme.BG_SURFACE
@@ -588,7 +982,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         val hit = tabBounds.firstOrNull { it.second.contains(e.point) } ?: return
                         if (activeCategoryStatus != hit.first) {
                             activeCategoryStatus = hit.first
-                            repaint()
+                            animateIndicatorTo(hit.second)
                             applyFilter()
                         }
                     }
@@ -744,10 +1138,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 g2.color = if (active) Theme.ACCENT_HOVER else Theme.TEXT_MUTED
                 g2.drawString(countStr, pillX + 7, pillY + (pillH - bFm.height) / 2 + bFm.ascent)
 
-                // Active primary indicator bar at bottom (3px rounded pill)
-                if (active) {
-                    g2.color = Theme.ACCENT
-                    g2.fillRoundRect(x + 10, h - 3, tabW - 20, 3, 3, 3)
+                // Record target bar when active (drawn smoothly below using animIndicatorX/W)
+                if (active && indicatorTimer?.isRunning != true) {
+                    animIndicatorX = (x + 10).toFloat()
+                    animIndicatorW = (tabW - 20).coerceAtLeast(16).toFloat()
                 }
 
                 // Drag indicator line
@@ -757,6 +1151,11 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 }
 
                 x += tabW + 4
+            }
+
+            if (animIndicatorX >= 0f && animIndicatorW > 0f) {
+                g2.color = Theme.ACCENT
+                g2.fillRoundRect(animIndicatorX.toInt(), h - 3, animIndicatorW.toInt(), 3, 3, 3)
             }
 
             g2.dispose()

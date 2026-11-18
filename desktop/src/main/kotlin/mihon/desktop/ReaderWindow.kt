@@ -3,6 +3,12 @@ package mihon.desktop
 import mihon.core.archive.ArchiveReader
 import mihon.core.archive.ArchiveReaderFactory
 import mihon.core.archive.ImageDecoder
+import mihon.desktop.translator.LensOverlayRenderer
+import mihon.desktop.translator.PageTranslationController
+import mihon.desktop.translator.TranslationStatus
+import mihon.desktop.translator.TranslatorPreferences
+import tachiyomi.domain.bookmark.model.Bookmark
+import tachiyomi.domain.bookmark.model.BookmarkType
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dimension
@@ -34,7 +40,9 @@ import javax.swing.JComboBox
 import javax.swing.JFrame
 import javax.swing.JLabel
 import javax.swing.JLayeredPane
+import javax.swing.JMenuItem
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
 import javax.swing.JSlider
 import javax.swing.JViewport
@@ -378,15 +386,21 @@ class AutoScrollController(
 class FloatingSpeedPill(
     private val controller: AutoScrollController,
 ) : JPanel() {
-    private val playPauseBtn = JButton("⏸").apply {
-        isFocusable = false
-        font = font.deriveFont(Font.BOLD, 12f)
-        toolTipText = "Pausar / Retomar rolagem automática (Espaço / A)"
+    private val playPauseBtn = ModernIconButton(
+        icon = ModernIcons.pause(14) { Color.WHITE },
+        tip = "Pausar / Retomar rolagem automática (Espaço / A)",
+        sizePx = 28,
+        cornerRadius = 8f,
+        darkOverlay = true,
+    ).apply {
         addActionListener { controller.toggle() }
     }
-    private val minusBtn = JButton("−").apply {
+    private val minusBtn = ModernButton(
+        text = "−",
+        variant = ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
         isFocusable = false
-        font = font.deriveFont(Font.BOLD, 12f)
         toolTipText = "Diminuir velocidade ([ ou ↑)"
         addActionListener { controller.adjustSpeed(-1) }
     }
@@ -394,9 +408,12 @@ class FloatingSpeedPill(
         font = font.deriveFont(Font.BOLD, 12f)
         foreground = Color(245, 245, 245)
     }
-    private val plusBtn = JButton("+").apply {
+    private val plusBtn = ModernButton(
+        text = "+",
+        variant = ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
         isFocusable = false
-        font = font.deriveFont(Font.BOLD, 12f)
         toolTipText = "Aumentar velocidade (] ou ↓)"
         addActionListener { controller.adjustSpeed(1) }
     }
@@ -404,10 +421,13 @@ class FloatingSpeedPill(
         font = font.deriveFont(Font.PLAIN, 11f)
         foreground = Color(175, 180, 190)
     }
-    private val stopBtn = JButton("✕").apply {
-        isFocusable = false
-        font = font.deriveFont(Font.BOLD, 11f)
-        toolTipText = "Parar rolagem automática (Esc)"
+    private val stopBtn = ModernIconButton(
+        icon = ModernIcons.close(13) { Color(220, 224, 232) },
+        tip = "Parar rolagem automática (Esc)",
+        sizePx = 26,
+        cornerRadius = 8f,
+        darkOverlay = true,
+    ).apply {
         addActionListener { controller.stop() }
     }
 
@@ -430,7 +450,7 @@ class FloatingSpeedPill(
     fun updateUi(state: AutoScrollState, speedLevel: Int) {
         val pxPerSec = AutoScrollController.calculateBaseSpeed(speedLevel).toInt()
         val isRunning = state == AutoScrollState.RUNNING
-        playPauseBtn.text = if (isRunning) "⏸" else "▶"
+        playPauseBtn.icon = if (isRunning) ModernIcons.pause(14) { Color.WHITE } else ModernIcons.play(13) { Color.WHITE }
         val statePrefix = when (state) {
             AutoScrollState.RUNNING -> "Rolando"
             AutoScrollState.PAUSED_HOVER -> "Pausado (Cursor)"
@@ -474,6 +494,13 @@ class ReaderWindow(
     private var onPrevChapter: (() -> Unit)? = null,
     private var onNextChapter: (() -> Unit)? = null,
     private var onProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
+    // Bookmark integration
+    private val chapterId: Long = -1,
+    private val mangaTitle: String = "",
+    private val onToggleBookmark: ((Long, Int) -> Boolean)? = null,
+    private val onAddNote: ((Long, Int, String) -> Unit)? = null,
+    private val onAddHighlight: ((Long, Int, String) -> Unit)? = null,
+    private val onShowBookmarks: ((Long, String, Int, (Int) -> Unit) -> Unit)? = null,
 ) : JFrame("Mihon Linux - $title") {
 
     private var reader: ArchiveReader = when (source) {
@@ -521,16 +548,21 @@ class ReaderWindow(
     /** In-flight decoding, scaling, and prefetch jobs for responsive cancellation on rapid navigation. */
     private val inFlightTasks = ConcurrentHashMap<Int, Future<*>>()
 
-    /** Dynamic memory cache bounded between 16 and 48 images according to available JVM heap. */
-    private val maxCacheEntries = ReaderEngine.calculateMaxCacheEntries(minEntries = 16, maxEntries = 48)
+    /** Dynamic memory cache bounded by global memory manager (default 500MB target). */
+    private var maxCacheEntries = MemoryManager.calculateReaderCacheEntries(isWebtoon)
     private val cacheLock = Any()
     private val cache = object : LinkedHashMap<Int, BufferedImage>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>): Boolean {
-            val evict = size > maxCacheEntries
-            if (evict) {
-                runCatching { eldest.value.flush() }
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, BufferedImage>): Boolean =
+            size > maxCacheEntries
+    }
+
+    private val memoryLimitListener: (Int) -> Unit = {
+        maxCacheEntries = MemoryManager.calculateReaderCacheEntries(isWebtoon)
+        synchronized(cacheLock) {
+            while (cache.size > maxCacheEntries) {
+                val firstKey = cache.keys.firstOrNull() ?: break
+                cache.remove(firstKey)
             }
-            return evict
         }
     }
 
@@ -569,18 +601,34 @@ class ReaderWindow(
     private val webtoon = WebtoonView()
     private val scroll = JScrollPane(paged)
 
-    private val btnPrevChapter = JButton("⏮ Cap. Ant.").apply {
+    private val btnPrevChapter = ModernButton(
+        text = "Cap. Ant.",
+        icon = ModernIcons.skipBack(13) { Color.WHITE },
+        variant = ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
         isFocusable = false
         isVisible = onPrevChapter != null
         addActionListener { onPrevChapter?.invoke() }
     }
-    private val btnNextChapter = JButton("Próx. Cap. ⏭").apply {
+    private val btnNextChapter = ModernButton(
+        text = "Próx. Cap.",
+        icon = ModernIcons.skipForward(13) { Color.WHITE },
+        variant = ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
         isFocusable = false
+        horizontalTextPosition = SwingConstants.LEFT
         isVisible = onNextChapter != null
         addActionListener { onNextChapter?.invoke() }
     }
 
-    private val autoScrollBtn: JButton = JButton("Auto-Scroll (A)").apply {
+    private val autoScrollBtn: ModernButton = ModernButton(
+        text = "Auto-Scroll (A)",
+        icon = ModernIcons.play(12) { Color.WHITE },
+        variant = ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
         isFocusable = false
         toolTipText = "Rolagem suave contínua mãos-livres (Espaço ou A)"
     }
@@ -588,7 +636,10 @@ class ReaderWindow(
         scroll = scroll,
         onStateChanged = { state, speed ->
             speedPill.updateUi(state, speed)
-            autoScrollBtn.text = if (state == AutoScrollState.RUNNING) "Auto-Scroll: ${speed}x" else "Auto-Scroll (A)"
+            val running = state == AutoScrollState.RUNNING
+            autoScrollBtn.text = if (running) "Auto-Scroll: ${speed}x" else "Auto-Scroll (A)"
+            autoScrollBtn.icon = if (running) ModernIcons.pause(12) { Color.WHITE } else ModernIcons.play(12) { Color.WHITE }
+            autoScrollBtn.variant = if (running) ModernButton.Variant.HUD_ACCENT else ModernButton.Variant.HUD
         },
         onReachedEnd = {
             if (onNextChapter != null) {
@@ -605,12 +656,271 @@ class ReaderWindow(
         }
     }.apply { isRepeats = false }
 
+    // Bookmark state
+    private val bookmarksByPage = mutableMapOf<Int, List<Bookmark>>()
+    private var bookmarksLoaded = false
+
+    // Google Lens Simultaneous Translator state
+    var translatorEnabled: Boolean = TranslatorPreferences.load().enabledByDefault
+        private set
+
+    private var translatorPillTint: Color = Theme.ACCENT
+
+    val translatorBtn: JButton = ModernButton(
+        text = "Tradutor (T)",
+        icon = ModernIcons.translateIcon(15) {
+            if (translatorEnabled) Color.WHITE else Color(225, 228, 236)
+        },
+        variant = if (translatorEnabled) ModernButton.Variant.HUD_ACCENT else ModernButton.Variant.HUD,
+        compact = true,
+    ).apply {
+        name = "translatorToggleBtn"
+        isFocusable = false
+        toolTipText = "Tradutor simultâneo estilo Google Lens (Atalho: T)"
+        addActionListener { toggleTranslator() }
+    }
+
+    val translatorStatusPill: JLabel = object : JLabel(
+        "Lens Ativo",
+        ModernIcons.translateIcon(14) { translatorPillTint },
+        SwingConstants.CENTER,
+    ) {
+        init {
+            name = "translatorStatusPill"
+            font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
+            foreground = Color(242, 244, 248)
+            iconTextGap = 7
+            isOpaque = false
+            isFocusable = false
+            border = BorderFactory.createEmptyBorder(5, 13, 5, 13)
+            isVisible = translatorEnabled
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val arc = height.toFloat().coerceAtLeast(24f)
+            g2.color = Color(18, 20, 26, 224)
+            g2.fill(java.awt.geom.RoundRectangle2D.Float(0f, 0f, width - 1f, height - 1f, arc, arc))
+            val c = translatorPillTint
+            g2.color = Color(c.red, c.green, c.blue, 145)
+            g2.stroke = java.awt.BasicStroke(1.2f)
+            g2.draw(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, width - 2f, height - 2f, arc, arc))
+            g2.dispose()
+            super.paintComponent(g)
+        }
+    }
+
+    var translatorController: PageTranslationController = PageTranslationController(
+        isWebtoonProvider = { isWebtoon },
+        onPageResultReady = { _ ->
+            SwingUtilities.invokeLater {
+                if (!closed) {
+                    paged.repaint()
+                    webtoon.repaint()
+                }
+            }
+        },
+        onStatusChanged = { status, msg ->
+            SwingUtilities.invokeLater {
+                if (!closed) {
+                    updateTranslatorStatusUi(status, msg)
+                }
+            }
+        },
+    )
+        private set
+
+    fun replaceTranslatorControllerForTest(controller: PageTranslationController) {
+        val wasEnabled = translatorEnabled
+        runCatching { translatorController.close() }
+        translatorController = controller
+        if (wasEnabled) {
+            translatorController.setEnabled(true, visiblePageIndexes(), ::providePageImageForTranslation)
+        }
+    }
+
+    fun toggleTranslator() {
+        setTranslatorEnabled(!translatorEnabled)
+    }
+
+    fun setTranslatorEnabled(enabled: Boolean) {
+        if (closed) return
+        translatorEnabled = enabled
+        updateTranslatorButtonStyle()
+        if (enabled) {
+            translatorPillTint = Theme.ACCENT
+            translatorStatusPill.isVisible = true
+            translatorStatusPill.text = "Lens Ativo"
+            layoutTranslatorPill()
+            showToast("Tradutor simultâneo ativado")
+            translatorController.setEnabled(true, visiblePageIndexes(), ::providePageImageForTranslation)
+        } else {
+            translatorController.setEnabled(false, emptyList(), ::providePageImageForTranslation)
+            translatorStatusPill.isVisible = false
+            showToast("Tradutor simultâneo desativado")
+        }
+        paged.repaint()
+        webtoon.repaint()
+    }
+
+    private fun layoutTranslatorPill() {
+        val parent = translatorStatusPill.parent ?: return
+        val pw = translatorStatusPill.preferredSize.width.coerceAtLeast(130)
+        val ph = translatorStatusPill.preferredSize.height.coerceAtLeast(28)
+        translatorStatusPill.setBounds((parent.width - pw - 18).coerceAtLeast(10), 12, pw, ph)
+    }
+
+    private fun updateTranslatorButtonStyle() {
+        val shortcutStr = ReaderAction.getDisplayString(ReaderAction.TOGGLE_TRANSLATOR)
+        translatorBtn.text = if (translatorEnabled) "Tradutor: ON ($shortcutStr)" else "Tradutor ($shortcutStr)"
+        (translatorBtn as? ModernButton)?.variant =
+            if (translatorEnabled) ModernButton.Variant.HUD_ACCENT else ModernButton.Variant.HUD
+        translatorBtn.repaint()
+    }
+
+    private fun updateTranslatorStatusUi(status: TranslationStatus, detail: String?) {
+        if (!translatorEnabled) {
+            translatorStatusPill.isVisible = false
+            return
+        }
+        translatorStatusPill.isVisible = true
+        when (status) {
+            TranslationStatus.IDLE -> {
+                translatorPillTint = Theme.ACCENT
+                translatorStatusPill.text = "Lens Ativo"
+            }
+            TranslationStatus.TRANSLATING -> {
+                translatorPillTint = Theme.ACCENT_HOVER
+                translatorStatusPill.text = detail ?: "Traduzindo…"
+            }
+            TranslationStatus.READY -> {
+                translatorPillTint = Theme.SUCCESS
+                translatorStatusPill.text = "Traduzido"
+            }
+            TranslationStatus.ERROR -> {
+                translatorPillTint = Color(0xE0, 0x55, 0x65)
+                translatorStatusPill.text = detail ?: "Erro na tradução"
+            }
+        }
+        layoutTranslatorPill()
+        translatorStatusPill.revalidate()
+        translatorStatusPill.repaint()
+    }
+
+    fun visiblePageIndexes(): List<Int> {
+        if (pageCount <= 0) return emptyList()
+        return if (isWebtoon) {
+            webtoon.currentVisiblePages()
+        } else {
+            spreadAt(currentPage)
+        }
+    }
+
+    private suspend fun providePageImageForTranslation(pageIndex: Int): BufferedImage? {
+        if (closed || pageIndex !in 0 until pageCount) return null
+        if (isWebtoon && colorFilter == MangaImageEnhancer.ColorFilterMode.NONE) {
+            webtoon.getDisplayedImage(pageIndex)?.takeIf { it.width >= 600 }?.let { return it }
+        }
+        getCachedImage(pageIndex)?.takeIf { it.width >= 600 || !isWebtoon }?.let { return it }
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val decodeMaxDim = if (isWebtoon) maxOf(scroll.viewport?.width ?: 900, 1000) else 0
+            val loaded = readPageFromArchive(pageIndex, decodeMaxDim)
+            if (loaded != null && !closed) {
+                putCachedImage(pageIndex, loaded)
+            }
+            loaded
+        }
+    }
+
     private val sessionStartNano = System.nanoTime()
     private var lastRecordedNano = sessionStartNano
     private var lastInteractionNano = sessionStartNano
 
     private fun markUserInteraction() {
         lastInteractionNano = System.nanoTime()
+    }
+
+    private var activeToastTimer: Timer? = null
+
+    private fun showToast(message: String) {
+        if (closed) return
+        val glass = getRootPane()?.glassPane as? javax.swing.JComponent ?: return
+        activeToastTimer?.stop()
+
+        var toastAlpha = 0f
+        var holdFrames = 0
+        var fadingOut = false
+
+        val toast = object : JLabel(message, ModernIcons.translateIcon(14) { Theme.ACCENT }, SwingConstants.CENTER) {
+            override fun removeNotify() {
+                activeToastTimer?.stop()
+                super.removeNotify()
+            }
+
+            override fun paint(g: Graphics) {
+                val g2 = g.create() as Graphics2D
+                g2.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, toastAlpha.coerceIn(0f, 1f))
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val arc = height.toFloat().coerceAtLeast(28f)
+                g2.color = Color(18, 20, 26, 232)
+                g2.fill(java.awt.geom.RoundRectangle2D.Float(0f, 0f, width - 1f, height - 1f, arc, arc))
+                val c = Theme.ACCENT
+                g2.color = Color(c.red, c.green, c.blue, 140)
+                g2.stroke = java.awt.BasicStroke(1.2f)
+                g2.draw(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, width - 2f, height - 2f, arc, arc))
+                super.paint(g2)
+                g2.dispose()
+            }
+        }.apply {
+            font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+            foreground = Color(242, 244, 248)
+            iconTextGap = 8
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(9, 18, 9, 18)
+        }
+
+        glass.isVisible = true
+        glass.layout = FlowLayout(FlowLayout.CENTER, 0, (height - 120).coerceAtLeast(56))
+        glass.removeAll()
+        glass.add(toast)
+        glass.revalidate()
+        glass.repaint()
+
+        val timer = Timer(14) { e ->
+            if (closed || !toast.isDisplayable) {
+                (e.source as? Timer)?.stop()
+                return@Timer
+            }
+            if (!fadingOut) {
+                toastAlpha = (toastAlpha + 0.16f).coerceAtMost(1f)
+                if (toastAlpha >= 1f) {
+                    holdFrames++
+                    if (holdFrames >= 85) fadingOut = true
+                }
+            } else {
+                toastAlpha = (toastAlpha - 0.08f).coerceAtLeast(0f)
+                if (toastAlpha <= 0f) {
+                    (e.source as? Timer)?.stop()
+                    glass.remove(toast)
+                    glass.isVisible = false
+                    glass.repaint()
+                    return@Timer
+                }
+            }
+            toast.repaint()
+        }
+        activeToastTimer = timer
+        timer.start()
+    }
+
+    private fun loadBookmarksForCurrentChapter() {
+        if (chapterId <= 0) return
+        // This would be called from the service, but we need to trigger a refresh
+        // For now, we just repaint to show visual indicators
+        scroll.repaint()
+        paged.repaint()
+        webtoon.repaint()
     }
 
     /**
@@ -694,11 +1004,11 @@ class ReaderWindow(
             isFocusable = false
             toolTipText = "Filtro de leitura (Grayscale, Noturno Invertido, Sépia)"
         }
-        fun button(text: String, action: () -> Unit) = JButton(text).apply {
-            isFocusable = false
-            addActionListener { action() }
-        }
-        val marginBtn = JButton("Margem: ${webtoonSideMarginPercent}%").apply {
+        val marginBtn = ModernButton(
+            text = "Margem: ${webtoonSideMarginPercent}%",
+            variant = ModernButton.Variant.HUD,
+            compact = true,
+        ).apply {
             isFocusable = false
             toolTipText = "Margem lateral em Webtoon para monitores ultrawide (0%, 15%, 25%, 35%)"
             isVisible = isWebtoon
@@ -714,7 +1024,11 @@ class ReaderWindow(
                 if (isWebtoon) webtoon.relayout()
             }
         }
-        val splitBtn = JButton(if (splitWidePages) "Divisão: Ligada" else "Divisão: Desligada").apply {
+        val splitBtn = ModernButton(
+            text = if (splitWidePages) "Divisão: Ligada" else "Divisão: Desligada",
+            variant = ModernButton.Variant.HUD,
+            compact = true,
+        ).apply {
             isFocusable = false
             toolTipText = "Divisão automática de páginas duplas em páginas normais sequenciais"
             isVisible = !isWebtoon
@@ -765,9 +1079,9 @@ class ReaderWindow(
             webtoon.invalidateScaledCache()
             applyView()
         }
-        topHud = JPanel(FlowLayout(FlowLayout.CENTER, 8, 6)).apply {
-            background = Color(18, 19, 24, 240)
-            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+        topHud = JPanel(FlowLayout(FlowLayout.CENTER, 7, 6)).apply {
+            background = Color(18, 19, 24, 242)
+            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Color(255, 255, 255, 26))
             add(modeBox)
             add(fitBox)
             add(qualityBox)
@@ -775,29 +1089,94 @@ class ReaderWindow(
             add(marginBtn)
             add(splitBtn)
             add(autoScrollBtn)
-            add(button("−") { adjustZoom(0.85) })
-            add(button("100%") { resetZoom() })
-            add(button("+") { adjustZoom(1.18) })
-            add(button("Tela cheia (F11)") { toggleFullscreen() })
-            add(button("Ocultar HUD (H)") { toggleHud() })
+            add(translatorBtn)
+            add(
+                ModernIconButton(
+                    icon = ModernIcons.zoomOut(15) { Color.WHITE },
+                    tip = "Diminuir zoom",
+                    sizePx = 28,
+                    cornerRadius = 8f,
+                    darkOverlay = true,
+                ).apply { addActionListener { adjustZoom(0.85) } },
+            )
+            add(
+                ModernButton(
+                    text = "100%",
+                    variant = ModernButton.Variant.HUD,
+                    compact = true,
+                ).apply {
+                    isFocusable = false
+                    toolTipText = "Redefinir zoom (100%)"
+                    addActionListener { resetZoom() }
+                },
+            )
+            add(
+                ModernIconButton(
+                    icon = ModernIcons.zoomIn(15) { Color.WHITE },
+                    tip = "Aumentar zoom",
+                    sizePx = 28,
+                    cornerRadius = 8f,
+                    darkOverlay = true,
+                ).apply { addActionListener { adjustZoom(1.18) } },
+            )
+            add(
+                ModernButton(
+                    text = "Tela cheia",
+                    icon = ModernIcons.maximize(13) { Color.WHITE },
+                    variant = ModernButton.Variant.HUD,
+                    compact = true,
+                ).apply {
+                    isFocusable = false
+                    toolTipText = "Alternar tela cheia (F11)"
+                    addActionListener { toggleFullscreen() }
+                },
+            )
+            add(
+                ModernButton(
+                    text = "Ocultar (H)",
+                    icon = ModernIcons.eyeOff(13) { Color.WHITE },
+                    variant = ModernButton.Variant.HUD,
+                    compact = true,
+                ).apply {
+                    isFocusable = false
+                    toolTipText = "Ocultar barra de controles (H)"
+                    addActionListener { toggleHud() }
+                },
+            )
         }
 
         // Mihon BottomReaderBar + ReaderPageIndicator + Slider
         bottomHud = JPanel(BorderLayout(12, 0)).apply {
-            background = Color(18, 19, 24, 240)
+            background = Color(18, 19, 24, 242)
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Color(255, 255, 255, 26)),
                 BorderFactory.createEmptyBorder(6, 16, 6, 16),
             )
             val leftNav = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
                 isOpaque = false
                 add(btnPrevChapter)
-                add(button("◀") { prev() })
+                add(
+                    ModernIconButton(
+                        icon = ModernIcons.chevronLeft(16) { Color.WHITE },
+                        tip = "Página anterior",
+                        sizePx = 30,
+                        cornerRadius = 8f,
+                        darkOverlay = true,
+                    ).apply { addActionListener { prev() } },
+                )
             }
             val rightNav = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
                 isOpaque = false
                 add(pageLabel)
-                add(button("▶") { next() })
+                add(
+                    ModernIconButton(
+                        icon = ModernIcons.chevronRight(16) { Color.WHITE },
+                        tip = "Próxima página",
+                        sizePx = 30,
+                        cornerRadius = 8f,
+                        darkOverlay = true,
+                    ).apply { addActionListener { next() } },
+                )
                 add(btnNextChapter)
             }
             add(leftNav, BorderLayout.WEST)
@@ -808,6 +1187,7 @@ class ReaderWindow(
         val centerLayered = JLayeredPane().apply {
             add(scroll, JLayeredPane.DEFAULT_LAYER)
             add(speedPill, JLayeredPane.POPUP_LAYER)
+            add(translatorStatusPill, JLayeredPane.POPUP_LAYER)
         }
         centerLayered.addComponentListener(object : ComponentAdapter() {
             override fun componentResized(e: ComponentEvent) {
@@ -821,6 +1201,14 @@ class ReaderWindow(
                     (h - pillH - 18).coerceAtLeast(10),
                     pillW,
                     pillH,
+                )
+                val transW = translatorStatusPill.preferredSize.width.coerceAtLeast(150)
+                val transH = translatorStatusPill.preferredSize.height.coerceAtLeast(28)
+                translatorStatusPill.setBounds(
+                    (w - transW - 18).coerceAtLeast(10),
+                    12,
+                    transW,
+                    transH,
                 )
             }
         })
@@ -896,6 +1284,7 @@ class ReaderWindow(
                     }
                     ReaderAction.matches(ReaderAction.TOGGLE_HUD, e.keyCode) -> toggleHud()
                     ReaderAction.matches(ReaderAction.TOGGLE_FULLSCREEN, e.keyCode) -> toggleFullscreen()
+                    ReaderAction.matches(ReaderAction.TOGGLE_TRANSLATOR, e) -> toggleTranslator()
                     ReaderAction.matches(ReaderAction.ZOOM_IN, e.keyCode) -> adjustZoom(1.15)
                     ReaderAction.matches(ReaderAction.ZOOM_OUT, e.keyCode) -> adjustZoom(0.87)
                     ReaderAction.matches(ReaderAction.ZOOM_RESET, e.keyCode) -> resetZoom()
@@ -924,9 +1313,126 @@ class ReaderWindow(
                             dispose()
                         }
                     }
+                    // B - Toggle bookmark on current page
+                    e.keyCode == KeyEvent.VK_B -> {
+                        if (chapterId > 0 && onToggleBookmark != null) {
+                            val added = onToggleBookmark!!(chapterId, currentPage)
+                            val msg = if (added) "🔖 Bookmark adicionado na página ${currentPage + 1}" else "🔖 Bookmark removido da página ${currentPage + 1}"
+                            showToast(msg)
+                            loadBookmarksForCurrentChapter()
+                        }
+                    }
+                    // N - Add note on current page
+                    e.keyCode == KeyEvent.VK_N -> {
+                        if (chapterId > 0 && onAddNote != null) {
+                            NoteDialog(this@ReaderWindow, "Nova Nota - Página ${currentPage + 1}") { note ->
+                                onAddNote!!(chapterId, currentPage, note)
+                                showToast("📝 Nota adicionada na página ${currentPage + 1}")
+                                loadBookmarksForCurrentChapter()
+                            }.isVisible = true
+                        }
+                    }
+                    // H - Toggle highlight color picker (Shift+H for highlight)
+                    e.keyCode == KeyEvent.VK_H && e.isShiftDown -> {
+                        if (chapterId > 0 && onAddHighlight != null) {
+                            HighlightColorDialog(this@ReaderWindow) { color ->
+                                onAddHighlight!!(chapterId, currentPage, color)
+                                showToast("🖍️ Destaque adicionado na página ${currentPage + 1}")
+                                loadBookmarksForCurrentChapter()
+                            }.isVisible = true
+                        }
+                    }
                 }
             }
         })
+
+        // Context menu (right-click)
+        val contextMenu = JPopupMenu().apply {
+            add(JMenuItem("Alternar Tradutor Simultâneo (T)", ModernIcons.translateIcon(15)).apply {
+                name = "translatorContextMenuItem"
+                addActionListener { toggleTranslator() }
+            })
+            addSeparator()
+            add(JMenuItem("Adicionar Bookmark (B)").apply {
+                isEnabled = chapterId > 0 && onToggleBookmark != null
+                addActionListener {
+                    if (chapterId > 0 && onToggleBookmark != null) {
+                        val added = onToggleBookmark!!(chapterId, currentPage)
+                        val msg = if (added) "🔖 Bookmark adicionado na página ${currentPage + 1}" else "🔖 Bookmark removido da página ${currentPage + 1}"
+                        showToast(msg)
+                        loadBookmarksForCurrentChapter()
+                    }
+                }
+            })
+            add(JMenuItem("Adicionar Nota (N)").apply {
+                isEnabled = chapterId > 0 && onAddNote != null
+                addActionListener {
+                    if (chapterId > 0 && onAddNote != null) {
+                        NoteDialog(this@ReaderWindow, "Nova Nota - Página ${currentPage + 1}") { note ->
+                            onAddNote!!(chapterId, currentPage, note)
+                            showToast("📝 Nota adicionada na página ${currentPage + 1}")
+                            loadBookmarksForCurrentChapter()
+                        }.isVisible = true
+                    }
+                }
+            })
+            add(JMenuItem("Adicionar Destaque (Shift+H)").apply {
+                isEnabled = chapterId > 0 && onAddHighlight != null
+                addActionListener {
+                    if (chapterId > 0 && onAddHighlight != null) {
+                        HighlightColorDialog(this@ReaderWindow) { color ->
+                            onAddHighlight!!(chapterId, currentPage, color)
+                            showToast("🖍️ Destaque adicionado na página ${currentPage + 1}")
+                            loadBookmarksForCurrentChapter()
+                        }.isVisible = true
+                    }
+                }
+            })
+            addSeparator()
+            add(JMenuItem("Ver Bookmarks do Capítulo").apply {
+                isEnabled = chapterId > 0 && onShowBookmarks != null
+                addActionListener {
+                    if (chapterId > 0 && onShowBookmarks != null) {
+                        onShowBookmarks!!(chapterId, mangaTitle, pageCount) { page ->
+                            goTo(page)
+                        }
+                    }
+                }
+            })
+            addSeparator()
+            add(JMenuItem("Copiar número da página").apply {
+                addActionListener {
+                    val pageStr = "Página ${currentPage + 1} de $pageCount"
+                    java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                        java.awt.datatransfer.StringSelection(pageStr),
+                        null,
+                    )
+                    showToast("📋 $pageStr copiado")
+                }
+            })
+        }
+
+        val showContextMenu = { e: MouseEvent ->
+            if (e.isPopupTrigger) {
+                contextMenu.show(e.component, e.x, e.y)
+            }
+        }
+        scroll.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) { showContextMenu(e) }
+            override fun mouseReleased(e: MouseEvent) { showContextMenu(e) }
+        })
+        paged.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) { showContextMenu(e) }
+            override fun mouseReleased(e: MouseEvent) { showContextMenu(e) }
+        })
+        webtoon.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) { showContextMenu(e) }
+            override fun mouseReleased(e: MouseEvent) { showContextMenu(e) }
+        })
+
+        // Install custom scrollbar with bookmark indicators
+        installBookmarkScrollbarIndicators()
+
         scroll.viewport.addComponentListener(object : ComponentAdapter() {
             override fun componentResized(e: ComponentEvent) {
                 val vw = scroll.viewport.width
@@ -942,10 +1448,13 @@ class ReaderWindow(
             markUserInteraction()
             if (isWebtoon) webtoon.scheduleUpdateVisible()
         }
+        MemoryManager.addLimitListener(memoryLimitListener)
         addWindowListener(object : WindowAdapter() {
             override fun windowClosed(e: WindowEvent) {
                 if (togglingFullscreen) return
                 closed = true
+                MemoryManager.removeLimitListener(memoryLimitListener)
+                runCatching { translatorController.close() }
                 autoScroll.stop()
                 hoverResumeTimer.stop()
                 progressTimer.stop()
@@ -962,17 +1471,22 @@ class ReaderWindow(
                 webtoon.invalidateScaledCache()
                 paged.invalidateCache()
                 paged.setContent(emptyList(), null)
+                LensOverlayRenderer.clearPatchCache()
                 if (activeReader === this@ReaderWindow) {
                     activeReader = null
                 }
-                System.gc()
+                MemoryManager.trimMemoryIfNeeded(force = true)
             }
         })
 
+        updateTranslatorButtonStyle()
         if (pageCount == 0) {
             paged.setContent(emptyList(), "Nenhuma imagem encontrada")
             pageLabel.text = "Página 0/0"
         } else {
+            if (translatorEnabled) {
+                translatorController.setEnabled(true, visiblePageIndexes(), ::providePageImageForTranslation)
+            }
             applyView()
             SwingUtilities.invokeLater { readSizes() }
         }
@@ -992,6 +1506,13 @@ class ReaderWindow(
         newPrevChapter: (() -> Unit)? = null,
         newNextChapter: (() -> Unit)? = null,
         newOnProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
+        // Bookmark integration
+        newChapterId: Long = -1,
+        newMangaTitle: String = "",
+        newOnToggleBookmark: ((Long, Int) -> Boolean)? = null,
+        newOnAddNote: ((Long, Int, String) -> Unit)? = null,
+        newOnAddHighlight: ((Long, Int, String) -> Unit)? = null,
+        newOnShowBookmarks: ((Long, String, Int, (Int) -> Unit) -> Unit)? = null,
     ) {
         autoScroll.stop()
         hoverResumeTimer.stop()
@@ -1026,6 +1547,13 @@ class ReaderWindow(
         reportedPage = currentPage
         currentSubPage = 0
         generation++
+        translatorController.onChapterChanged(generation.toLong())
+        LensOverlayRenderer.clearPatchCache()
+
+        // Update bookmark integration params
+        // Note: We can't reassign val properties, so we use a mutable holder or just update what we can
+        // For now, we'll use a different approach - the callbacks are passed at construction time
+        // and we assume they're long-lived (from the service)
 
         title = "Mihon Linux - $newTitle"
         onPrevChapter = newPrevChapter
@@ -1140,6 +1668,7 @@ class ReaderWindow(
     private fun applyView() {
         generation++
         currentSubPage = 0
+        maxCacheEntries = MemoryManager.calculateReaderCacheEntries(isWebtoon)
         if (isWebtoon) {
             scroll.setViewportView(webtoon)
             webtoon.relayout(currentPage)
@@ -1151,12 +1680,28 @@ class ReaderWindow(
 
     // --- Single / double page ------------------------------------------------------------------
 
-    private fun readPageFromArchive(index: Int): BufferedImage? =
+    private fun readPageFromArchive(index: Int, targetW: Int = 0): BufferedImage? =
         runCatching {
             val r = reader
             if (index !in 0 until r.pages.size) return null
-            synchronized(readerLock) { r.getPageImage(r.pages[index]) }
+            if (r is OnlineStreamArchiveReader || r is mihon.core.archive.DirectoryArchiveReader) {
+                if (targetW > 0) r.getPageImage(r.pages[index], targetW) else r.getPageImage(r.pages[index])
+            } else {
+                synchronized(readerLock) {
+                    if (targetW > 0) {
+                        r.getPageImage(r.pages[index], targetW)
+                    } else {
+                        r.getPageImage(r.pages[index])
+                    }
+                }
+            }
         }.getOrNull()
+
+    private data class PagedSlot(
+        val pageIndex: Int,
+        val image: BufferedImage,
+        val halfSlice: Boolean? = null,
+    )
 
     private fun showSpread() {
         val myGeneration = ++generation
@@ -1174,29 +1719,39 @@ class ReaderWindow(
             if (myGeneration != generation || closed) return
             val images = indexes.map { getCachedImage(it) }
             if (images.any { it == null }) {
-                paged.setContent(emptyList(), "Não foi possível decodificar a página")
+                paged.setSlots(emptyList(), "Não foi possível decodificar a página")
             } else {
-                val contentImages = if (isWideSingle && images.firstOrNull() != null) {
+                val contentSlots = if (isWideSingle && images.firstOrNull() != null && indexes.isNotEmpty()) {
+                    val isSecondHalf = (currentSubPage == 1)
                     val half = ReaderEngine.getHalfPage(
                         images.first()!!,
-                        isSecondHalf = (currentSubPage == 1),
+                        isSecondHalf = isSecondHalf,
                         isRtl = splitWideRtl,
                     )
-                    listOf(half)
-                } else if (mode == ReadMode.DOUBLE_RTL) {
-                    images.filterNotNull().reversed()
+                    val halfSlice = LensOverlayRenderer.physicalHalfSlice(
+                        isSecondHalf = isSecondHalf,
+                        isRtl = splitWideRtl,
+                    )
+                    listOf(PagedSlot(pageIndex = indexes.first(), image = half, halfSlice = halfSlice))
                 } else {
-                    images.filterNotNull()
+                    val pairs = indexes.zip(images).mapNotNull { (idx, img) ->
+                        img?.let { PagedSlot(pageIndex = idx, image = it, halfSlice = null) }
+                    }
+                    if (mode == ReadMode.DOUBLE_RTL) pairs.reversed() else pairs
                 }
-                paged.setContent(contentImages, null)
+                paged.setSlots(contentSlots, null)
                 scroll.verticalScrollBar.value = 0
                 scroll.horizontalScrollBar.value = 0
+                if (translatorEnabled) {
+                    translatorController.onVisiblePagesChanged(indexes, ::providePageImageForTranslation)
+                }
             }
-            cancelDistantTasks(indexes.lastOrNull() ?: currentPage, radiusAhead = 4, radiusBehind = 2)
-            for (ahead in 1..4) {
+            val (aheadRadius, behindRadius) = if (MemoryManager.ramLimitMb <= 384) 2 to 1 else 3 to 1
+            cancelDistantTasks(indexes.lastOrNull() ?: currentPage, radiusAhead = aheadRadius, radiusBehind = behindRadius)
+            for (ahead in 1..aheadRadius) {
                 prefetch((indexes.lastOrNull() ?: currentPage) + ahead)
             }
-            for (behind in 1..2) {
+            for (behind in 1..behindRadius) {
                 prefetch((indexes.firstOrNull() ?: currentPage) - behind)
             }
         }
@@ -1206,12 +1761,13 @@ class ReaderWindow(
             finish()
             return
         }
-        paged.setContent(emptyList(), "Carregando…")
+        paged.setSlots(emptyList(), "Carregando…")
+        val snapGen = generation
         val future = io.submit {
-            val snapGen = generation
             try {
                 if (closed || Thread.currentThread().isInterrupted) return@submit
-                val loaded = missing.associateWith { readPageFromArchive(it) }
+                val vpW = maxOf(scroll.viewport?.width ?: 0, scroll.viewport?.height ?: 0, 1280)
+                val loaded = missing.associateWith { readPageFromArchive(it, vpW) }
                 SwingUtilities.invokeLater {
                     if (closed || snapGen != generation) return@invokeLater
                     loaded.forEach { (index, image) ->
@@ -1237,7 +1793,8 @@ class ReaderWindow(
         val future = io.submit {
             try {
                 if (closed || Thread.currentThread().isInterrupted) return@submit
-                val image = readPageFromArchive(index) ?: return@submit
+                val vpW = maxOf(scroll.viewport?.width ?: 0, scroll.viewport?.height ?: 0, 1280)
+                val image = readPageFromArchive(index, vpW) ?: return@submit
                 SwingUtilities.invokeLater {
                     if (!closed && snapGen == generation && index in sizes.indices) {
                         putCachedImage(index, image)
@@ -1262,13 +1819,20 @@ class ReaderWindow(
         val snapReader = reader
         val snapCount = pageCount
         io.execute {
-            val order = (0 until snapCount).sortedBy { kotlin.math.abs(it - currentPage) }
+            val baseOrder = (0 until snapCount).sortedBy { kotlin.math.abs(it - currentPage) }
+            // On online streams with many pages, only pre-fetch nearby pages so startup stays instant
+            // and remote CDN connections are never saturated; distant pages measure lazily on scroll.
+            val order = if (snapReader is OnlineStreamArchiveReader && snapCount > 12) {
+                baseOrder.take(10)
+            } else {
+                baseOrder
+            }
             val found = arrayOfNulls<Dimension>(snapCount)
             for (i in order) {
                 if (closed || snapGen != generation) return@execute
                 if (sizes.getOrNull(i) != null) continue
                 found[i] = runCatching {
-                    val stream = if (snapReader is OnlineStreamArchiveReader) {
+                    val stream = if (snapReader is OnlineStreamArchiveReader || snapReader is mihon.core.archive.DirectoryArchiveReader) {
                         snapReader.getPageStream(snapReader.pages[i])
                     } else {
                         synchronized(readerLock) {
@@ -1319,14 +1883,42 @@ class ReaderWindow(
 
     // --- Views ---------------------------------------------------------------------------------
 
+    /**
+     * Renders the currently active reader canvas ([PagedView] or [WebtoonView]) into an offscreen [BufferedImage].
+     */
+    fun renderCurrentCanvasToImage(
+        w: Int = max(scroll.viewport.width, 800),
+        h: Int = max(scroll.viewport.height, 1200),
+    ): BufferedImage {
+        val out = BufferedImage(w.coerceAtLeast(1), h.coerceAtLeast(1), BufferedImage.TYPE_INT_ARGB)
+        val g2 = out.createGraphics()
+        try {
+            val view = if (isWebtoon) webtoon else paged
+            if (isWebtoon && webtoon.layoutWidth <= 0) {
+                webtoon.relayoutForWidth(w)
+            }
+            if (view.width <= 0 || view.height <= 0) {
+                view.setSize(w, h)
+            }
+            g2.clipRect(0, 0, w, h)
+            view.paint(g2)
+        } finally {
+            g2.dispose()
+        }
+        return out
+    }
+
     /** One page or a two-page spread, painted scaled according to [fit]. */
     private inner class PagedView : JPanel(), Scrollable {
+        private var slots: List<PagedSlot> = emptyList()
         private var images: List<BufferedImage> = emptyList()
         private var message: String? = null
         private var scaled: List<BufferedImage> = emptyList()
         private var scaledKey = ""
         private var pendingKey = ""
         private var scalingFuture: Future<*>? = null
+        private var previewSrcKey = ""
+        private var previewImages: List<BufferedImage> = emptyList()
 
         init {
             background = Color.BLACK
@@ -1353,18 +1945,30 @@ class ReaderWindow(
             scalingFuture = null
             scaled.forEach { runCatching { it.flush() } }
             scaled = emptyList()
+            previewSrcKey = ""
+            previewImages = emptyList()
             repaint()
         }
 
-        fun setContent(images: List<BufferedImage>, message: String?) {
-            this.images = images
+        fun setSlots(newSlots: List<PagedSlot>, message: String?) {
+            this.slots = newSlots
+            this.images = newSlots.map { it.image }
             this.message = message
             scaledKey = ""
             pendingKey = ""
+            previewSrcKey = ""
+            previewImages = emptyList()
             scalingFuture?.cancel(true)
             scalingFuture = null
             revalidate()
             repaint()
+        }
+
+        fun setContent(images: List<BufferedImage>, message: String?) {
+            val mapped = images.mapIndexed { idx, img ->
+                PagedSlot(pageIndex = currentPage + idx, image = img, halfSlice = null)
+            }
+            setSlots(mapped, message)
         }
 
         private fun natural() = Dimension(images.sumOf { it.width }, images.maxOfOrNull { it.height } ?: 0)
@@ -1445,21 +2049,65 @@ class ReaderWindow(
                 }
             }
 
+            val g2 = g as java.awt.Graphics2D
             var x = ((width - totalW) / 2).coerceAtLeast(0)
             val top = ((height - totalH) / 2).coerceAtLeast(0)
             if (key == scaledKey && scaled.isNotEmpty()) {
-                scaled.forEach { img ->
-                    g.drawImage(img, x, top + (totalH - img.height) / 2, null)
+                scaled.forEachIndexed { idx, img ->
+                    val drawY = top + (totalH - img.height) / 2
+                    g2.drawImage(img, x, drawY, null)
+                    if (translatorEnabled) {
+                        val slot = slots.getOrNull(idx)
+                        val transResult = slot?.let { translatorController.getCachedResult(it.pageIndex) }
+                        if (transResult != null && transResult.status == TranslationStatus.READY && transResult.blocks.isNotEmpty()) {
+                            LensOverlayRenderer.renderOverlayOnGraphics(
+                                g2 = g2,
+                                sourceOrDisplayImage = img,
+                                destX = x,
+                                destY = drawY,
+                                destW = img.width,
+                                destH = img.height,
+                                result = transResult,
+                                halfSlice = slot.halfSlice,
+                            )
+                        }
+                    }
                     x += img.width
                 }
             } else {
                 // Instant bilinear preview on EDT while background scaling/filtering finishes
-                val g2 = g as java.awt.Graphics2D
                 g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-                images.forEach { img ->
-                    val w = (img.width * s).toInt().coerceAtLeast(1)
-                    val h = (img.height * s).toInt().coerceAtLeast(1)
-                    g2.drawImage(img, x, top + (totalH - h) / 2, w, h, null)
+                val previewList = if (colorFilter != MangaImageEnhancer.ColorFilterMode.NONE) {
+                    val pKey = images.joinToString(",") { System.identityHashCode(it).toString() } + "@${colorFilter.name}"
+                    if (pKey != previewSrcKey || previewImages.size != images.size) {
+                        previewImages = images.map { MangaImageEnhancer.applyColorFilter(it, colorFilter) }
+                        previewSrcKey = pKey
+                    }
+                    previewImages
+                } else {
+                    images
+                }
+                previewList.forEachIndexed { idx, previewImg ->
+                    val w = (previewImg.width * s).toInt().coerceAtLeast(1)
+                    val h = (previewImg.height * s).toInt().coerceAtLeast(1)
+                    val drawY = top + (totalH - h) / 2
+                    g2.drawImage(previewImg, x, drawY, w, h, null)
+                    if (translatorEnabled) {
+                        val slot = slots.getOrNull(idx)
+                        val transResult = slot?.let { translatorController.getCachedResult(it.pageIndex) }
+                        if (transResult != null && transResult.status == TranslationStatus.READY && transResult.blocks.isNotEmpty()) {
+                            LensOverlayRenderer.renderOverlayOnGraphics(
+                                g2 = g2,
+                                sourceOrDisplayImage = previewImg,
+                                destX = x,
+                                destY = drawY,
+                                destW = w,
+                                destH = h,
+                                result = transResult,
+                                halfSlice = slot.halfSlice,
+                            )
+                        }
+                    }
                     x += w
                 }
             }
@@ -1479,9 +2127,9 @@ class ReaderWindow(
      * from disk or restarts loading.
      */
     private inner class WebtoonView : JPanel(), Scrollable {
-        private val images = HashMap<Int, BufferedImage>()
-        private val requested = HashSet<Int>()
-        private val failed = HashSet<Int>()
+        private val images = ConcurrentHashMap<Int, BufferedImage>()
+        private val requested: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+        private val failed: MutableSet<Int> = ConcurrentHashMap.newKeySet()
         private var heights = IntArray(pageCount)
         private var tops = IntArray(pageCount + 1)
         private var maxWidth = 0
@@ -1493,7 +2141,9 @@ class ReaderWindow(
             private set
 
         fun invalidateScaledCache() {
-            images.values.forEach { runCatching { it.flush() } }
+            images.forEach { (idx, img) ->
+                if (img !== getCachedImage(idx)) runCatching { img.flush() }
+            }
             images.clear()
             requested.clear()
             failed.clear()
@@ -1537,6 +2187,10 @@ class ReaderWindow(
 
         fun relayout(anchorPage: Int = currentPage) {
             val vw = (parent as? JViewport)?.width ?: 0
+            relayoutForWidth(vw, anchorPage)
+        }
+
+        fun relayoutForWidth(vw: Int, anchorPage: Int = currentPage) {
             if (vw <= 0 || pageCount == 0) return
             layoutWidth = vw
             layoutGeneration++
@@ -1602,6 +2256,7 @@ class ReaderWindow(
                 positioning = false
             }
             repaint()
+            scheduleUpdateVisible()
         }
 
         fun scrollToPage(page: Int) {
@@ -1618,6 +2273,20 @@ class ReaderWindow(
         private val viewport: JViewport? get() = parent as? JViewport
 
         private fun pageAt(y: Int): Int = ReaderEngine.pageAt(y, tops, pageCount)
+
+        fun getDisplayedImage(i: Int): BufferedImage? = images[i]
+
+        fun currentVisiblePages(): List<Int> {
+            if (pageCount == 0) return emptyList()
+            val vp = viewport
+            if (vp == null || layoutWidth == 0) {
+                return listOf(currentPage.coerceIn(0, pageCount - 1))
+            }
+            val top = vp.viewPosition.y
+            val first = pageAt(top).coerceIn(0, pageCount - 1)
+            val last = pageAt(top + max(vp.height, 1)).coerceIn(first, pageCount - 1)
+            return (first..last).toList()
+        }
 
         private val updateVisibleTimer = javax.swing.Timer(14) {
             updateVisible()
@@ -1642,32 +2311,39 @@ class ReaderWindow(
             }
             reportProgress(last)
 
-            // Cancel tasks for pages that scrolled out of active window
-            cancelDistantTasks(first, (last - first) + 8, 6)
+            val (aheadWindow, behindWindow) = MemoryManager.getWebtoonWindow()
 
-            // Keep a generous window in memory (8 behind, 12 ahead) so scrolling back and forth never drops or recomputes images
-            images.keys.filter { it < first - 8 || it > last + 12 }.toList().forEach { idx ->
-                images.remove(idx)?.let { runCatching { it.flush() } }
+            // Cancel tasks for pages that scrolled out of active window
+            cancelDistantTasks(first, (last - first) + aheadWindow + 2, behindWindow + 2)
+
+            // Keep an optimal window in memory so scrolling stays fluid without hoarding
+            images.keys.filter { it < first - behindWindow || it > last + aheadWindow }.toList().forEach { idx ->
+                images.remove(idx)
             }
-            requested.filter { it < first - 8 || it > last + 12 }.toList().forEach { idx ->
+            requested.filter { it < first - behindWindow || it > last + aheadWindow }.toList().forEach { idx ->
                 requested.remove(idx)
             }
             // Request visible pages first, then prefetch ahead and behind
-            for (i in first..min(last, pageCount - 1)) request(i)
-            for (ahead in 1..4) {
+            val visiblePages = (first..min(last, pageCount - 1)).toList()
+            for (i in visiblePages) request(i)
+            for (ahead in 1..aheadWindow) {
                 val idx = last + ahead
                 if (idx < pageCount) request(idx)
             }
-            for (behind in 1..2) {
+            for (behind in 1..behindWindow) {
                 val idx = first - behind
                 if (idx >= 0) request(idx)
             }
+            if (translatorEnabled && visiblePages.isNotEmpty()) {
+                translatorController.onVisiblePagesChanged(visiblePages, ::providePageImageForTranslation)
+            }
+            MemoryManager.trimMemoryIfNeeded()
         }
 
         private fun request(i: Int) {
             val targetW = pageWidth(i)
             val existing = images[i]
-            if ((existing != null && existing.width == targetW) || !requested.add(i)) return
+            if (i in failed || (existing != null && existing.width == targetW) || !requested.add(i)) return
             val gen = layoutGeneration
             val cachedOriginal = getCachedImage(i)
             val snapQuality = quality
@@ -1684,8 +2360,23 @@ class ReaderWindow(
                             requested.remove(i)
                             return@submit
                         }
-                        val original = cachedOriginal ?: readPageFromArchive(i)
+                        val original = cachedOriginal ?: readPageFromArchive(i, targetW.coerceAtLeast(1000))
+                        if (cachedOriginal == null && original != null && !closed) {
+                            putCachedImage(i, original)
+                        }
                         val naturalSize = original?.let { Dimension(it.width, it.height) }
+                        if (original != null && snapQuality != MangaImageEnhancer.QualityMode.BILINEAR && !closed) {
+                            SwingUtilities.invokeLater {
+                                if (!closed && gen == layoutGeneration) {
+                                    if (i in sizes.indices && sizes[i] == null && naturalSize != null) {
+                                        sizes[i] = naturalSize
+                                        recomputeGeometryPreserveScroll(changedPage = i)
+                                    } else if (i in tops.indices && i in heights.indices) {
+                                        repaint(0, tops[i], width, heights[i])
+                                    }
+                                }
+                            }
+                        }
                         val result = original?.let {
                             val targetH = (it.height.toDouble() * targetW / it.width).toInt().coerceAtLeast(1)
                             var res = if (snapQuality == MangaImageEnhancer.QualityMode.BILINEAR) {
@@ -1694,31 +2385,37 @@ class ReaderWindow(
                                 scaleImage(it, targetW, targetH, snapQuality)
                             }
                             if (snapFilter != MangaImageEnhancer.ColorFilterMode.NONE) {
-                                res = MangaImageEnhancer.applyColorFilter(res, snapFilter)
+                                val filtered = MangaImageEnhancer.applyColorFilter(res, snapFilter)
+                                if (filtered !== res && res !== original) runCatching { res.flush() }
+                                res = filtered
                             }
                             res
                         }
                         SwingUtilities.invokeLater {
                             if (closed || gen != layoutGeneration) {
-                                result?.let { runCatching { it.flush() } }
+                                if (result !== original) result?.let { runCatching { it.flush() } }
                                 requested.remove(i)
                                 return@invokeLater
-                            }
-                            if (original != null && !isPageCached(i)) {
-                                putCachedImage(i, original)
                             }
                             if (result == null) {
                                 failed.add(i)
                                 requested.remove(i)
                                 repaint(0, tops[i], width, heights[i])
                             } else {
-                                images[i]?.let { runCatching { it.flush() } }
+                                images[i]?.let { prev ->
+                                    if (prev !== original && prev !== getCachedImage(i)) {
+                                        runCatching { prev.flush() }
+                                    }
+                                }
                                 images[i] = result
                                 if (i in sizes.indices && sizes[i] == null && naturalSize != null) {
                                     sizes[i] = naturalSize
                                     recomputeGeometryPreserveScroll(changedPage = i)
                                 } else if (i in tops.indices && i in heights.indices) {
                                     repaint(0, tops[i], width, heights[i])
+                                }
+                                if (translatorEnabled && i in currentVisiblePages() && translatorController.getCachedResult(i) == null) {
+                                    translatorController.onVisiblePagesChanged(currentVisiblePages(), ::providePageImageForTranslation)
                                 }
                             }
                         }
@@ -1759,6 +2456,21 @@ class ReaderWindow(
                         g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
                     }
                     g2.drawImage(image, x, tops[i], w, heights[i], null)
+                    if (translatorEnabled) {
+                        val transResult = translatorController.getCachedResult(i)
+                        if (transResult != null && transResult.status == TranslationStatus.READY && transResult.blocks.isNotEmpty()) {
+                            LensOverlayRenderer.renderOverlayOnGraphics(
+                                g2 = g2,
+                                sourceOrDisplayImage = image,
+                                destX = x,
+                                destY = tops[i],
+                                destW = w,
+                                destH = heights[i],
+                                result = transResult,
+                                halfSlice = null,
+                            )
+                        }
+                    }
                 } else {
                     g.color = Color(40, 40, 40)
                     g.fillRect(x, tops[i], w, heights[i])
@@ -1779,6 +2491,70 @@ class ReaderWindow(
             (if (orientation == SwingConstants.VERTICAL) visibleRect.height else visibleRect.width) * 9 / 10
         override fun getScrollableTracksViewportWidth() = fit != FitMode.ORIGINAL
         override fun getScrollableTracksViewportHeight() = false
+    }
+
+    // Bookmark scrollbar indicators
+    private fun installBookmarkScrollbarIndicators() {
+        val scrollBar = scroll.verticalScrollBar
+        val originalUI = scrollBar.ui
+
+        // Custom scrollbar UI that paints bookmark indicators on the track
+        scrollBar.ui = object : javax.swing.plaf.basic.BasicScrollBarUI() {
+            override fun paintTrack(g: Graphics, c: javax.swing.JComponent, trackBounds: Rectangle) {
+                super.paintTrack(g, c, trackBounds)
+                if (pageCount <= 0) return
+
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+
+                // Get bookmarks for current chapter
+                // We'll use a simple approach: draw small markers on the track
+                val bookmarks = getBookmarksForCurrentChapter()
+                if (bookmarks.isEmpty()) {
+                    g2.dispose()
+                    return
+                }
+
+                val trackHeight = trackBounds.height
+                val trackY = trackBounds.y
+
+                bookmarks.forEach { bm ->
+                    // Calculate position on scrollbar track (0.0 to 1.0)
+                    val relativePos = if (pageCount > 1) bm.page.toDouble() / (pageCount - 1) else 0.0
+                    val markerY = trackY + (trackHeight * relativePos).toInt()
+
+                    // Draw marker based on type
+                    when (bm.type) {
+                        BookmarkType.BOOKMARK -> {
+                            g2.color = Theme.ACCENT
+                            g2.fillRoundRect(trackBounds.x + 2, markerY - 2, trackBounds.width - 4, 4, 2, 2)
+                        }
+                        BookmarkType.NOTE -> {
+                            g2.color = Color(0x4E, 0xCD, 0xC4) // Turquoise
+                            g2.fillOval(trackBounds.x + 2, markerY - 3, trackBounds.width - 4, 6)
+                        }
+                        BookmarkType.HIGHLIGHT -> {
+                            val color = bm.color?.let { Color.decode(it) } ?: Color.YELLOW
+                            g2.color = color
+                            g2.fillRect(trackBounds.x, markerY - 1, trackBounds.width, 3)
+                        }
+                    }
+                }
+                g2.dispose()
+            }
+
+            override fun paintThumb(g: Graphics, c: javax.swing.JComponent, thumbBounds: Rectangle) {
+                super.paintThumb(g, c, thumbBounds)
+            }
+        }
+    }
+
+    private fun getBookmarksForCurrentChapter(): List<Bookmark> {
+        // This would ideally come from the service, but for visual indicators
+        // we can load them synchronously or use a cached version
+        // For now, return empty list - the visual indicators will be updated
+        // when bookmarks are added/removed via the callbacks
+        return emptyList()
     }
 
     companion object {

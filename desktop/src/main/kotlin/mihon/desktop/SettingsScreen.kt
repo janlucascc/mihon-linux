@@ -18,23 +18,35 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.RoundRectangle2D
 import java.io.File
+import java.util.Locale
 import java.util.prefs.Preferences
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.ButtonGroup
+import javax.swing.DefaultListModel
 import javax.swing.Icon
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JDialog
 import javax.swing.JButton
 import javax.swing.JLabel
+import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
+import javax.swing.JTextField
 import javax.swing.JToggleButton
+import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
+import mihon.desktop.translator.TranslationProviderRegistry
+import mihon.desktop.translator.TranslatorLanguage
+import mihon.desktop.translator.TranslatorPreferences
+import tachiyomi.i18n.MR
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * AntiGravity-inspired Segmented Pill Selector (e.g., [ Queue | Send Immediately ] or [ External Browser | Built-in Browser ]).
@@ -289,6 +301,23 @@ class AntiGravityCategoryButton(
     private val navIcon: Icon? = null,
 ) : JToggleButton() {
 
+    private var hoverProgress = 0f
+    private var activeProgress = 0f
+    private val animTimer = javax.swing.Timer(14) {
+        val targetHover = if (model.isRollover && !isSelected) 1f else 0f
+        val targetActive = if (isSelected) 1f else 0f
+        hoverProgress += (targetHover - hoverProgress) * 0.25f
+        activeProgress += (targetActive - activeProgress) * 0.28f
+        if (kotlin.math.abs(targetHover - hoverProgress) < 0.01f &&
+            kotlin.math.abs(targetActive - activeProgress) < 0.01f
+        ) {
+            hoverProgress = targetHover
+            activeProgress = targetActive
+            (it.source as javax.swing.Timer).stop()
+        }
+        repaint()
+    }
+
     init {
         isOpaque = false
         isFocusable = false
@@ -299,6 +328,26 @@ class AntiGravityCategoryButton(
         alignmentX = 0f
         preferredSize = Dimension(190, 36)
         maximumSize = Dimension(Int.MAX_VALUE, 36)
+        model.addChangeListener {
+            if (!isDisplayable) {
+                hoverProgress = if (model.isRollover && !isSelected) 1f else 0f
+                activeProgress = if (isSelected) 1f else 0f
+                repaint()
+            } else if (!animTimer.isRunning) {
+                animTimer.start()
+            }
+        }
+    }
+
+    override fun addNotify() {
+        super.addNotify()
+        hoverProgress = if (model.isRollover && !isSelected) 1f else 0f
+        activeProgress = if (isSelected) 1f else 0f
+    }
+
+    override fun removeNotify() {
+        animTimer.stop()
+        super.removeNotify()
     }
 
     override fun paintBorder(g: Graphics) {}
@@ -312,12 +361,23 @@ class AntiGravityCategoryButton(
         val h = height
         val arc = 10
 
-        if (isSelected) {
-            g2.color = if (Theme.isDark) Color(0x28, 0x2A, 0x30) else Theme.BG_PILL_ACTIVE
+        if (hoverProgress > 0.01f && activeProgress < 0.99f) {
+            val baseHover = if (Theme.isDark) Color(255, 255, 255, 16) else Theme.BG_CARD_HOVER
+            g2.color = Color(
+                baseHover.red,
+                baseHover.green,
+                baseHover.blue,
+                (baseHover.alpha * hoverProgress * (1f - activeProgress)).toInt().coerceIn(0, 255),
+            )
             g2.fillRoundRect(2, 2, w - 4, h - 4, arc, arc)
-        } else if (model.isRollover) {
-            g2.color = if (Theme.isDark) Color(255, 255, 255, 12) else Theme.BG_CARD_HOVER
+        }
+        if (activeProgress > 0.01f) {
+            val activeBg = if (Theme.isDark) Color(0x28, 0x2A, 0x30) else Theme.BG_PILL_ACTIVE
+            g2.color = Color(activeBg.red, activeBg.green, activeBg.blue, (activeBg.alpha * activeProgress).toInt().coerceIn(0, 255))
             g2.fillRoundRect(2, 2, w - 4, h - 4, arc, arc)
+            val barH = ((h - 16) * activeProgress).toInt().coerceAtLeast(4)
+            g2.color = Color(Theme.ACCENT.red, Theme.ACCENT.green, Theme.ACCENT.blue, (255 * activeProgress).toInt().coerceIn(0, 255))
+            g2.fillRoundRect(2, (h - barH) / 2, 3, barH, 3, 3)
         }
 
         var textX = 14
@@ -328,7 +388,7 @@ class AntiGravityCategoryButton(
         }
 
         g2.font = Theme.FONT_UI.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
-        g2.color = if (isSelected) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+        g2.color = blendUiColor(Theme.TEXT_SECONDARY, Theme.TEXT_PRIMARY, activeProgress.coerceAtLeast(hoverProgress * 0.45f))
         val fm = g2.fontMetrics
         val ty = ((h - fm.height) / 2) + fm.ascent
         g2.drawString(titleText, textX, ty)
@@ -362,6 +422,25 @@ class AntiGravitySettingsScreen(
     private val themeUpdaters = mutableListOf<() -> Unit>()
 
     private lateinit var themeBox: JComboBox<String>
+    private var updatingThemeBox = false
+
+    private val themeListener = { isDark: Boolean ->
+        background = Theme.BG_APP
+        detailContainer.background = Theme.BG_APP
+        themeUpdaters.forEach { it.invoke() }
+        if (::themeBox.isInitialized) {
+            val idx = Theme.currentPreset.ordinal
+            if (themeBox.selectedIndex != idx) {
+                updatingThemeBox = true
+                try {
+                    themeBox.selectedIndex = idx
+                } finally {
+                    updatingThemeBox = false
+                }
+            }
+        }
+        repaint()
+    }
 
     init {
         background = Theme.BG_APP
@@ -373,24 +452,17 @@ class AntiGravitySettingsScreen(
         detailContainer.add(wrapScrollable(buildGeneralPage()), "general")
         detailContainer.add(wrapScrollable(buildAppearancePage()), "appearance")
         detailContainer.add(wrapScrollable(buildReaderPage()), "reader")
-        detailContainer.add(wrapScrollable(buildGraphicsPage()), "graphics")
+        detailContainer.add(wrapScrollable(buildGraphicsPage()), "performance")
         detailContainer.add(wrapScrollable(buildStoragePage()), "storage")
         detailContainer.add(wrapScrollable(buildAboutPage()), "about")
 
         add(detailContainer, BorderLayout.CENTER)
 
-        ctx.addThemeListener {
-            background = Theme.BG_APP
-            detailContainer.background = Theme.BG_APP
-            themeUpdaters.forEach { it.invoke() }
-            if (::themeBox.isInitialized) {
-                val idx = Theme.currentPreset.ordinal
-                if (themeBox.selectedIndex != idx) {
-                    themeBox.selectedIndex = idx
-                }
-            }
-            repaint()
-        }
+        ctx.addThemeListener(themeListener)
+    }
+
+    fun dispose() {
+        ctx.removeThemeListener(themeListener)
     }
 
     private fun buildLeftSidebar(): JPanel {
@@ -430,7 +502,7 @@ class AntiGravitySettingsScreen(
             Triple("general", "Geral", ModernIcons.settings(16) { Theme.TEXT_PRIMARY }),
             Triple("appearance", "Aparência", ModernIcons.sparkles(16) { Theme.TEXT_PRIMARY }),
             Triple("reader", "Leitor", ModernIcons.library(16) { Theme.TEXT_PRIMARY }),
-            Triple("graphics", "Gráficos & Imagem", ModernIcons.statistics(16) { Theme.TEXT_PRIMARY }),
+            Triple("performance", "Desempenho", ModernIcons.statistics(16) { Theme.TEXT_PRIMARY }),
             Triple("storage", "Dados & Backup", ModernIcons.storage(16) { Theme.TEXT_PRIMARY }),
             Triple("about", "Sobre", ModernIcons.about(16) { Theme.TEXT_PRIMARY }),
         )
@@ -677,7 +749,102 @@ class AntiGravitySettingsScreen(
                 rightControl = autoPrefetchPill,
             ),
         )
+        val traySwitch = M3Switch(SystemTrayManager.minimizeToTray) { enabled ->
+            SystemTrayManager.minimizeToTray = enabled
+            ctx.setStatus(if (enabled) "Minimizar para a bandeja ativado" else "Minimizar para a bandeja desativado")
+        }
+        execCard.addRow(
+            createSettingsRow(
+                title = "Minimizar para a Bandeja do Sistema",
+                subtitle = "Mantém o Mihon Linux em segundo plano na barra do sistema ao fechar a janela principal.",
+                rightControl = traySwitch,
+            ),
+        )
+        val notificationsSwitch = M3Switch(SystemTrayManager.desktopNotificationsEnabled) { enabled ->
+            SystemTrayManager.desktopNotificationsEnabled = enabled
+            ctx.setStatus(if (enabled) "Notificações de desktop ativadas" else "Notificações de desktop desativadas")
+        }
+        execCard.addRow(
+            createSettingsRow(
+                title = "Notificações de Desktop",
+                subtitle = "Exibe notificações nativas do sistema (notify-send) para novos capítulos, downloads e erros.",
+                rightControl = notificationsSwitch,
+            ),
+        )
+        val intervalCombo = JComboBox(
+            LibraryUpdateScheduler.INTERVAL_OPTIONS.map { it.second }.toTypedArray(),
+        ).apply {
+            val cur = LibraryUpdateScheduler.intervalHours
+            selectedIndex = LibraryUpdateScheduler.INTERVAL_OPTIONS.indexOfFirst { it.first == cur }.coerceAtLeast(0)
+            preferredSize = Dimension(200, 32)
+            addActionListener {
+                val chosen = LibraryUpdateScheduler.INTERVAL_OPTIONS.getOrNull(selectedIndex)?.first ?: 6
+                LibraryUpdateScheduler.intervalHours = chosen
+                ctx.setStatus("Frequência de atualização: ${LibraryUpdateScheduler.INTERVAL_OPTIONS[selectedIndex].second}")
+            }
+        }
+        execCard.addRow(
+            createSettingsRow(
+                title = "Verificação Periódica de Novos Capítulos",
+                subtitle = "Busca automaticamente novos lançamentos da biblioteca e envia notificações nativas.",
+                rightControl = intervalCombo,
+            ),
+        )
         page.add(execCard)
+        page.add(Box.createVerticalStrut(24))
+
+        addSectionHeader(
+            page,
+            "Sincronização & Rastreamento (AniList / MyAnimeList)",
+            "Sincronize automaticamente seu progresso de capítulos lidos com sua conta online.",
+        )
+        val trackerCard = SettingsGroupCard()
+        val autoSyncSwitch = M3Switch(TrackerService.autoSyncOnRead) { enabled ->
+            TrackerService.autoSyncOnRead = enabled
+            ctx.setStatus(if (enabled) "Sincronização automática de capítulos ativada" else "Sincronização automática pausada")
+        }
+        trackerCard.addRow(
+            createSettingsRow(
+                title = "Sincronizar Progresso ao Terminar Capítulo",
+                subtitle = "Atualiza automaticamente o último capítulo lido no AniList / MyAnimeList ao concluir a leitura.",
+                rightControl = autoSyncSwitch,
+            ),
+        )
+        val btnConfigTokens = ModernButton(
+            text = "Configurar Tokens de API…",
+            variant = ModernButton.Variant.SURFACE,
+        ).apply {
+            addActionListener {
+                val panel = JPanel(java.awt.GridLayout(4, 1, 6, 6))
+                val aniField = javax.swing.JTextField(TrackerService.anilistToken, 28)
+                val malField = javax.swing.JTextField(TrackerService.malToken, 28)
+                panel.add(JLabel("Token de Acesso AniList (Bearer Token OAuth):"))
+                panel.add(aniField)
+                panel.add(JLabel("Token de Acesso MyAnimeList (Bearer Token API v2):"))
+                panel.add(malField)
+                val res = JOptionPane.showConfirmDialog(
+                    this@AntiGravitySettingsScreen,
+                    panel,
+                    "Credenciais de Rastreamento (AniList & MyAnimeList)",
+                    JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.PLAIN_MESSAGE,
+                )
+                if (res == JOptionPane.OK_OPTION) {
+                    TrackerService.anilistToken = aniField.text.trim()
+                    TrackerService.malToken = malField.text.trim()
+                    ctx.setStatus("Tokens de rastreamento salvos com sucesso!")
+                }
+            }
+        }
+        trackerCard.addRow(
+            createSettingsRow(
+                title = "Contas Conectadas (AniList / MyAnimeList)",
+                subtitle = "Configure seus tokens pessoais para sincronização bidirecional na nuvem.",
+                rightControl = btnConfigTokens,
+            ),
+        )
+        
+        page.add(trackerCard)
 
         return page
     }
@@ -699,11 +866,12 @@ class AntiGravitySettingsScreen(
         val themeCard = SettingsGroupCard()
 
         themeBox = JComboBox(Theme.ThemePreset.entries.map { it.displayName }.toTypedArray()).apply {
-            val savedPreset = runCatching { Theme.ThemePreset.valueOf(prefs.get("theme_preset", "AMOLED")) }
-                .getOrDefault(Theme.ThemePreset.AMOLED)
+            val savedPreset = runCatching { Theme.ThemePreset.valueOf(prefs.get("themePreset", Theme.currentPreset.name)) }
+                .getOrDefault(Theme.currentPreset)
             selectedIndex = savedPreset.ordinal
             preferredSize = Dimension(220, 32)
             addActionListener {
+                if (updatingThemeBox) return@addActionListener
                 val selected = Theme.ThemePreset.entries[selectedIndex]
                 if (selected == Theme.ThemePreset.CUSTOM) {
                     onOpenCustomThemeDialog()
@@ -744,6 +912,47 @@ class AntiGravitySettingsScreen(
             ),
         )
         page.add(navCard)
+        page.add(Box.createVerticalStrut(24))
+
+        // Language selector
+        addSectionHeader(
+            page,
+            "Idioma",
+            "Selecione o idioma da interface. Requer reinício do aplicativo para ter efeito.",
+        )
+        val langCard = SettingsGroupCard()
+        val availableLocales = MR.getAvailableLocales()
+        val localeNames = availableLocales.map { locale ->
+            locale to MR.getLocaleDisplayName(locale)
+        }
+        val currentLocaleTag = prefs.get("app_language", "system")
+        val currentLocale = if (currentLocaleTag == "system") {
+            Locale.getDefault()
+        } else {
+            Locale.forLanguageTag(currentLocaleTag.replace('_', '-'))
+        }
+        val currentDisplayName = MR.getLocaleDisplayName(currentLocale)
+        
+        val langCombo = JComboBox(localeNames.map { it.second }.toTypedArray()).apply {
+            selectedItem = currentDisplayName
+            preferredSize = Dimension(220, 32)
+            addActionListener {
+                val selectedName = selectedItem as String
+                val selectedLocale = localeNames.first { it.second == selectedName }.first
+                val localeTag = if (selectedLocale == Locale.getDefault()) "system" else selectedLocale.toLanguageTag()
+                prefs.put("app_language", localeTag)
+                MR.locale = selectedLocale
+                ctx.setStatus("Idioma alterado para ${selectedName}. ${MR["requires_app_restart"]}")
+            }
+        }
+        langCard.addRow(
+            createSettingsRow(
+                title = "Idioma do Aplicativo",
+                subtitle = "Selecione o idioma da interface. Requer reinício para aplicar completamente.",
+                rightControl = langCombo,
+            ),
+        )
+        page.add(langCard)
 
         return page
     }
@@ -840,6 +1049,232 @@ class AntiGravitySettingsScreen(
 
         addSectionHeader(
             page,
+            "Tradutor Simultâneo (Google Lens)",
+            "Configure a detecção automática de texto, idiomas de origem/destino e provedor de tradução sobreposta.",
+        )
+        val translatorCard = SettingsGroupCard()
+        val initialTranslatorCfg = TranslatorPreferences.load()
+
+        val translatorDefaultSwitch = M3Switch(initialTranslatorCfg.enabledByDefault) { enabled ->
+            val updated = TranslatorPreferences.load().copy(enabledByDefault = enabled)
+            TranslatorPreferences.save(updated)
+            ctx.setStatus(
+                if (enabled) "Tradutor simultâneo ativado por padrão" else "Tradutor simultâneo desativado por padrão",
+            )
+        }.apply {
+            name = "translatorEnabledByDefaultSwitch"
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Ativar tradutor por padrão",
+                subtitle = "Inicia automaticamente o modo Google Lens ao abrir capítulos no leitor.",
+                rightControl = translatorDefaultSwitch,
+            ),
+        )
+
+        val sourceLangs = TranslatorLanguage.sourceLanguages().toTypedArray()
+        val sourceLangCombo = object : JComboBox<TranslatorLanguage>(sourceLangs) {
+            override fun setSelectedItem(anObject: Any?) {
+                val resolved = when (anObject) {
+                    is TranslatorLanguage -> anObject
+                    is String -> sourceLangs.firstOrNull {
+                        it.displayName.equals(anObject, ignoreCase = true) ||
+                            it.name.equals(anObject, ignoreCase = true) ||
+                            it.isoCode.equals(anObject, ignoreCase = true)
+                    }
+                    else -> null
+                } ?: anObject
+                super.setSelectedItem(resolved)
+            }
+        }.apply {
+            name = "translatorSourceLangCombo"
+            preferredSize = Dimension(200, 32)
+            renderer = javax.swing.DefaultListCellRenderer().let { base ->
+                javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
+                    val comp = base.getListCellRendererComponent(
+                        list,
+                        value?.displayName ?: "",
+                        index,
+                        isSelected,
+                        cellHasFocus,
+                    )
+                    comp
+                }
+            }
+            selectedItem = initialTranslatorCfg.sourceLanguage
+            addActionListener {
+                val chosen = selectedItem as? TranslatorLanguage ?: return@addActionListener
+                val updated = TranslatorPreferences.load().copy(sourceLanguage = chosen)
+                TranslatorPreferences.save(updated)
+                ctx.setStatus("Idioma de origem do tradutor: ${chosen.displayName}")
+            }
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Idioma de Origem",
+                subtitle = "Idioma do texto original nas páginas do mangá para reconhecimento OCR.",
+                rightControl = sourceLangCombo,
+            ),
+        )
+
+        val targetLangs = TranslatorLanguage.targetLanguages().toTypedArray()
+        val targetLangCombo = object : JComboBox<TranslatorLanguage>(targetLangs) {
+            override fun setSelectedItem(anObject: Any?) {
+                val resolved = when (anObject) {
+                    is TranslatorLanguage -> if (anObject == TranslatorLanguage.AUTO) TranslatorLanguage.PORTUGUESE_BR else anObject
+                    is String -> targetLangs.firstOrNull {
+                        it.displayName.equals(anObject, ignoreCase = true) ||
+                            it.name.equals(anObject, ignoreCase = true) ||
+                            it.isoCode.equals(anObject, ignoreCase = true)
+                    }
+                    else -> null
+                } ?: anObject
+                super.setSelectedItem(resolved)
+            }
+        }.apply {
+            name = "translatorTargetLangCombo"
+            preferredSize = Dimension(200, 32)
+            renderer = javax.swing.DefaultListCellRenderer().let { base ->
+                javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
+                    val comp = base.getListCellRendererComponent(
+                        list,
+                        value?.displayName ?: "",
+                        index,
+                        isSelected,
+                        cellHasFocus,
+                    )
+                    comp
+                }
+            }
+            selectedItem = initialTranslatorCfg.targetLanguage
+            addActionListener {
+                val chosen = selectedItem as? TranslatorLanguage ?: return@addActionListener
+                val updated = TranslatorPreferences.load().copy(targetLanguage = chosen)
+                TranslatorPreferences.save(updated)
+                ctx.setStatus("Idioma de destino do tradutor: ${chosen.displayName}")
+            }
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Idioma de Destino",
+                subtitle = "Idioma para o qual os balões de fala serão traduzidos e sobrepostos.",
+                rightControl = targetLangCombo,
+            ),
+        )
+
+        val providerDescriptors = TranslationProviderRegistry.availableProviders
+        val providerIds = providerDescriptors.map { it.id }.toTypedArray()
+        val providerCombo = object : JComboBox<String>(providerIds) {
+            override fun setSelectedItem(anObject: Any?) {
+                val resolved = when (anObject) {
+                    is mihon.desktop.translator.TranslationProviderDescriptor -> anObject.id
+                    is String -> {
+                        val trimmed = anObject.trim()
+                        providerDescriptors.firstOrNull {
+                            it.id.equals(trimmed, ignoreCase = true) ||
+                                it.displayName.equals(trimmed, ignoreCase = true)
+                        }?.id ?: trimmed
+                    }
+                    else -> anObject
+                }
+                super.setSelectedItem(resolved)
+            }
+        }.apply {
+            name = "translatorProviderCombo"
+            preferredSize = Dimension(220, 32)
+            renderer = javax.swing.DefaultListCellRenderer().let { base ->
+                javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
+                    val label = providerDescriptors.firstOrNull { it.id == value }?.displayName ?: (value ?: "")
+                    base.getListCellRendererComponent(list, label, index, isSelected, cellHasFocus)
+                }
+            }
+            selectedItem = initialTranslatorCfg.providerId
+            addActionListener {
+                val chosenId = (selectedItem as? String)?.trim().orEmpty()
+                if (chosenId.isNotEmpty()) {
+                    val updated = TranslatorPreferences.load().copy(providerId = chosenId)
+                    TranslatorPreferences.save(updated)
+                    val display = providerDescriptors.firstOrNull { it.id == updated.providerId }?.displayName ?: updated.providerId
+                    ctx.setStatus("Provedor de tradução: $display")
+                }
+            }
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Provedor de Tradução",
+                subtitle = "Serviço utilizado para traduzir o texto extraído das páginas.",
+                rightControl = providerCombo,
+            ),
+        )
+
+        val autoDownloadSwitch = M3Switch(initialTranslatorCfg.autoDownloadTessdata) { enabled ->
+            val updated = TranslatorPreferences.load().copy(autoDownloadTessdata = enabled)
+            TranslatorPreferences.save(updated)
+            ctx.setStatus(
+                if (enabled) "Download automático de modelos OCR ativado" else "Download automático de modelos OCR desativado",
+            )
+        }.apply {
+            name = "translatorAutoDownloadSwitch"
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Baixar Modelos OCR Automaticamente",
+                subtitle = "Faz o download sob demanda dos pacotes de idioma Tesseract (tessdata_fast) em ~/.mihon/tessdata.",
+                rightControl = autoDownloadSwitch,
+            ),
+        )
+
+        val libreUrlField = JTextField(initialTranslatorCfg.libreTranslateUrl, 18).apply {
+            name = "libreTranslateUrlField"
+            preferredSize = Dimension(220, 30)
+            fun persistUrl() {
+                val raw = text?.trim().orEmpty()
+                val current = TranslatorPreferences.load()
+                TranslatorPreferences.save(current.copy(libreTranslateUrl = raw))
+            }
+            addActionListener { persistUrl() }
+            document.addDocumentListener(object : DocumentListener {
+                override fun insertUpdate(e: DocumentEvent?) = persistUrl()
+                override fun removeUpdate(e: DocumentEvent?) = persistUrl()
+                override fun changedUpdate(e: DocumentEvent?) = persistUrl()
+            })
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Endpoint LibreTranslate",
+                subtitle = "URL do servidor LibreTranslate (usado quando LibreTranslate está selecionado).",
+                rightControl = libreUrlField,
+            ),
+        )
+
+        val libreKeyField = JTextField(initialTranslatorCfg.libreTranslateApiKey, 16).apply {
+            name = "libreTranslateApiKeyField"
+            preferredSize = Dimension(220, 30)
+            fun persistKey() {
+                val raw = text ?: ""
+                val current = TranslatorPreferences.load()
+                TranslatorPreferences.save(current.copy(libreTranslateApiKey = raw))
+            }
+            addActionListener { persistKey() }
+            document.addDocumentListener(object : DocumentListener {
+                override fun insertUpdate(e: DocumentEvent?) = persistKey()
+                override fun removeUpdate(e: DocumentEvent?) = persistKey()
+                override fun changedUpdate(e: DocumentEvent?) = persistKey()
+            })
+        }
+        translatorCard.addRow(
+            createSettingsRow(
+                title = "Chave de API LibreTranslate",
+                subtitle = "Chave de autenticação opcional para instâncias protegidas do LibreTranslate.",
+                rightControl = libreKeyField,
+            ),
+        )
+
+        page.add(translatorCard)
+        page.add(Box.createVerticalStrut(24))
+
+        addSectionHeader(
+            page,
             "Atalhos de Teclado Personalizáveis",
             "Clique sobre qualquer atalho para definir uma nova tecla de controle do leitor.",
         )
@@ -881,7 +1316,11 @@ class AntiGravitySettingsScreen(
             }
             p.add(center, BorderLayout.CENTER)
 
-            val btnReset = JButton("Restaurar Padrão").apply {
+            val btnReset = ModernButton(
+                text = "Restaurar Padrão",
+                icon = ModernIcons.sync(13) { Theme.TEXT_PRIMARY },
+                variant = ModernButton.Variant.SURFACE,
+            ).apply {
                 isFocusable = false
                 addActionListener {
                     ReaderAction.setKeyCodes(action, action.defaultKeyCodes)
@@ -889,7 +1328,10 @@ class AntiGravitySettingsScreen(
                     dialog.dispose()
                 }
             }
-            val btnCancel = JButton("Cancelar").apply {
+            val btnCancel = ModernButton(
+                text = "Cancelar",
+                variant = ModernButton.Variant.GHOST,
+            ).apply {
                 isFocusable = false
                 addActionListener { dialog.dispose() }
             }
@@ -915,16 +1357,11 @@ class AntiGravitySettingsScreen(
         }
 
         ReaderAction.entries.forEach { action ->
-            val btnKey = JButton(ReaderAction.getDisplayString(action)).apply {
+            val btnKey = ModernButton(
+                text = ReaderAction.getDisplayString(action),
+                variant = ModernButton.Variant.SURFACE,
+            ).apply {
                 font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_CARD
-                isFocusPainted = false
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
-                    BorderFactory.createEmptyBorder(6, 12, 6, 12),
-                )
                 addActionListener {
                     showKeyBindingDialog(action) {
                         text = ReaderAction.getDisplayString(action)
@@ -932,8 +1369,7 @@ class AntiGravitySettingsScreen(
                 }
             }
             themeUpdaters.add {
-                btnKey.foreground = Theme.TEXT_PRIMARY
-                btnKey.background = Theme.BG_CARD
+                btnKey.repaint()
             }
             shortcutsCard.addRow(
                 createSettingsRow(
@@ -949,13 +1385,83 @@ class AntiGravitySettingsScreen(
     }
 
     // =========================================================================
-    // PAGE 4: GRÁFICOS & IMAGEM
+    // PAGE 4: DESEMPENHO & GRÁFICOS
     // =========================================================================
     private fun buildGraphicsPage(): JPanel {
         val page = createPageContainer(
-            "Gráficos & Imagem",
-            "Motor de nitidez de nanquim em tempo real e aprimoramento de arquivos baixados.",
+            "Desempenho",
+            "Ajustes de consumo de memória RAM, renderização e aprimoramento de arquivos.",
         )
+
+        addSectionHeader(
+            page,
+            "Gerenciamento de Memória RAM",
+            "Defina o teto máximo de consumo de memória RAM alocado para o aplicativo e leitor de capítulos.",
+        )
+        val ramCard = SettingsGroupCard()
+
+        val ramLimitOptions = listOf(
+            256 to "256 MB (Ultra Econômico)",
+            384 to "384 MB (Econômico)",
+            500 to "500 MB (Padrão Recomendado)",
+            768 to "768 MB (Alto Desempenho)",
+            1024 to "1024 MB (Sem Restrições)",
+        )
+        val currentLimit = MemoryManager.ramLimitMb
+        val ramLimitBox = JComboBox(ramLimitOptions.map { it.second }.toTypedArray()).apply {
+            val selectedIdx = ramLimitOptions.indexOfFirst { it.first == currentLimit }.let { if (it >= 0) it else 2 } // 2 is 500MB
+            selectedIndex = selectedIdx
+            preferredSize = Dimension(280, 32)
+        }
+
+        val memStatusLbl = JLabel("${MemoryManager.usedMemoryMb} MB / ${MemoryManager.ramLimitMb} MB").apply {
+            font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
+            foreground = Theme.ACCENT
+        }
+
+        ramLimitBox.addActionListener {
+            val chosen = ramLimitOptions[ramLimitBox.selectedIndex].first
+            MemoryManager.ramLimitMb = chosen
+            memStatusLbl.text = "${MemoryManager.usedMemoryMb} MB / ${chosen} MB"
+            ctx.setStatus("Limite de RAM configurado para ${chosen} MB")
+        }
+
+        ramCard.addRow(
+            createSettingsRow(
+                title = "Limite de Consumo de RAM",
+                subtitle = "Define o orçamento máximo de memória RAM. O leitor adapta automaticamente o pré-carregamento e buffers para respeitar este teto.",
+                rightControl = ramLimitBox,
+            ),
+        )
+
+        val btnCleanRam = ModernButton(
+            text = "Otimizar / Liberar RAM",
+            icon = ModernIcons.storage(14) { Color.WHITE },
+            variant = ModernButton.Variant.SURFACE,
+        ).apply {
+            addActionListener {
+                MemoryManager.trimMemoryIfNeeded(force = true)
+                memStatusLbl.text = "${MemoryManager.usedMemoryMb} MB / ${MemoryManager.ramLimitMb} MB"
+                ctx.setStatus("Memória RAM desfragmentada e buffers liberados.")
+            }
+        }
+
+        val monitorControlPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 0)).apply {
+            isOpaque = false
+            add(memStatusLbl)
+            add(btnCleanRam)
+        }
+
+        ramCard.addRow(
+            createSettingsRow(
+                title = "Monitor de Memória Ativa",
+                subtitle = "Exibe o consumo de memória heap atual em relação ao limite estipulado.",
+                rightControl = monitorControlPanel,
+            ),
+        )
+
+        page.add(ramCard)
+        page.add(Box.createVerticalStrut(24))
 
         addSectionHeader(
             page,

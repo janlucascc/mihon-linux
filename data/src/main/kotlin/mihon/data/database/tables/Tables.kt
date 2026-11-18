@@ -4,10 +4,26 @@ import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import org.jetbrains.exposed.dao.id.LongIdTable
 import org.jetbrains.exposed.sql.ReferenceOption
 
+object SourceTable : LongIdTable("source") {
+    val name = text("name")
+    val baseUrl = text("baseUrl")
+    val type = text("type") // "BUILTIN", "JAR", "JSON_SCRAPER"
+    val configJson = text("configJson") // ScraperConfig serializado
+    val version = text("version")
+    val enabled = integer("enabled").default(1)
+    val lastSync = long("lastSync").default(0L)
+    val errorCount = integer("errorCount").default(0)
+    val lastError = text("lastError").nullable()
+
+    init {
+        index(isUnique = true, name)
+    }
+}
+
 object MangaTable : LongIdTable("manga") {
-    // Note: Property named 'sourceId' maps to SQLite column 'source' to avoid
-    // collision with Exposed ColumnSet.source property.
-    val sourceId = long("source").default(0L)
+    // Note: Property named 'sourceId' maps to SQLite column 'source_id'
+    // References SourceTable.id (FK added via migration)
+    val sourceId = long("source_id").default(0L)
     val url = text("url")
     val title = text("title")
     val artist = text("artist").nullable()
@@ -31,7 +47,7 @@ object MangaTable : LongIdTable("manga") {
     val favoriteAt = long("favorite_at").nullable()
 
     init {
-        index(isUnique = false, sourceId, url)
+        index(isUnique = true, sourceId, url)
         index(isUnique = false, favorite)
     }
 }
@@ -52,7 +68,7 @@ object ChapterTable : LongIdTable("chapter") {
 
     init {
         index(isUnique = false, mangaId)
-        index(isUnique = false, mangaId, url)
+        index(isUnique = true, mangaId, url)
     }
 }
 
@@ -64,5 +80,52 @@ object HistoryTable : LongIdTable("history") {
     init {
         index(isUnique = false, chapterId)
         index(isUnique = false, readAt)
+    }
+}
+
+object BookmarkTable : LongIdTable("bookmark") {
+    val chapterId = reference("chapter_id", ChapterTable, onDelete = ReferenceOption.CASCADE)
+    val page = integer("page")
+    val note = text("note").nullable()
+    val createdAt = long("created_at")
+    val type = text("type").default("BOOKMARK") // BOOKMARK, NOTE, HIGHLIGHT
+    val color = text("color").nullable() // hex color for highlights
+
+    init {
+        index(isUnique = false, chapterId)
+    }
+}
+
+object TrackerAuthTable : LongIdTable("tracker_auth") {
+    val trackerType = text("tracker_type")
+    val authJson = text("auth_json")
+
+    init {
+        index(isUnique = true, trackerType)
+    }
+}
+
+object TrackerProgressTable : LongIdTable("tracker_progress") {
+    val mangaId = long("manga_id")
+    val trackerType = text("tracker_type")
+    val progressJson = text("progress_json")
+
+    init {
+        index(isUnique = true, mangaId, trackerType)
+        index(isUnique = false, trackerType)
+    }
+}
+
+object TrackerSyncLogTable : LongIdTable("tracker_sync_log") {
+    val timestamp = long("timestamp")
+    val trackerType = text("tracker_type")
+    val action = text("action")
+    val mangaId = long("manga_id").default(-1L)
+    val remoteId = long("remote_id").default(-1L)
+    val logJson = text("log_json")
+
+    init {
+        index(isUnique = false, timestamp)
+        index(isUnique = false, trackerType)
     }
 }

@@ -1,6 +1,11 @@
 package mihon.desktop
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.awt.Color
+import java.awt.Font
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 import kotlin.test.assertTrue
@@ -8,9 +13,20 @@ import kotlin.test.assertTrue
 class UpscaleQualityTest {
 
     @Test
-    fun testUpscaleQualityComparison() {
-        val scratchDir = File("/home/janlucas/.gemini/antigravity/brain/a3f9d193-8e0e-4aa3-aca8-99a494f20ac1/scratch/test_upscale")
+    fun testUpscaleQualityComparison(@TempDir scratchDir: File) {
         val sampleFile = File(scratchDir, "sample_orig.jpg")
+        val sampleImg = BufferedImage(480, 640, BufferedImage.TYPE_INT_RGB).apply {
+            val g = createGraphics()
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g.color = Color.WHITE
+            g.fillRect(0, 0, width, height)
+            g.color = Color(24, 24, 30)
+            g.drawOval(60, 80, 320, 180)
+            g.font = Font("SansSerif", Font.BOLD, 28)
+            g.drawString("SAMPLE MANGA LINE ART", 80, 180)
+            g.dispose()
+        }
+        ImageIO.write(sampleImg, "jpg", sampleFile)
         assertTrue(sampleFile.exists(), "Sample file should exist")
 
         val rawBytes = sampleFile.readBytes()

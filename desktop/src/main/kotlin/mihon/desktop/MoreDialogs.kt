@@ -3,10 +3,12 @@ package mihon.desktop
 import mihon.data.database.DatabaseManager
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Dialog
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.GridLayout
+import java.awt.Window
 import java.io.File
 import javax.swing.BorderFactory
 import javax.swing.Box
@@ -39,8 +41,7 @@ class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog
                 isOpaque = false
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 border = BorderFactory.createEmptyBorder(40, 20, 40, 20)
-                add(JLabel("📥", SwingConstants.CENTER).apply {
-                    font = font.deriveFont(38f)
+                add(JLabel(ModernIcons.downloads(42) { Theme.TEXT_MUTED }).apply {
                     alignmentX = 0.5f
                 })
                 add(Box.createVerticalStrut(12))
@@ -372,24 +373,31 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
             alignmentX = 0f
         }
 
-        fun statCard(icon: String, title: String, value: String): JPanel {
-            return JPanel().apply {
-                background = Theme.BG_CARD
+        fun statCard(icon: javax.swing.Icon, title: String, value: String): JPanel {
+            return object : JPanel() {
+                override fun paintComponent(g: java.awt.Graphics) {
+                    val g2 = g.create() as java.awt.Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = Theme.BG_CARD
+                    g2.fillRoundRect(0, 0, width - 1, height - 1, 12, 12)
+                    g2.color = Theme.BORDER_SUBTLE
+                    g2.drawRoundRect(0, 0, width - 1, height - 1, 12, 12)
+                    g2.dispose()
+                }
+            }.apply {
+                isOpaque = false
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                    BorderFactory.createEmptyBorder(10, 14, 10, 14),
-                )
-                val top = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                border = BorderFactory.createEmptyBorder(12, 14, 12, 14)
+                val top = JPanel(FlowLayout(FlowLayout.LEFT, 7, 0)).apply {
                     isOpaque = false
-                    add(JLabel(icon).apply { font = font.deriveFont(16f) })
+                    add(JLabel(icon))
                     add(JLabel(title).apply {
                         font = font.deriveFont(11.5f)
                         foreground = Theme.TEXT_MUTED
                     })
                 }
                 val valLabel = JLabel(value).apply {
-                    font = font.deriveFont(Font.BOLD, 17f)
+                    font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 18f)
                     foreground = Theme.TEXT_PRIMARY
                     border = BorderFactory.createEmptyBorder(6, 4, 0, 0)
                 }
@@ -429,12 +437,12 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                 grid.removeAll()
                 val timeStr = formatReadingDuration(stats.totalReadingTimeMs)
 
-                grid.add(statCard("📚", "Mangás na Biblioteca", "${stats.totalManga}"))
-                grid.add(statCard("📖", "Capítulos Lidos", "${stats.totalChaptersRead}"))
-                grid.add(statCard("📥", "Capítulos Baixados", "${stats.totalChaptersDownloaded}"))
-                grid.add(statCard("⏱️", "Tempo Estimado", timeStr))
-                grid.add(statCard("🔌", "Fontes Instaladas", "${ctx.extensions.size}"))
-                grid.add(statCard("💾", "Cache de Capas", "${cacheMb} MB"))
+                grid.add(statCard(ModernIcons.library(16) { Theme.ACCENT }, "Mangás na Biblioteca", "${stats.totalManga}"))
+                grid.add(statCard(ModernIcons.bookOpen(16) { Theme.ACCENT_HOVER }, "Capítulos Lidos", "${stats.totalChaptersRead}"))
+                grid.add(statCard(ModernIcons.downloads(16) { Theme.SUCCESS }, "Capítulos Baixados", "${stats.totalChaptersDownloaded}"))
+                grid.add(statCard(ModernIcons.history(16) { Theme.TEXT_PRIMARY }, "Tempo Estimado", timeStr))
+                grid.add(statCard(ModernIcons.plug(16) { Theme.ACCENT }, "Fontes Instaladas", "${ctx.extensions.size}"))
+                grid.add(statCard(ModernIcons.storage(16) { Theme.TEXT_SECONDARY }, "Cache de Capas", "${cacheMb} MB"))
 
                 wrappedContainer.removeAll()
 
@@ -443,10 +451,18 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                     isOpaque = false
                     maximumSize = Dimension(Int.MAX_VALUE, 30)
                     alignmentX = 0f
-                    add(JLabel("⭐ SEU RECAP (Mihon Wrapped)").apply {
-                        font = font.deriveFont(Font.BOLD, 14f)
-                        foreground = Theme.ACCENT
-                    }, BorderLayout.WEST)
+                    add(
+                        JLabel(
+                            "SEU RECAP (Mihon Wrapped)",
+                            ModernIcons.sparkles(16) { Theme.ACCENT },
+                            SwingConstants.LEFT,
+                        ).apply {
+                            iconTextGap = 7
+                            font = font.deriveFont(Font.BOLD, 14f)
+                            foreground = Theme.ACCENT
+                        },
+                        BorderLayout.WEST,
+                    )
                 }
                 wrappedContainer.add(wrappedHeader)
                 wrappedContainer.add(Box.createVerticalStrut(12))
@@ -854,5 +870,594 @@ class StorageManagerDialog(
         }
         content.add(bottomBar, BorderLayout.SOUTH)
         add(content)
+    }
+}
+
+/**
+ * Material 3 Dialog: Add/Edit Note
+ */
+class NoteDialog(
+    owner: Window?,
+    private val title: String,
+    private val currentNote: String? = null,
+    private val onSave: (String) -> Unit,
+) : JDialog(owner, title, Dialog.ModalityType.APPLICATION_MODAL) {
+
+    init {
+        setSize(500, 380)
+        setLocationRelativeTo(owner)
+        val content = JPanel(BorderLayout()).apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+        }
+
+        val topBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 10, 0)
+            add(JLabel(title).apply {
+                font = font.deriveFont(Font.BOLD, 18f)
+                foreground = Theme.TEXT_PRIMARY
+            }, BorderLayout.WEST)
+        }
+        content.add(topBar, BorderLayout.NORTH)
+
+        val textArea = javax.swing.JTextArea(currentNote ?: "").apply {
+            font = Theme.FONT_UI
+            foreground = Theme.TEXT_PRIMARY
+            background = Theme.BG_CARD
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(10, 10, 10, 10),
+            )
+            lineWrap = true
+            wrapStyleWord = true
+            rows = 12
+            columns = 50
+            caretColor = Theme.ACCENT
+        }
+        val scroll = JScrollPane(textArea).apply {
+            border = null
+            verticalScrollBar.unitIncrement = 16
+        }
+        content.add(scroll, BorderLayout.CENTER)
+
+        val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            isOpaque = false
+            add(JButton("Cancelar").apply {
+                isFocusable = false
+                addActionListener { dispose() }
+            })
+            add(JButton("Salvar").apply {
+                isFocusable = false
+                addActionListener {
+                    val note = textArea.text.trim()
+                    if (note.isNotEmpty()) {
+                        onSave(note)
+                        dispose()
+                    } else {
+                        JOptionPane.showMessageDialog(this@NoteDialog, "A nota não pode estar vazia.", "Erro", JOptionPane.ERROR_MESSAGE)
+                    }
+                }
+            })
+        }
+        content.add(bottomBar, BorderLayout.SOUTH)
+        add(content)
+    }
+}
+
+/**
+ * Material 3 Dialog: Color Picker for Highlights
+ */
+class HighlightColorDialog(
+    owner: Window?,
+    private val onColorSelected: (String) -> Unit,
+) : JDialog(owner, "Cor do Destaque", Dialog.ModalityType.APPLICATION_MODAL) {
+
+    private val presetColors = listOf(
+        "#FFFF00" to "Amarelo",
+        "#FFD700" to "Dourado",
+        "#FFA500" to "Laranja",
+        "#FF6B6B" to "Vermelho Claro",
+        "#4ECDC4" to "Turquesa",
+        "#45B7D1" to "Azul Claro",
+        "#96CEB4" to "Verde Claro",
+        "#FFEAA7" to "Creme",
+        "#DDA0DD" to "Lilás",
+        "#98D8C8" to "Menta",
+    )
+
+    init {
+        setSize(420, 300)
+        setLocationRelativeTo(owner)
+        val content = JPanel(BorderLayout()).apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+        }
+
+        val topBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 12, 0)
+            add(JLabel("Escolha a cor do destaque").apply {
+                font = font.deriveFont(Font.BOLD, 16f)
+                foreground = Theme.TEXT_PRIMARY
+            }, BorderLayout.WEST)
+        }
+        content.add(topBar, BorderLayout.NORTH)
+
+        val grid = JPanel(GridLayout(2, 5, 10, 10)).apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createEmptyBorder(10, 0, 0, 0)
+        }
+
+        presetColors.forEach { (hex, name) ->
+            val btn = object : JPanel(BorderLayout()) {
+                init {
+                    isOpaque = false
+                    background = Color.decode(hex)
+                    preferredSize = Dimension(56, 56)
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 2),
+                        BorderFactory.createEmptyBorder(2, 2, 2, 2),
+                    )
+                    cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                    addMouseListener(object : java.awt.event.MouseAdapter() {
+                        override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                            onColorSelected(hex)
+                            dispose()
+                        }
+                        override fun mouseEntered(e: java.awt.event.MouseEvent) {
+                            border = BorderFactory.createLineBorder(Theme.ACCENT, 3)
+                        }
+                        override fun mouseExited(e: java.awt.event.MouseEvent) {
+                            border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 2)
+                        }
+                    })
+                }
+            }
+            val label = JLabel(name, SwingConstants.CENTER).apply {
+                font = font.deriveFont(11f)
+                foreground = if (Color.decode(hex).getRed() + Color.decode(hex).getGreen() + Color.decode(hex).getBlue() > 384) Color.BLACK else Color.WHITE
+                border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+            }
+            btn.add(label, BorderLayout.SOUTH)
+            grid.add(btn)
+        }
+
+        content.add(grid, BorderLayout.CENTER)
+
+        val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
+            isOpaque = false
+            add(JButton("Cancelar").apply {
+                isFocusable = false
+                addActionListener { dispose() }
+            })
+        }
+        content.add(bottomBar, BorderLayout.SOUTH)
+        add(content)
+    }
+}
+
+/**
+ * Material 3 Dialog: Bookmarks List for a Chapter
+ */
+class BookmarksListDialog(
+    owner: Window?,
+    private val ctx: AppContext,
+    private val chapterId: Long,
+    private val chapterName: String,
+    private val pageCount: Int,
+    private val onNavigateToPage: (Int) -> Unit,
+) : JDialog(owner, "Bookmarks do Capítulo: $chapterName", Dialog.ModalityType.APPLICATION_MODAL) {
+
+    private val bookmarksPanel = JPanel().apply {
+        background = Theme.BG_SURFACE
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+    }
+
+    init {
+        setSize(480, 520)
+        setLocationRelativeTo(owner)
+        val content = JPanel(BorderLayout()).apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+        }
+
+        val topBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 12, 0)
+            add(JLabel("Bookmarks & Anotações").apply {
+                font = font.deriveFont(Font.BOLD, 18f)
+                foreground = Theme.TEXT_PRIMARY
+            }, BorderLayout.WEST)
+        }
+        content.add(topBar, BorderLayout.NORTH)
+
+        content.add(JScrollPane(bookmarksPanel).apply {
+            border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
+            verticalScrollBar.unitIncrement = 16
+        }, BorderLayout.CENTER)
+
+        val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            isOpaque = false
+            add(JButton("Fechar").apply {
+                isFocusable = false
+                addActionListener { dispose() }
+            })
+        }
+        content.add(bottomBar, BorderLayout.SOUTH)
+        add(content)
+
+        refreshBookmarks()
+    }
+
+    private fun refreshBookmarks() {
+        background({ ctx.service.getBookmarksByChapterId(chapterId) }) { res ->
+            res.onSuccess { bookmarks ->
+                SwingUtilities.invokeLater {
+                    bookmarksPanel.removeAll()
+                    if (bookmarks.isEmpty()) {
+                        val emptyPanel = JPanel().apply {
+                            isOpaque = false
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            border = BorderFactory.createEmptyBorder(40, 20, 40, 20)
+                            add(JLabel(ModernIcons.bookmark(42) { Theme.TEXT_MUTED }).apply {
+                                alignmentX = 0.5f
+                            })
+                            add(Box.createVerticalStrut(12))
+                            add(JLabel("Nenhum bookmark ou anotação", SwingConstants.CENTER).apply {
+                                font = font.deriveFont(Font.BOLD, 14f)
+                                foreground = Theme.TEXT_PRIMARY
+                                alignmentX = 0.5f
+                            })
+                            add(Box.createVerticalStrut(6))
+                            add(JLabel("Pressione B para bookmark, N para nota", SwingConstants.CENTER).apply {
+                                font = font.deriveFont(12f)
+                                foreground = Theme.TEXT_MUTED
+                                alignmentX = 0.5f
+                            })
+                        }
+                        bookmarksPanel.add(emptyPanel)
+                    } else {
+                        bookmarks.forEach { bm ->
+                            val row = createBookmarkRow(bm)
+                            bookmarksPanel.add(row)
+                            bookmarksPanel.add(Box.createVerticalStrut(6))
+                        }
+                    }
+                    bookmarksPanel.revalidate()
+                    bookmarksPanel.repaint()
+                }
+            }
+        }
+    }
+
+    private fun createBookmarkRow(bm: tachiyomi.domain.bookmark.model.Bookmark): JPanel {
+        val isNote = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.NOTE
+        val isHighlight = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.HIGHLIGHT
+        val isBookmark = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.BOOKMARK
+
+        val typeIcon = when {
+            isNote -> "📝"
+            isHighlight -> "🖍️"
+            else -> "🔖"
+        }
+        val typeLabel = when {
+            isNote -> "Nota"
+            isHighlight -> "Destaque"
+            else -> "Bookmark"
+        }
+
+        val row = JPanel(BorderLayout(12, 0)).apply {
+            background = Theme.BG_CARD
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(12, 14, 12, 14),
+            )
+            maximumSize = Dimension(Int.MAX_VALUE, 90)
+        }
+
+        val left = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(JLabel("$typeIcon $typeLabel • Página ${bm.page + 1}/$pageCount").apply {
+                font = font.deriveFont(Font.BOLD, 12.5f)
+                foreground = Theme.TEXT_PRIMARY
+            })
+            bm.note?.let { note ->
+                add(Box.createVerticalStrut(4))
+                val preview = if (note.length > 80) note.substring(0, 80) + "…" else note
+                add(JLabel(preview).apply {
+                    font = font.deriveFont(Font.PLAIN, 11.5f)
+                    foreground = Theme.TEXT_MUTED
+                })
+            }
+            if (isHighlight) {
+                bm.color?.let { color ->
+                    add(Box.createVerticalStrut(4))
+                    val colorPanel = JPanel().apply {
+                        isOpaque = true
+                        background = Color.decode(color)
+                        preferredSize = Dimension(120, 18)
+                        border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
+                    }
+                    add(colorPanel)
+                }
+            }
+        }
+
+        val right = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        }
+
+        val goToBtn = JButton("Ir para a página").apply {
+            isFocusable = false
+            addActionListener {
+                onNavigateToPage(bm.page)
+                dispose()
+            }
+        }
+        right.add(goToBtn)
+        right.add(Box.createVerticalStrut(6))
+
+        if (isNote) {
+            val editBtn = JButton("Editar nota").apply {
+                isFocusable = false
+                addActionListener {
+                    NoteDialog(owner, "Editar Nota", bm.note) { newNote ->
+                        background({
+                            ctx.service.addNote(bm.chapterId, bm.page, newNote)
+                        }) { _ ->
+                            refreshBookmarks()
+                        }
+                    }.isVisible = true
+                }
+            }
+            right.add(editBtn)
+            right.add(Box.createVerticalStrut(6))
+        }
+
+        val deleteBtn = JButton("Excluir").apply {
+            isFocusable = false
+            foreground = Theme.DANGER
+            addActionListener {
+                val confirm = JOptionPane.showConfirmDialog(
+                    this@BookmarksListDialog,
+                    "Excluir este $typeLabel?",
+                    "Confirmar Exclusão",
+                    JOptionPane.YES_NO_OPTION,
+                )
+                if (confirm == JOptionPane.YES_OPTION) {
+                    background({
+                        ctx.service.deleteBookmark(bm.id)
+                    }) { _ ->
+                        refreshBookmarks()
+                    }
+                }
+            }
+        }
+        right.add(deleteBtn)
+
+        row.add(left, BorderLayout.CENTER)
+        row.add(right, BorderLayout.EAST)
+        return row
+    }
+}
+
+/**
+ * Material 3 Dialog: All Bookmarks Across Library
+ */
+class AllBookmarksDialog(
+    owner: Window?,
+    private val ctx: AppContext,
+) : JDialog(owner, "Todos os Bookmarks", Dialog.ModalityType.APPLICATION_MODAL) {
+
+    private val bookmarksPanel = JPanel().apply {
+        background = Theme.BG_SURFACE
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+    }
+
+    init {
+        setSize(600, 600)
+        setLocationRelativeTo(owner)
+        val content = JPanel(BorderLayout()).apply {
+            background = Theme.BG_SURFACE
+            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+        }
+
+        val topBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, 0, 12, 0)
+            add(JLabel("Todos os Bookmarks & Anotações").apply {
+                font = font.deriveFont(Font.BOLD, 18f)
+                foreground = Theme.TEXT_PRIMARY
+            }, BorderLayout.WEST)
+        }
+        content.add(topBar, BorderLayout.NORTH)
+
+        content.add(JScrollPane(bookmarksPanel).apply {
+            border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
+            verticalScrollBar.unitIncrement = 16
+        }, BorderLayout.CENTER)
+
+        val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            isOpaque = false
+            add(JButton("Fechar").apply {
+                isFocusable = false
+                addActionListener { dispose() }
+            })
+        }
+        content.add(bottomBar, BorderLayout.SOUTH)
+        add(content)
+
+        refreshBookmarks()
+    }
+
+    private fun refreshBookmarks() {
+        background({ ctx.service.getAllBookmarks() }) { res ->
+            res.onSuccess { bookmarks ->
+                SwingUtilities.invokeLater {
+                    bookmarksPanel.removeAll()
+                    if (bookmarks.isEmpty()) {
+                        val emptyPanel = JPanel().apply {
+                            isOpaque = false
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            border = BorderFactory.createEmptyBorder(40, 20, 40, 20)
+                            add(JLabel(ModernIcons.bookmark(42) { Theme.TEXT_MUTED }).apply {
+                                alignmentX = 0.5f
+                            })
+                            add(Box.createVerticalStrut(12))
+                            add(JLabel("Nenhum bookmark ou anotação", SwingConstants.CENTER).apply {
+                                font = font.deriveFont(Font.BOLD, 14f)
+                                foreground = Theme.TEXT_PRIMARY
+                                alignmentX = 0.5f
+                            })
+                            add(Box.createVerticalStrut(6))
+                            add(JLabel("Pressione B para bookmark, N para nota no leitor", SwingConstants.CENTER).apply {
+                                font = font.deriveFont(12f)
+                                foreground = Theme.TEXT_MUTED
+                                alignmentX = 0.5f
+                            })
+                        }
+                        bookmarksPanel.add(emptyPanel)
+                    } else {
+                        // Group by chapter
+                        val byChapter = bookmarks.groupBy { it.chapterId }
+                        byChapter.forEach { (chapterId, bms) ->
+                            background({ ctx.service.chapters.getChapterById(chapterId) }) { chRes ->
+                                chRes.onSuccess { chapter ->
+                                    if (chapter != null) {
+                                        background({ ctx.service.mangas.getMangaById(chapter.mangaId) }) { mRes ->
+                                            mRes.onSuccess { manga ->
+                                                SwingUtilities.invokeLater {
+                                                    addChapterSection(manga!!.title, chapter.name, bms)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    bookmarksPanel.revalidate()
+                    bookmarksPanel.repaint()
+                }
+            }
+        }
+    }
+
+    private fun addChapterSection(mangaTitle: String, chapterName: String, bookmarks: List<tachiyomi.domain.bookmark.model.Bookmark>) {
+        val sectionHeader = JLabel(
+            "$mangaTitle — $chapterName",
+            ModernIcons.bookOpen(15) { Theme.ACCENT },
+            SwingConstants.LEFT,
+        ).apply {
+            iconTextGap = 7
+            font = font.deriveFont(Font.BOLD, 13f)
+            foreground = Theme.ACCENT
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(8, 4, 8, 4),
+            )
+        }
+        bookmarksPanel.add(sectionHeader)
+
+        bookmarks.forEach { bm ->
+            val row = createBookmarkRow(bm, mangaTitle, chapterName)
+            bookmarksPanel.add(row)
+            bookmarksPanel.add(Box.createVerticalStrut(4))
+        }
+        bookmarksPanel.add(Box.createVerticalStrut(8))
+    }
+
+    private fun createBookmarkRow(
+        bm: tachiyomi.domain.bookmark.model.Bookmark,
+        mangaTitle: String,
+        chapterName: String,
+    ): JPanel {
+        val isNote = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.NOTE
+        val isHighlight = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.HIGHLIGHT
+        val isBookmark = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.BOOKMARK
+
+        val typeIcon = when {
+            isNote -> "📝"
+            isHighlight -> "🖍️"
+            else -> "🔖"
+        }
+        val typeLabel = when {
+            isNote -> "Nota"
+            isHighlight -> "Destaque"
+            else -> "Bookmark"
+        }
+
+        val row = JPanel(BorderLayout(12, 0)).apply {
+            background = Theme.BG_CARD
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(10, 14, 10, 14),
+            )
+            maximumSize = Dimension(Int.MAX_VALUE, 80)
+        }
+
+        val left = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(JLabel("$typeIcon $typeLabel • Página ${bm.page + 1}").apply {
+                font = font.deriveFont(Font.BOLD, 12f)
+                foreground = Theme.TEXT_PRIMARY
+            })
+            bm.note?.let { note ->
+                add(Box.createVerticalStrut(4))
+                val preview = if (note.length > 80) note.substring(0, 80) + "…" else note
+                add(JLabel(preview).apply {
+                    font = font.deriveFont(Font.PLAIN, 11f)
+                    foreground = Theme.TEXT_MUTED
+                })
+            }
+            if (isHighlight) {
+                bm.color?.let { color ->
+                    add(Box.createVerticalStrut(4))
+                    val colorPanel = JPanel().apply {
+                        isOpaque = true
+                        background = Color.decode(color)
+                        preferredSize = Dimension(120, 18)
+                        border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
+                    }
+                    add(colorPanel)
+                }
+            }
+        }
+
+        val right = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        }
+
+        val deleteBtn = JButton("Excluir").apply {
+            isFocusable = false
+            foreground = Theme.DANGER
+            addActionListener {
+                val confirm = JOptionPane.showConfirmDialog(
+                    this@AllBookmarksDialog,
+                    "Excluir este $typeLabel de '$chapterName'?",
+                    "Confirmar Exclusão",
+                    JOptionPane.YES_NO_OPTION,
+                )
+                if (confirm == JOptionPane.YES_OPTION) {
+                    background({
+                        ctx.service.deleteBookmark(bm.id)
+                    }) { _ ->
+                        refreshBookmarks()
+                    }
+                }
+            }
+        }
+        right.add(deleteBtn)
+
+        row.add(left, BorderLayout.CENTER)
+        row.add(right, BorderLayout.EAST)
+        return row
     }
 }

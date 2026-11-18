@@ -123,7 +123,7 @@ class M1LegacyMigrationAdversarialTest {
                     while (rs.next()) {
                         columns.add(rs.getString("name"))
                     }
-                    assertTrue(columns.contains("source"), "Modern manga table must have 'source'")
+                    assertTrue(columns.contains("source_id"), "Modern manga table must have 'source_id'")
                     assertTrue(columns.contains("genre"), "Modern manga table must have 'genre'")
                     assertTrue(columns.contains("update_strategy"), "Modern manga table must have 'update_strategy'")
                     assertTrue(columns.contains("thumbnail_url"), "Modern manga table must have 'thumbnail_url'")

@@ -53,3 +53,81 @@ Arquivo cumulativo atualizado automaticamente via comando /analisar
    Descrição: Capítulos online subsequentes eram baixados silenciosamente sem controle do usuário.
    Correção: O download automático antecipado agora respeita a preferência `autoPrefetch`, com controle de ativação/desativação adicionado à tela de Configurações, poupando dados e disco por padrão.
 --------------------------------------------------------------------------------
+
+[ANALISE #3] - 09/11/2026 10:25
+--------------------------------------------------------------------------------
+10. [BUG-010] [DESINCRONIZAÇÃO DE IDENTIFICADORES DE EXTENSÃO NA REATIVAÇÃO] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/SearchScreens.kt (linha 818) e data/src/main/kotlin/mihon/data/extension/ExtensionLoader.kt
+    Descrição: Ao reativar uma extensão JSON anteriormente desativada (`enableExtension`), o objeto `ext` original mantinha um ID gerado temporariamente pela leitura do arquivo `.disabled`.
+    Correção: A função `enableExtension` agora relê e desserializa o JSON renomeado antes de passá-lo ao `ctx.registerExtension`, garantindo identificador idêntico ao carregamento frio.
+
+11. [BUG-011] [POSSÍVEL BLOQUEIO DE ESCRITA CONCORRENTE EM PREFERÊNCIAS DE ATALHOS] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/ReaderShortcuts.kt
+    Descrição: As operações de leitura no nó de preferências `Preferences.userRoot().node("mihon-linux-shortcuts")` eram chamadas a cada evento `keyPressed` de cada tecla sem memoização.
+    Correção: Implementado cache em memória via `ConcurrentHashMap`, eliminando I/O síncrono a cada tecla pressionada.
+
+12. [BUG-012] [AMBIGUIDADE DE SELEÇÃO AO ATIVAR/DESATIVAR EXTENSÕES COM NOMES PARCIAIS COINCIDENTES] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/SearchScreens.kt
+    Descrição: A busca pelo arquivo JSON alvo utilizava verificação parcial imprecisa de string.
+    Correção: Criada a rotina `findMatchingSourceFile` que valida correspondência exata de nome e `baseUrl` lendo as propriedades do JSON ou nome do arquivo normalizado.
+
+13. [BUG-013] [AVISO DE CONSTRUTOR DEPRECIADO DE LOCALE] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/LibraryService.kt (linha 706)
+    Descrição: Chamada a `Locale("pt", "BR")` emitia warning de compilação em Java 19+.
+    Correção: Atualizado para o padrão moderno `Locale.Builder().setLanguage("pt").setRegion("BR").build()`, eliminando o warning.
+--------------------------------------------------------------------------------
+
+[ANALISE #4 - PERFORMANCE] - 09/11/2026 10:35
+--------------------------------------------------------------------------------
+14. [PERF-001] [ALOCAÇÃO EXCESSIVA EM CICLO DE PINTURA E RENDERIZAÇÃO DE CARDS] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/MangaPosterCard.kt
+    Descrição: O método `paintComponent` dos cartões da grade recalculava a quebra de texto e largura das strings em todas as repinturas.
+    Correção: Implementado cache de texto formatado (`cachedWrapKey` / `cachedSubtitleKey`), evitando recalcular `FontMetrics` e strings quando o conteúdo e largura permanecem inalterados.
+
+15. [PERF-002] [PRESSÃO DE MEMÓRIA E GC NA ROLAGEM CONTÍNUA DE WEBTOON E LEITOR] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/ReaderWindow.kt, MemoryManager.kt e SettingsScreen.kt
+    Descrição: No modo de leitura contínua Webtoon e paged, imagens verticais de alta resolução eram decodificadas e mantidas simultaneamente em cache original e cache escalonado (janela de até 21 páginas e teto de 48 imagens), gerando picos de 800MB a 1.2GB.
+    Correção: Implementado o `MemoryManager` com limite padrão estrito de 500 MB (personalizável no menu Desempenho entre 256MB e 1024MB), eliminação do cache duplo no Webtoon, redução da janela ativa para 5 páginas com liberação imediata via `.flush()`, subsampling nativo via `ImageReadParam` para imagens ultra-largas e afinação dos parâmetros da JVM no Gradle (-XX:G1PeriodicGCInterval=3000 e -Xmx768m).
+
+16. [PERF-003] [GARGALO DE SINCRONIZAÇÃO GLOBAL DO ImageIO NO CARREGAMENTO DE CAPAS] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/AppContext.kt (CoverCache)
+    Descrição: O carregamento de capas em disco utilizava `ImageIO.read(file)`, que possui lock global na JVM em suas fábricas SPI.
+    Correção: Implementado `readCachedImageFile` criando `ImageInputStream` e instanciando o `ImageReader` diretamente, contornando o monitor global do `ImageIO.read`.
+
+17. [PERF-004] [I/O DE DISCO SÍNCRONO E DESERIALIZAÇÃO JSON NA THREAD DE INTERFACE (EDT)] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/SearchScreens.kt (função refreshModel)
+    Descrição: O carregamento das extensões desativadas realizava a leitura de múltiplos arquivos `.json.disabled` do disco diretamente na thread EDT.
+    Correção: A leitura das extensões desativadas foi transferida para `background` (corrotinas em `Dispatchers.IO`), atualizando o Swing EDT apenas na conclusão.
+
+18. [PERF-005] [ALOCAÇÕES DE SHAPES E FLOATS A 60 FPS EM ANIMAÇÕES DO MENU GOOEY] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/GooeyContextMenu.kt
+    Descrição: Durante a interpolação do menu radial (60 FPS), instâncias de `Ellipse2D.Double` eram criadas a cada frame.
+    Correção: Reutilizada instância de `reusableEllipse` com `setFrame()`, eliminando alocações efêmeras de geometrias a cada frame.
+--------------------------------------------------------------------------------
+
+[ANALISE #5] - 10/11/2026 00:40
+--------------------------------------------------------------------------------
+19. [BUG-014] [CASCADING DELETE EM MIGRAÇÃO LEGADA SQLite] [CORRIGIDO]
+    Arquivo: data/src/main/kotlin/mihon/data/database/DatabaseManager.kt
+    Descrição: A migração de schema legado executava `DROP TABLE manga`, o que acionava `ON DELETE CASCADE` do SQLite e deletava silenciosamente os capítulos vinculados.
+    Correção: Substituído por `ALTER TABLE manga RENAME COLUMN source TO source_id`, operação atômica nativa do SQLite 3.25+ sem deleção de tabelas e sem perda de dados.
+
+20. [BUG-015] [TYPING E ESCOPO 'THIS' EM LISTENERS DO LEITOR E DIÁLOGOS] [CORRIGIDO]
+    Arquivo: desktop/src/main/kotlin/mihon/desktop/ReaderWindow.kt e MoreDialogs.kt
+    Descrição: Diálogos (`NoteDialog`, `HighlightColorDialog`) esperavam `JFrame` estrito ao invés de `Window?`, e atalhos de teclado no `ReaderWindow` passavam `this` (instância de `KeyAdapter`) em vez de `this@ReaderWindow`.
+    Correção: Diálogos atualizados para receber `java.awt.Window?` com modalidade padrão `APPLICATION_MODAL`, e corrigido o escopo para `this@ReaderWindow`.
+
+21. [BUG-016] [SERIALIZATION COMPILER PLUGIN AUSENTE NO MÓDULO DESKTOP] [CORRIGIDO]
+    Arquivo: desktop/build.gradle.kts
+    Descrição: A anotação `@Serializable` na classe `TrackRecord` do `TrackerService` gerava `SerializationException` em tempo de execução pela falta do plugin do compilador Kotlin.
+    Correção: Adicionado `kotlin("plugin.serialization")` no bloco `plugins` de `desktop/build.gradle.kts`.
+
+22. [BUG-017] [CRASH NA INICIALIZAÇÃO AO CARREGAR FONTE LEGADA COM CONFIGURAÇÃO VAZIA] [CORRIGIDO]
+    Arquivo: data/src/main/kotlin/mihon/data/extension/ExtensionLoader.kt e DatabaseManager.kt
+    Descrição: O registro inicial `Unknown (Legacy)` (id=0) gravado na tabela `source` com `configJson = "{}"` causava `MissingFieldException` do Kotlinx Serialization ao inicializar o `ExtensionLoader` no startup do app, impedindo a exibição da janela principal.
+    Correção:
+    - O registro id=0 foi configurado como inativo (`enabled = 0`).
+    - `ExtensionLoader.loadExtensions()` e `loadDisabledExtensions()` agora filtram o registro de placeholder legado e utilizam `mapNotNull` com `runCatching` protetor.
+    - `disableMissingFiles()` aprimorado para casar arquivos JSON por nome de arquivo normalizado e baseUrl, prevenindo desativação incorreta de fontes instaladas.
+    - Script de inicialização `~/.local/bin/mihon-linux` atualizado com detecção resiliente de JDK 21 e auto-rebuild.
+--------------------------------------------------------------------------------

@@ -1,162 +1,152 @@
-# Project: Mihon Linux Core Features Implementation
+# Project: Mihon Linux — Tradutor Simultâneo Estilo Google Lens
 
 ## Architecture
-Mihon Linux is a Kotlin 2.4 / Java 21 desktop application for Linux providing a desktop port of Tachiyomi/Mihon. It uses a modular multi-project Gradle layout with Swing frontend and Exposed/SQLite persistence:
+Mihon Linux é uma aplicação desktop Kotlin `2.4.21` / Java `21` (Temurin) com interface Swing + FlatLaf `3.5.4` e build Gradle `9.8.2`. Os módulos existentes (`:domain`, `:core:archive`, `:core:common`, `:core:metro`, `:source-api`, `:data`, `:i18n`, `:desktop`) permanecem intactos, enquanto a funcionalidade de tradução simultânea estilo Google Lens é construída de forma modular e desacoplada dentro de `:desktop` sob `mihon.desktop.translator`:
 
-- `:domain` — Pure Kotlin domain models (`Manga`, `Chapter`, `History`) and repository interfaces (`MangaRepository`, `ChapterRepository`, `HistoryRepository`).
-- `:core:archive` — Archive extraction and streaming engine (`ArchiveReader`, `ZipArchiveReader`, `DirectoryArchiveReader`, `NaturalOrderComparator`) supporting `.cbz`, `.zip`, and local image directories.
-- `:core:common` — Cross-cutting utilities, network models, language/sorting extensions.
-- `:source-api` — Manga catalog and HTTP source abstractions (`CatalogueSource`, `HttpSource`, `ParsedHttpSource`, `Page`, `FilterList`, `JsoupExtensions`) and concrete scraping implementations using OkHttp and jsoup.
-- `:data` — Database persistence via JetBrains Exposed DSL and SQLite (`~/.mihon/mihon.db`), table schemas (`MangaTable`, `ChapterTable`, `HistoryTable`), and repository implementations.
-- `:desktop` — Java Swing desktop user interface (`MihonApp`, `MangaGridPanel`, `MangaDetailsPanel`, `ChapterListPanel`, `ReaderWindow`, `CoverCache`, async `SwingWorker` thread scheduling).
+1. **Detecção de Regiões & OCR Local (`mihon.desktop.translator`)**:
+   - `TextRegionDetector`: detector puro-JVM leve de balões de fala e agrupamentos densos de texto em mangás (operando sobre cópia reduzida, retornando retângulos normalizados `[0..1]`).
+   - `TesseractJnaEngine`: binding JNA (`net.java.dev.jna:jna:5.14.0`, zero transitivas) sondando `/lib64/libtesseract.so.5.5` (e nomes padrão Linux) com fallback opcional para CLI `tesseract`, instância única protegida por `Mutex` e fallback de segmentação via `TessPageIterator`.
+   - `TessdataManager`: localiza modelos em `/usr/share/tesseract/tessdata` e `~/.mihon/tessdata`, baixando modelos `tessdata_fast` (`jpn`, `jpn_vert`, `kor`, `chi_sim`, `por`, `eng`) sob demanda de forma assíncrona.
+2. **Tradução Plugável (`TranslationProvider`)**:
+   - Interface `TranslationProvider` com implementação padrão pronta para uso `GoogleTranslateGtxProvider` (OkHttp + `kotlinx-serialization-json`, sem API key, batching por página), além de `MyMemoryTranslationProvider`, `LibreTranslateProvider` e `CompositeTranslationProvider` com fallback.
+3. **Renderização Google Lens & Controlador de Sessão**:
+   - `LensOverlayRenderer`: pipeline não-destrutivo que mapeia caixas normalizadas para coordenadas de tela (`SINGLE`, `splitWidePages` com `splitWideRtl`, `DOUBLE_RTL`/`DOUBLE_LTR`, `WEBTOON`/`CONTINUOUS_VERTICAL`, zoom, `FitMode`), aplica desfoque (blur) restrito às sub-regiões de texto + tint adaptativo da borda e renderiza o texto traduzido via `Graphics2D` com quebra de linha, auto-fit de fonte e alto contraste — preservando 100% a imagem original quando desativado.
+   - `PageTranslationController`: coordena fila assíncrona dedicada (1–2 workers, isolada do pool `io` de decodificação de páginas), cancelamento por `generation`/distância, e cache LRU de resultados integrado a `MemoryManager.registerTrimCallback` (respeitando o teto padrão de `500 MB` RAM).
+4. **Integração UI, Atalhos e Configurações (`:desktop`)**:
+   - `TranslatorPreferences`, `ReaderAction.TOGGLE_TRANSLATOR` (`T`), `ModernIcons`, `SettingsScreen` (seção Leitor) e `ReaderWindow` (`topHud`, `contextMenu`, pílula de status, disparo automático em `showSpread()` e `WebtoonView.updateVisible()`, composição em `PagedView.paintComponent` e `WebtoonView.paintComponent`, ciclo de vida seguro em `loadChapter()` e `togglingFullscreen`).
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | F2.1 Exposed JDBC Dependency | Add `exposed-jdbc:0.48.0` to `data/build.gradle.kts` | M1 | Survey Exp 2 |
-| 2 | F2.2 Manga Domain Entity | Create `Manga` model with timestamps, flags, and `UpdateStrategy` in `:domain` | M1 | Survey Exp 2 |
-| 3 | F2.3 MangaRepository Interface | Define `MangaRepository` CRUD and flow queries in `:domain` | M1 | Survey Exp 2 |
-| 4 | F2.4 HistoryRepository Interface | Define `HistoryRepository` CRUD and query contracts in `:domain` | M1 | Survey Exp 2 |
-| 5 | F2.5 Exposed Table Schemas | Implement `MangaTable`, `ChapterTable`, `HistoryTable` in `:data` | M1 | Survey Exp 2 |
-| 6 | F2.6 DatabaseManager Refactoring | Add Exposed database connection, WAL mode, foreign keys, legacy migration | M1 | Survey Exp 2 |
-| 7 | F2.7 MangaRepositoryImpl | Implement `MangaRepository` via Exposed in `:data` | M1 | Survey Exp 2 |
-| 8 | F2.8 ChapterRepositoryImpl | Implement all 12 `ChapterRepository` methods via Exposed in `:data` | M1 | Survey Exp 2 |
-| 9 | F2.9 HistoryRepositoryImpl | Implement `HistoryRepository` via Exposed in `:data` | M1 | Survey Exp 2 |
-| 10 | F2.10 Persistence Test Setup | Add JUnit 5 and coroutines-test to `:data` and `:domain` | M1 | Survey Exp 2 |
-| 11 | F2.11 Persistence CRUD Tests | Automated integration test suite with isolated SQLite database | M1 | Survey Exp 2 |
-| 12 | F1.1 ArchiveReader Core Abstraction | `ArchiveReader` interface and `ArchivePage` data class in `:core:archive` | M2 | Survey Exp 1 |
-| 13 | F1.2 ZipArchiveReader | High-performance stream-based `.cbz` and `.zip` reader in `:core:archive` | M2 | Survey Exp 1 |
-| 14 | F1.3 DirectoryArchiveReader | Local filesystem directory image reader in `:core:archive` | M2 | Survey Exp 1 |
-| 15 | F1.4 NaturalOrderComparator | Alphanumeric comparator ordering numbers naturally (`page 2` < `page 10`) | M2 | Survey Exp 1 |
-| 16 | F1.5 File Filtering & Sanitation | Filters out non-images, macOS resource forks (`__MACOSX`), and OS metadata | M2 | Survey Exp 1 |
-| 17 | F1.6 ArchiveReaderFactory | Factory instantiating `ZipArchiveReader` or `DirectoryArchiveReader` by file | M2 | Survey Exp 1 |
-| 18 | F1.7 Synthetic Archive Test Fixtures | Programmatic test archive generator & unit tests in `:core:archive` | M2 | Survey Exp 1 |
-| 19 | R3-F1 Page Model | `Page` data class in `:source-api` | M3 | Survey Exp 3 |
-| 20 | R3-F2 FilterList Collection | `FilterList` wrapping list of filters in `:source-api` | M3 | Survey Exp 3 |
-| 21 | R3-F3 JsoupExtensions | `Response.asJsoup()` helper using OkHttp Response and Jsoup parser | M3 | Survey Exp 3 |
-| 22 | R3-F4 CatalogueSource Interface | Core catalog contract for search, popular, details, chapters, pages | M3 | Survey Exp 3 |
-| 23 | R3-F5 HttpSource Base Class | Base class with OkHttp request/parse template hooks | M3 | Survey Exp 3 |
-| 24 | R3-F6 ParsedHttpSource Base Class | Jsoup HTML selector scraping implementation of `HttpSource` | M3 | Survey Exp 3 |
-| 25 | R3-F7 Concrete HTTP Scraping Source | Source implementation parsing real manga search, details, chapters, pages | M3 | Survey Exp 3 |
-| 26 | R3-F8 Source Bridge / Adapter | Adapter connecting `HttpSource` with `ExtensionSource` and UI consumers | M3 | Survey Exp 3 |
-| 27 | R3-F9 MockWebServer Test Suite | Comprehensive tests verifying requests, HTML parsing, pagination offline | M3 | Survey Exp 3 |
-| 28 | F1.8 ReaderWindow Archive Integration | Support `ArchiveReader` / local files in `ReaderWindow` in `:desktop` | M4 | Survey Exp 1 |
-| 29 | F1.9 Aspect-Preserving Image Panel | Centered rendering preserving aspect ratio in `ReaderWindow` | M4 | Survey Exp 1 |
-| 30 | F1.10 Open Archive Menu & FileChooser | `JFileChooser` dialog for opening `.cbz`, `.zip`, and folders in `Main.kt` | M4 | Survey Exp 1 |
-| 31 | R4-F1 Async SwingWorker Execution | Offload database, network, and archive I/O from Swing EDT | M4 | Survey Exp 3 |
-| 32 | R4-F2 CoverCache & Image Scaler | In-memory LRU thumbnail cache and smooth asynchronous image loader | M4 | Survey Exp 3 |
-| 33 | R4-F3 Cover Grid View (MangaGridPanel) | Responsive card grid displaying cover art, title, unread badges | M4 | Survey Exp 3 |
-| 34 | R4-F4 Manga Details Screen | Detailed view with cover art, metadata, synopsis, action buttons | M4 | Survey Exp 3 |
-| 35 | R4-F5 Chapter List Component | Chapter list with unread markers, sort toggle, and read launch | M4 | Survey Exp 3 |
-| 36 | R4-F6 CardLayout Navigation | Seamless transitions between Library, Details, Search, and Reader | M4 | Survey Exp 3 |
-| 37 | R4-F7 UI Persistence Integration | Connect Cover Grid and Details to `MangaRepository` / `ChapterRepository` | M4 | Survey Exp 3 |
-| 38 | R4-F8 Reading History Callback | Update read status and `History` in SQLite when chapter is read | M4 | Survey Exp 3 |
-| 39 | E2E-T1 Feature Coverage Suite | ≥5 tests per feature covering all R1-R4 requirements | E2E | Requirement |
-| 40 | E2E-T2 Boundary & Corner Suite | Edge cases: corrupted archives, zero-size DB, malformed HTML, empty query | E2E | Requirement |
-| 41 | E2E-T3 Cross-Feature Combination | Pairwise interactions: Search -> Add to Library -> Read Archive -> History | E2E | Requirement |
-| 42 | E2E-T4 Real-World Workload Suite | End-to-end user journeys from cold start to reading archives | E2E | Requirement |
-| 43 | FINAL-1 100% E2E Test Pass | Verification that all Tier 1-4 tests pass via `gradle build` | FINAL | Acceptance |
-| 44 | FINAL-2 Tier 5 Adversarial Hardening | White-box source audit and stress-testing exposed code paths | FINAL | Project Pattern |
+| 1 | F1 Translator Models & Config | `NormalizedRect`, `TextOrientation`, `DetectedTextRegion`, `TranslatedBlock`, `PageTranslationResult`, `TranslationStatus`, `TranslatorConfig`, `TranslatorLanguage` | M1 | Survey 1, 2, 3 |
+| 2 | F2 Pure-JVM Text Region Detector | `TextRegionDetector` para detecção de balões/regiões de texto e helpers de mapeamento/recorte normalizado | M1 | Survey 3 |
+| 3 | F3 JNA Tesseract OCR & Tessdata | `TesseractJnaEngine` (`libtesseract.so.5.5` + fallback CLI + `Mutex`) e `TessdataManager` (resolução local + download assíncrono `tessdata_fast`) | M1 | Survey 3 |
+| 4 | F4 Pluggable Translation Providers | `TranslationProvider`, `GoogleTranslateGtxProvider`, `MyMemoryTranslationProvider`, `LibreTranslateProvider`, `CompositeTranslationProvider` + testes `MockWebServer` | M1 | Survey 2, 3 |
+| 5 | F5 Google Lens Blur & Overlay Renderer | `LensOverlayRenderer`: blur não-destrutivo em ROI, tint adaptativo, word-wrap + auto-fit vetorial, suporte a todos `ReadMode`/`FitMode`/`splitWidePages`/zoom | M2 | Survey 1, 3 |
+| 6 | F6 Session Controller & Memory Cache | `PageTranslationController`: worker dedicado, cancelamento por geração, disparo on-page/scroll, cache LRU + `MemoryManager.registerTrimCallback` | M2 | Survey 1, 3 |
+| 7 | F7 Translator Preferences | `TranslatorPreferences` persistindo idioma origem/destino, provedor, endpoint/key e estado padrão via `Preferences.userRoot()` | M2 | Survey 2 |
+| 8 | F8 Shortcut & Vector Icon | `ReaderAction.TOGGLE_TRANSLATOR` (`VK_T`) em `ReaderShortcuts.kt` e ícone vetorial em `ModernIcons.kt` | M3 | Survey 1, 2 |
+| 9 | F9 SettingsScreen Translator Section | Configurações na aba Leitor de `SettingsScreen.kt` (idiomas, provedor, URL/chave LibreTranslate, toggle padrão) | M3 | Survey 2 |
+| 10 | F10 ReaderWindow Auto-Translate Integration | Botão `topHud`, menu de contexto, pílula de status, disparo automático em `showSpread`/`WebtoonView.updateVisible`, pintura em `PagedView`/`WebtoonView`, segurança em `loadChapter`/`togglingFullscreen` | M3 | Survey 1 |
+| 11 | F11 E2E Test Suite (Tiers 1-4) | Suíte E2E opaque-box (`TEST_INFRA.md`, fixtures sintéticos de mangá, Tiers 1-4 cobrindo F1–F10, `TEST_READY.md`) | E2E | Dual Track |
+| 12 | F12 Final Verification & Tier 5 Hardening | Passagem 100% em `./gradlew test :desktop:installDist`, verificação funcional no app empacotado e auditoria adversarial Tier 5 | FINAL | Acceptance |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Domain Entities & Exposed Persistence | `:domain` and `:data` Exposed SQLite persistence, models, tables, repositories, CRUD tests | none | DONE |
-| M2 | Local Archive and Directory Reader | `:core:archive` streaming reader for `.cbz`, `.zip`, folders, natural sorting, test fixtures | none | PLANNED |
-| M3 | HTTP Sources and Manga Search | `:source-api` OkHttp + jsoup scraping engine, `HttpSource`, `ParsedHttpSource`, MockWebServer tests | none | PLANNED |
-| M4 | Desktop Swing UI Enhancements & Reader Integration | `:desktop` Cover Grid, Details Screen, Chapter List, async loader, ReaderWindow archive integration | M1, M2, M3 | PLANNED |
-| E2E | E2E Testing Suite Track | Dual-track comprehensive opaque-box test suite (Tiers 1-4) publishing `TEST_READY.md` | none | PLANNED |
-| FINAL | E2E Test Pass & Coverage Hardening | 100% pass of E2E suite (Tiers 1-4) + Tier 5 adversarial testing & hardening | M4, E2E | PLANNED |
+| M1 | Text Detection, OCR Engine & Translation Providers | Dependências Gradle (`jna:5.14.0`, `mockwebserver:4.12.0`), `TranslatorModels`, `TextRegionDetector`, `TesseractJnaEngine`, `TessdataManager`, `TranslationProvider` + testes unitários | none | COMPLETED |
+| M2 | Google Lens Renderer, Session Controller & Preferences | `LensOverlayRenderer`, `PageTranslationController`, `TranslatorPreferences` + testes unitários completos de blur, mapeamento, disparo e memória | M1 | COMPLETED |
+| M3 | ReaderWindow, Shortcuts, Icons & Settings Integration | `ModernIcons`, `ReaderShortcuts`, `SettingsScreen`, `ReaderWindow` + testes de integração do leitor | M1, M2 | COMPLETED |
+| E2E | E2E Testing Suite Track | `TEST_INFRA.md`, fixtures sintéticos de mangá, suíte E2E Tiers 1-4 cobrindo F1–F10, publicação de `TEST_READY.md` | none (Phase A infra/fixtures in parallel; Phase B `.kt` suite after M3) | COMPLETED |
+| FINAL | E2E Test Pass & Tier 5 Adversarial Hardening | Phase 1: 100% E2E Tiers 1-4 + verificação da distribuição `:desktop:installDist`; Phase 2: Tier 5 white-box adversarial hardening | M3, E2E | COMPLETED |
 
 ## Interface Contracts
 
-### Domain & Data ↔ Desktop UI (`:domain` & `:data` ↔ `:desktop`)
-- `DatabaseManager`:
+### M1: Models, OCR & Translation (`desktop/src/main/kotlin/mihon/desktop/translator/`)
+- `NormalizedRect`:
   ```kotlin
-  class DatabaseManager(dbPath: File) {
-      val database: Database
-      fun initialize()
+  data class NormalizedRect(val x: Float, val y: Float, val width: Float, val height: Float) {
+      fun toPixelRect(imgWidth: Int, imgHeight: Int): java.awt.Rectangle
+      fun clipToHalf(isSecondHalf: Boolean): NormalizedRect?
   }
   ```
-- `MangaRepository`:
+- `DetectedTextRegion` & `TranslatedBlock` & `PageTranslationResult`:
   ```kotlin
-  suspend fun getMangaById(id: Long): Manga?
-  suspend fun getMangaByUrlAndSource(url: String, source: Long): Manga?
-  suspend fun getFavorites(): List<Manga>
-  fun getFavoritesAsFlow(): Flow<List<Manga>>
-  suspend fun insert(manga: Manga): Long
-  suspend fun update(manga: Manga)
-  suspend fun delete(id: Long)
+  enum class TextOrientation { HORIZONTAL, VERTICAL }
+  enum class TranslationStatus { IDLE, TRANSLATING, READY, ERROR }
+  data class DetectedTextRegion(val bounds: NormalizedRect, val orientation: TextOrientation = TextOrientation.HORIZONTAL, val confidence: Float = 1f)
+  data class TranslatedBlock(val bounds: NormalizedRect, val originalText: String, val translatedText: String, val orientation: TextOrientation = TextOrientation.HORIZONTAL, val confidence: Float = 1f)
+  data class PageTranslationResult(val pageIndex: Int, val generation: Long, val sourceWidth: Int, val sourceHeight: Int, val blocks: List<TranslatedBlock>, val status: TranslationStatus, val errorMessage: String? = null)
   ```
-- `ChapterRepository`:
+- `OcrEngine` & `TextDetector` & `TranslationProvider`:
   ```kotlin
-  suspend fun getChapterById(id: Long): Chapter?
-  suspend fun getChapterByMangaId(mangaId: Long, applyScanlatorFilter: Boolean = false): List<Chapter>
-  suspend fun update(chapterUpdate: ChapterUpdate)
-  suspend fun updateFromRemote(removedIds: List<Long>, added: List<Chapter>, updated: List<ChapterRemoteUpdate>): List<Chapter>
-  ```
-- `HistoryRepository`:
-  ```kotlin
-  suspend fun getHistoryByMangaId(mangaId: Long): List<History>
-  suspend fun upsert(historyUpdate: HistoryUpdate): History
-  suspend fun upsert(history: History): History
+  interface TextDetector {
+      fun detectRegions(image: java.awt.image.BufferedImage): List<DetectedTextRegion>
+  }
+  data class OcrSnippet(val text: String, val bounds: NormalizedRect, val confidence: Float)
+  interface OcrEngine : AutoCloseable {
+      fun isAvailable(): Boolean
+      fun recognizePage(image: java.awt.image.BufferedImage, regions: List<DetectedTextRegion>, sourceLang: TranslatorLanguage): List<OcrSnippet>
+  }
+  interface TranslationProvider {
+      val id: String
+      val displayName: String
+      suspend fun translateBatch(texts: List<String>, sourceLang: TranslatorLanguage, targetLang: TranslatorLanguage): List<String>
+  }
   ```
 
-### Archive Reader ↔ Desktop Reader (`:core:archive` ↔ `:desktop`)
-- `ArchivePage`:
+### M2: Renderer, Controller & Preferences (`desktop/src/main/kotlin/mihon/desktop/translator/`)
+- `TranslatorPreferences`:
   ```kotlin
-  data class ArchivePage(val index: Int, val name: String, val path: String, val size: Long = -1L)
+  data class TranslatorConfig(
+      val enabledByDefault: Boolean = false,
+      val sourceLanguage: TranslatorLanguage = TranslatorLanguage.JAPANESE,
+      val targetLanguage: TranslatorLanguage = TranslatorLanguage.PORTUGUESE_BR,
+      val providerId: String = "google_gtx",
+      val libreTranslateUrl: String = "https://libretranslate.com/translate",
+      val libreTranslateApiKey: String = "",
+      val autoDownloadTessdata: Boolean = true,
+  )
+  object TranslatorPreferences {
+      fun load(): TranslatorConfig
+      fun save(config: TranslatorConfig)
+  }
   ```
-- `ArchiveReader`:
+- `LensOverlayRenderer`:
   ```kotlin
-  interface ArchiveReader : AutoCloseable {
-      val sourceName: String
-      val pages: List<ArchivePage>
-      val pageCount: Int get() = pages.size
-      fun getPageStream(page: ArchivePage): InputStream
-      fun getPageBytes(page: ArchivePage): ByteArray
-      fun getPageImage(page: ArchivePage): BufferedImage?
+  object LensOverlayRenderer {
+      fun renderOverlayOnGraphics(
+          g2: java.awt.Graphics2D,
+          sourceOrDisplayImage: java.awt.image.BufferedImage,
+          destX: Int, destY: Int, destW: Int, destH: Int,
+          result: PageTranslationResult,
+          halfSlice: Boolean? = null, // null = full page, false = left half [0..0.5], true = right half [0.5..1]
+      )
+      fun renderPageWithOverlay(
+          image: java.awt.image.BufferedImage,
+          result: PageTranslationResult?,
+          halfSlice: Boolean? = null,
+      ): java.awt.image.BufferedImage
+  }
+  ```
+- `PageTranslationController`:
+  ```kotlin
+  class PageTranslationController(
+      private val textDetector: TextDetector,
+      private val ocrEngine: OcrEngine,
+      private val translationProvider: TranslationProvider,
+      private val configProvider: () -> TranslatorConfig = { TranslatorPreferences.load() },
+      private val isWebtoonProvider: () -> Boolean = { false },
+      private val onPageResultReady: (PageTranslationResult) -> Unit = {},
+      private val onStatusChanged: (TranslationStatus, String?) -> Unit = { _, _ -> },
+  ) : AutoCloseable {
+      var isEnabled: Boolean
+      fun currentGeneration(): Long
+      fun setEnabled(enabled: Boolean, visiblePages: List<Int>, pageImageProvider: suspend (Int) -> java.awt.image.BufferedImage?)
+      fun onVisiblePagesChanged(visiblePages: List<Int>, pageImageProvider: suspend (Int) -> java.awt.image.BufferedImage?)
+      fun onChapterChanged(newGeneration: Long)
+      fun getCachedResult(pageIndex: Int): PageTranslationResult?
+      fun trimMemory()
       override fun close()
   }
   ```
-- `ArchiveReaderFactory`:
-  ```kotlin
-  object ArchiveReaderFactory {
-      fun of(file: File): ArchiveReader
-  }
-  ```
 
-### Source API ↔ Desktop UI (`:source-api` ↔ `:desktop`)
-- `CatalogueSource` / `HttpSource` / `ParsedHttpSource`:
-  ```kotlin
-  fun fetchPopularManga(page: Int): MangasPage
-  fun fetchSearchManga(page: Int, query: String, filters: FilterList): MangasPage
-  fun fetchMangaDetails(manga: SManga): SManga
-  fun fetchChapterList(manga: SManga): List<SChapter>
-  fun fetchPageList(chapter: SChapter): List<Page>
-  ```
-- `ExtensionSource` bridge (for UI consumption):
-  ```kotlin
-  interface ExtensionSource {
-      val name: String
-      val baseUrl: String
-      fun searchManga(query: String): List<MangaResult>
-      fun getMangaDetails(url: String): MangaDetails
-      fun getChapterImages(url: String): List<String>
-  }
-  ```
+### M3: UI & Reader Integration (`desktop/src/main/kotlin/mihon/desktop/`)
+- `ReaderAction.TOGGLE_TRANSLATOR` (`KeyEvent.VK_T`, `"Alternar tradutor simultâneo"`) em `ReaderShortcuts.kt`.
+- `ModernIcons.translateIcon(...)` em `ModernIcons.kt`.
+- `SettingsScreen.kt` (`buildReaderPage()`): seção "Tradutor Simultâneo (Google Lens)".
+- `ReaderWindow.kt`:
+  - Estado `translatorEnabled` + botão toggle no `topHud` + item no `contextMenu` + status pill no `centerLayered` + atalho `TOGGLE_TRANSLATOR`.
+  - Disparo automático em `showSpread()` / `finish()` e `WebtoonView.updateVisible()` e ao ativar.
+  - Composição não-destrutiva em `PagedView.paintComponent` e `WebtoonView.paintComponent` respeitando `DOUBLE_RTL` e `splitWidePages` (`splitWideRtl`).
 
 ## Code Layout
-- `domain/src/main/java/tachiyomi/domain/` — Domain models and repository interfaces.
-- `domain/src/test/java/tachiyomi/domain/` — Domain unit tests.
-- `core/archive/src/main/kotlin/mihon/core/archive/` — Archive readers, comparators, factories.
-- `core/archive/src/test/kotlin/mihon/core/archive/` — Archive unit tests and synthetic fixtures.
-- `source-api/src/main/kotlin/eu/kanade/tachiyomi/source/` — Source abstractions and models.
-- `source-api/src/main/kotlin/eu/kanade/tachiyomi/util/` — Network and Jsoup utilities.
-- `source-api/src/main/kotlin/mihon/source/` — Extension sources and concrete scrapers.
-- `source-api/src/test/kotlin/` — MockWebServer tests and HTML test fixtures.
-- `data/src/main/kotlin/mihon/data/database/` — Exposed tables, DatabaseManager.
-- `data/src/main/kotlin/mihon/data/repository/` — Repository implementations.
-- `data/src/test/kotlin/mihon/data/` — Persistence integration tests.
-- `desktop/src/main/kotlin/mihon/desktop/` — Swing UI components, ReaderWindow, Main entry.
-- `desktop/src/test/kotlin/mihon/desktop/` — Desktop UI component tests.
+- `desktop/build.gradle.kts` — Dependências de `:desktop` (incluindo `net.java.dev.jna:jna:5.14.0` e `mockwebserver:4.12.0` para testes).
+- `desktop/src/main/kotlin/mihon/desktop/` — UI Swing existente (`ReaderWindow.kt`, `ReaderShortcuts.kt`, `SettingsScreen.kt`, `ModernIcons.kt`, `MemoryManager.kt`, `Main.kt`, `AppContext.kt`).
+- `desktop/src/main/kotlin/mihon/desktop/translator/` — Pipeline do tradutor simultâneo (`TranslatorModels.kt`, `TextRegionDetector.kt`, `TesseractJnaEngine.kt`, `TessdataManager.kt`, `TranslationProvider.kt`, `LensOverlayRenderer.kt`, `PageTranslationController.kt`, `TranslatorPreferences.kt`).
+- `desktop/src/test/kotlin/mihon/desktop/` — Testes unitários existentes e de integração do leitor.
+- `desktop/src/test/kotlin/mihon/desktop/translator/` — Testes unitários de M1 e M2.
+- `desktop/src/test/kotlin/mihon/desktop/e2e/` — Suíte E2E opaque-box (Tiers 1-4).
+- `desktop/src/test/resources/e2e/` — Fixtures sintéticos de páginas/arquivos `.cbz` para E2E.
+- `core/archive/src/main/kotlin/mihon/core/archive/` — Leitura e decodificação de arquivos/imagens (sem alterações previstas).
+- `domain/`, `data/`, `source-api/`, `core/common/`, `i18n/` — Módulos existentes preservados.

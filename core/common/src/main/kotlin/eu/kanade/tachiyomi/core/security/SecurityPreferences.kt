@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.core.security
 
-import dev.icerock.moko.resources.StringResource
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -35,7 +34,7 @@ class SecurityPreferences(
         0,
     )
 
-    enum class SecureScreenMode(val titleRes: StringResource) {
+    enum class SecureScreenMode(val title: String) {
         ALWAYS(MR.strings.lock_always),
         INCOGNITO(MR.strings.pref_incognito_mode),
         NEVER(MR.strings.lock_never),

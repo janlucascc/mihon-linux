@@ -13,6 +13,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-dao:0.48.0")
     implementation("org.jetbrains.exposed:exposed-jdbc:0.48.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")

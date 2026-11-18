@@ -1,13 +1,17 @@
 package mihon.source
 
 import kotlinx.serialization.Serializable
+import kotlin.math.max
+import kotlin.math.min
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -45,6 +49,7 @@ data class ScraperConfig(
 /** Generic [ExtensionSource] that scrapes HTML with OkHttp + jsoup according to a [ScraperConfig]. */
 class HttpScraperSource(
     val config: ScraperConfig,
+    override val id: Long = 0,
     private val client: OkHttpClient = defaultClient(),
 ) : ExtensionSource {
 
@@ -52,7 +57,6 @@ class HttpScraperSource(
     override val baseUrl: String get() = config.baseUrl.trimEnd('/')
     override val language: String get() = config.language
     override val isNsfw: Boolean get() = config.isNsfw
-    override val id: Long get() = (name.lowercase() + "/" + language).hashCode().toLong() and 0x7fffffffL
 
     override fun searchManga(query: String): List<MangaResult> {
         val path = config.searchPath.replace("{query}", java.net.URLEncoder.encode(query, "UTF-8"))
@@ -182,6 +186,16 @@ class HttpScraperSource(
         return if (clean.startsWith(baseUrl)) clean.removePrefix(baseUrl).ifEmpty { "/" } else clean
     }
 
+    /**
+     * Fetches a URL with exponential backoff retry policy.
+     *
+     * Retry configuration:
+     * - Max 3 attempts
+     * - Base delay: 1 second
+     * - Max delay: 10 seconds
+     * - Retries on: IOException (network errors), SocketTimeoutException, HTTP 5xx, HTTP 429
+     * - Respects Retry-After header when present
+     */
     private fun fetch(url: String): Document {
         val sanitizedUrl = url.trim().replace(" ", "%20")
         val request = Request.Builder()
@@ -190,14 +204,116 @@ class HttpScraperSource(
             .header("Referer", "$baseUrl/")
             .header("Cookie", "tia_idade_confirmada=1; wpmanga-adault=1")
             .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code} ao acessar $sanitizedUrl")
-            val body = response.body?.string() ?: throw IOException("Resposta vazia de $sanitizedUrl")
-            return Jsoup.parse(body, sanitizedUrl)
+
+        val maxAttempts = 3
+        val baseDelayMs = 1000L
+        val maxDelayMs = 10000L
+
+        var attempt = 0
+        var lastException: Exception? = null
+
+        while (attempt < maxAttempts) {
+            attempt++
+            try {
+                var retryDelayMs = -1L
+                val parsedDoc = client.newCall(request).execute().use { response ->
+                    val responseCode = response.code
+                    if (shouldRetry(responseCode)) {
+                        val retryAfterDelay = parseRetryAfter(response)
+                        if (attempt < maxAttempts) {
+                            retryDelayMs = if (retryAfterDelay > 0) {
+                                min(retryAfterDelay, maxDelayMs)
+                            } else {
+                                min(baseDelayMs * (1L shl (attempt - 1)), maxDelayMs)
+                            }
+                            return@use null
+                        }
+                        throw IOException("HTTP $responseCode ao acessar $sanitizedUrl após $maxAttempts tentativas")
+                    }
+
+                    if (!response.isSuccessful) {
+                        throw HttpStatusException(responseCode, "HTTP $responseCode ao acessar $sanitizedUrl")
+                    }
+                    val body = response.body?.string() ?: throw IOException("Resposta vazia de $sanitizedUrl")
+                    Jsoup.parse(body, sanitizedUrl)
+                }
+
+                if (parsedDoc != null) return parsedDoc
+                if (retryDelayMs > 0) {
+                    Thread.sleep(retryDelayMs)
+                }
+                continue
+
+            } catch (e: HttpStatusException) {
+                // Non-retryable HTTP error - propagate immediately
+                throw e
+            } catch (e: SocketTimeoutException) {
+                lastException = e
+                if (attempt < maxAttempts) {
+                    val delay = min(baseDelayMs * (1L shl (attempt - 1)), maxDelayMs)
+                    Thread.sleep(delay)
+                    continue
+                }
+            } catch (e: IOException) {
+                // Network-level errors (connection refused, DNS failure, etc.) - retry
+                lastException = e
+                if (attempt < maxAttempts) {
+                    val delay = min(baseDelayMs * (1L shl (attempt - 1)), maxDelayMs)
+                    Thread.sleep(delay)
+                    continue
+                }
+            }
+        }
+
+        throw lastException ?: IOException("Falha ao acessar $sanitizedUrl após $maxAttempts tentativas")
+    }
+
+    /**
+     * Exception for non-retryable HTTP status codes.
+     * This allows us to distinguish HTTP errors from network errors in catch blocks.
+     */
+    private class HttpStatusException(code: Int, message: String) : IOException(message) {
+        val statusCode: Int = code
+    }
+
+    /**
+     * Determines if a response code should trigger a retry.
+     * Retries on 5xx server errors and 429 (rate limited).
+     */
+    private fun shouldRetry(code: Int): Boolean {
+        return code >= 500 && code < 600 || code == 429
+    }
+
+    /**
+     * Parses the Retry-After header value.
+     * Returns delay in milliseconds, or 0 if header is absent/invalid.
+     * Supports both seconds (integer) and HTTP-date formats.
+     */
+    private fun parseRetryAfter(response: Response): Long {
+        val retryAfter = response.header("Retry-After")
+        if (retryAfter.isNullOrBlank()) return 0
+
+        return try {
+            // Try parsing as seconds (integer)
+            val seconds = retryAfter.toLongOrNull()
+            if (seconds != null) {
+                seconds * 1000
+            } else {
+                // Try parsing as HTTP-date (RFC 1123)
+                val date = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US)
+                    .parse(retryAfter)
+                if (date != null) {
+                    max(0, date.time - System.currentTimeMillis())
+                } else {
+                    0
+                }
+            }
+        } catch (e: Exception) {
+            0
         }
     }
 
-    private companion object {
+    companion object {
         val VOLUME_REGEX = Regex("""(?i)vol(?:ume)?\.?\s*(\d+)""")
         val CHAPTER_REGEX = Regex("""(?i)(?:ch(?:apter)?|cap(?:[ií]tulo)?)\.?\s*(\d+(?:\.\d+)?)""")
 

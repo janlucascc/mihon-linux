@@ -31,6 +31,7 @@ class MangaPosterCard : JPanel() {
     var compactOverlayMode: Boolean = false
     var selectedState: Boolean = false
     var hoveredState: Boolean = false
+    var hoverProgress: Float = 0f
 
     init {
         isOpaque = false
@@ -41,22 +42,27 @@ class MangaPosterCard : JPanel() {
         val g2 = g.create() as Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+        g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
 
-        val lift = if (hoveredState || selectedState) -3 else 0
+        val hp = if (hoverProgress > 0f) hoverProgress.coerceIn(0f, 1f) else if (hoveredState) 1f else 0f
+        val lift = -kotlin.math.round((if (selectedState) 3.5f else 0f).coerceAtLeast(4.5f * hp)).toInt()
         val coverX = (width - COVER_W) / 2
         val coverY = 8 + lift
 
-        // Physical book elevation shadow directly beneath the cover
-        g2.color = Color(0, 0, 0, if (hoveredState || selectedState) 140 else 85)
-        g2.fillRoundRect(coverX + 2, coverY + 5, COVER_W, COVER_H, COVER_ARC, COVER_ARC)
+        // Layered physical book elevation shadow directly beneath the cover
+        val shadowAlphaOuter = (36 + 52 * hp).toInt().coerceIn(0, 140)
+        val shadowAlphaInner = (68 + 65 * hp).toInt().coerceIn(0, 175)
+        g2.color = Color(0, 0, 0, shadowAlphaOuter)
+        g2.fillRoundRect(coverX + 1, coverY + 7 + (2f * hp).toInt(), COVER_W - 2, COVER_H, COVER_ARC + 2, COVER_ARC + 2)
+        g2.color = Color(0, 0, 0, shadowAlphaInner)
+        g2.fillRoundRect(coverX + 2, coverY + 4 + (1f * hp).toInt(), COVER_W, COVER_H, COVER_ARC, COVER_ARC)
 
         // Cover image
         coverIcon?.image?.let { img ->
             g2.drawImage(img, coverX, coverY, COVER_W, COVER_H, null)
         }
 
-        // Top-left: Material 3 Unread Badge (White solid pill with bold black digits, matching Mihon Android)
-        // and Downloads Offline Badge (Green pill with icon)
+        // Top-left: Material 3 Unread Badge + crisp vector Downloads Badge
         var badgeCursorX = coverX + 8
         val badgeY = coverY + 8
 
@@ -69,14 +75,13 @@ class MangaPosterCard : JPanel() {
             ) + 4
         }
         if (downloadsBadgeCount > 0) {
-            badgeCursorX += drawStamp(
+            badgeCursorX += drawVectorDownloadPill(
                 g2,
-                "⬇ $downloadsBadgeCount",
+                downloadsBadgeCount,
                 badgeCursorX,
                 badgeY,
                 Theme.TERTIARY,
                 Color.WHITE,
-                alignRight = false,
             ) + 4
         }
         if (downloadsBadgeCount == 0 && unreadBadgeCount == 0) {
@@ -92,14 +97,20 @@ class MangaPosterCard : JPanel() {
             drawStamp(g2, badge, coverX + COVER_W - 8, badgeY, rightColor, Color.WHITE, alignRight = true)
         }
 
-        // Crisp focus/hover frame around the book cover itself
+        // Crisp focus/hover frame & subtle edge border around the book cover
         if (selectedState) {
             g2.color = Theme.ACCENT
             g2.stroke = BasicStroke(2f)
             g2.drawRoundRect(coverX, coverY, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
-        } else if (hoveredState) {
-            g2.color = Theme.TEXT_PRIMARY
+        } else if (hp > 0.02f) {
+            val frameAlpha = (180 * hp).toInt().coerceIn(0, 220)
+            val baseCol = Theme.TEXT_PRIMARY
+            g2.color = Color(baseCol.red, baseCol.green, baseCol.blue, frameAlpha)
             g2.stroke = BasicStroke(1.3f)
+            g2.drawRoundRect(coverX, coverY, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
+        } else if (Theme.isDark) {
+            g2.color = Color(255, 255, 255, 22)
+            g2.stroke = BasicStroke(1f)
             g2.drawRoundRect(coverX, coverY, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
         }
 
@@ -205,9 +216,21 @@ class MangaPosterCard : JPanel() {
         return w
     }
 
+    private var cachedWrapKey: String? = null
+    private var cachedWrapLines: List<String> = emptyList()
+    private var cachedSubtitleKey: String? = null
+    private var cachedSubtitleStr: String = ""
+
     private fun wrapTwoLines(g2: Graphics2D, text: String, maxW: Int): List<String> {
+        val key = "$text@$maxW"
+        if (key == cachedWrapKey) return cachedWrapLines
         val fm = g2.fontMetrics
-        if (fm.stringWidth(text) <= maxW) return listOf(text)
+        if (fm.stringWidth(text) <= maxW) {
+            val res = listOf(text)
+            cachedWrapKey = key
+            cachedWrapLines = res
+            return res
+        }
         val words = text.split(Regex("\\s+"))
         val line1 = StringBuilder()
         var idx = 0
@@ -220,20 +243,135 @@ class MangaPosterCard : JPanel() {
                 break
             }
         }
-        if (line1.isEmpty()) {
-            return listOf(ellipsize(g2, text, maxW))
+        val res = if (line1.isEmpty()) {
+            listOf(ellipsize(g2, text, maxW))
+        } else {
+            val rest = words.drop(idx).joinToString(" ")
+            if (rest.isEmpty()) listOf(line1.toString()) else listOf(line1.toString(), ellipsize(g2, rest, maxW))
         }
-        val rest = words.drop(idx).joinToString(" ")
-        return if (rest.isEmpty()) listOf(line1.toString()) else listOf(line1.toString(), ellipsize(g2, rest, maxW))
+        cachedWrapKey = key
+        cachedWrapLines = res
+        return res
     }
 
     private fun ellipsize(g2: Graphics2D, text: String, maxW: Int): String {
+        val key = "$text@$maxW"
+        if (key == cachedSubtitleKey) return cachedSubtitleStr
         val fm = g2.fontMetrics
-        if (fm.stringWidth(text) <= maxW) return text
+        if (fm.stringWidth(text) <= maxW) {
+            cachedSubtitleKey = key
+            cachedSubtitleStr = text
+            return text
+        }
         var s = text
         while (s.length > 1 && fm.stringWidth("$s…") > maxW) {
             s = s.dropLast(1)
         }
-        return "$s…"
+        val res = "$s…"
+        cachedSubtitleKey = key
+        cachedSubtitleStr = res
+        return res
     }
+}
+
+/** Draws a rounded download-count pill with a crisp vector downward arrow inside [g2]. */
+internal fun drawVectorDownloadPill(
+    g2: Graphics2D,
+    count: Int,
+    anchorX: Int,
+    y: Int,
+    bg: Color,
+    fg: Color,
+    alignRight: Boolean = false,
+): Int {
+    val label = "$count"
+    g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
+    val fm = g2.fontMetrics
+    val iconSpace = 12
+    val w = iconSpace + fm.stringWidth(label) + 11
+    val h = 20
+    val x = if (alignRight) anchorX - w else anchorX
+    g2.color = bg
+    g2.fillRoundRect(x, y, w, h, 6, 6)
+    g2.color = Color(255, 255, 255, 42)
+    g2.stroke = BasicStroke(1f)
+    g2.drawRoundRect(x, y, w - 1, h - 1, 6, 6)
+
+    val ix = x + 6
+    val iy = y + 5
+    g2.color = fg
+    g2.stroke = BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+    g2.drawLine(ix + 4, iy, ix + 4, iy + 6)
+    g2.drawLine(ix + 1, iy + 4, ix + 4, iy + 7)
+    g2.drawLine(ix + 7, iy + 4, ix + 4, iy + 7)
+    g2.drawLine(ix + 1, iy + 9, ix + 7, iy + 9)
+
+    g2.drawString(label, ix + iconSpace, y + ((h - fm.height) / 2) + fm.ascent)
+    return w
+}
+
+/** Smooth 60fps per-cell hover animator for JList grids and lists. */
+internal class GridHoverAnimator(
+    private val list: javax.swing.JList<*>,
+) {
+    private val progressMap = HashMap<Int, Float>()
+    private var targetIndex: Int = -1
+    private var timer: javax.swing.Timer? = null
+
+    fun progressFor(index: Int): Float = progressMap[index] ?: if (index == targetIndex) 1f else 0f
+
+    fun setHovered(index: Int) {
+        if (index == targetIndex) return
+        val prev = targetIndex
+        targetIndex = index
+        if (prev >= 0 && prev !in progressMap) progressMap[prev] = 1f
+        if (index >= 0 && index !in progressMap) progressMap[index] = 0f
+        if (timer?.isRunning != true) {
+            timer = javax.swing.Timer(14) { step() }.also { it.start() }
+        }
+    }
+
+    fun stop() {
+        timer?.stop()
+        timer = null
+        progressMap.clear()
+        targetIndex = -1
+    }
+
+    private fun step() {
+        if (!list.isDisplayable) {
+            stop()
+            return
+        }
+        val it = progressMap.entries.iterator()
+        var anyActive = false
+        while (it.hasNext()) {
+            val entry = it.next()
+            val idx = entry.key
+            val target = if (idx == targetIndex) 1f else 0f
+            val next = entry.value + (target - entry.value) * 0.28f
+            val settled = kotlin.math.abs(next - target) < 0.025f
+            if (settled) {
+                if (target == 0f) it.remove() else entry.setValue(1f)
+            } else {
+                entry.setValue(next)
+                anyActive = true
+            }
+            list.getCellBounds(idx, idx)?.let { list.repaint(it) }
+        }
+        if (!anyActive) {
+            timer?.stop()
+            timer = null
+        }
+    }
+}
+
+/** Ellipsizes [text] to fit within [maxW] pixels using [g2]'s current font metrics. */
+internal fun clipUiText(g2: Graphics2D, text: String, maxW: Int): String {
+    if (maxW <= 12) return "…"
+    val fm = g2.fontMetrics
+    if (fm.stringWidth(text) <= maxW) return text
+    var s = text
+    while (s.length > 1 && fm.stringWidth("$s…") > maxW) s = s.dropLast(1)
+    return "$s…"
 }

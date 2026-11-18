@@ -2,6 +2,7 @@ package mihon.desktop
 
 import kotlinx.coroutines.runBlocking
 import mihon.data.database.DatabaseManager
+import mihon.data.repository.BookmarkRepositoryImpl
 import mihon.data.repository.ChapterRepositoryImpl
 import mihon.data.repository.HistoryRepositoryImpl
 import mihon.data.repository.MangaRepositoryImpl
@@ -30,7 +31,13 @@ class LibraryServiceTest {
     fun setUp() {
         val db = DatabaseManager(File(tmp, "test.db")).apply { initialize() }
         history = HistoryRepositoryImpl(db)
-        service = LibraryService(MangaRepositoryImpl(db), ChapterRepositoryImpl(db), history, File(tmp, "downloads"))
+        service = LibraryService(
+            MangaRepositoryImpl(db),
+            ChapterRepositoryImpl(db),
+            history,
+            BookmarkRepositoryImpl(db),
+            File(tmp, "downloads"),
+        )
     }
 
     private fun png(): ByteArray = ByteArrayOutputStream().also {

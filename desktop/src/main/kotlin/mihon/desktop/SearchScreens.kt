@@ -54,7 +54,7 @@ class SearchScreen(
     private val model = DefaultListModel<Hit>()
     private val grid = JList(model)
     private val cardPrototype = MangaPosterCard()
-    private var hoveredIndex = -1
+    private val hoverAnimator = GridHoverAnimator(grid)
 
     private val field = JTextField(26).apply {
         putClientProperty("JTextField.placeholderText", "Pesquisar mangá (ex: One Piece, Naruto, Solo Leveling)…")
@@ -62,6 +62,7 @@ class SearchScreen(
     private val sourceFilter = JComboBox(
         (listOf("Todas as fontes") + ctx.extensions.map { it.name }).toTypedArray(),
     )
+    private var themeListener: ((Boolean) -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -79,21 +80,12 @@ class SearchScreen(
                 val idx = grid.locationToIndex(e.point)
                 val valid = if (idx >= 0 && grid.getCellBounds(idx, idx)?.contains(e.point) == true) idx else -1
                 grid.cursor = if (valid >= 0) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
-                if (valid != hoveredIndex) {
-                    val prev = hoveredIndex
-                    hoveredIndex = valid
-                    if (prev >= 0) grid.getCellBounds(prev, prev)?.let { grid.repaint(it) }
-                    if (valid >= 0) grid.getCellBounds(valid, valid)?.let { grid.repaint(it) }
-                }
+                hoverAnimator.setHovered(valid)
             }
         })
         grid.addMouseListener(object : MouseAdapter() {
             override fun mouseExited(e: MouseEvent) {
-                if (hoveredIndex != -1) {
-                    val prev = hoveredIndex
-                    hoveredIndex = -1
-                    grid.getCellBounds(prev, prev)?.let { grid.repaint(it) }
-                }
+                hoverAnimator.setHovered(-1)
             }
 
             override fun mouseClicked(e: MouseEvent) {
@@ -106,12 +98,18 @@ class SearchScreen(
             }
         })
 
-        val btnPopular = JButton("🔥 Em Alta").apply {
+        val btnPopular = ModernButton(
+            text = "Em Alta",
+            icon = ModernIcons.flame(14) { Theme.ACCENT_HOVER },
+            variant = ModernButton.Variant.SURFACE,
+        ).apply {
             addActionListener { loadPopular() }
         }
-        val btnSearch = JButton("Buscar").apply {
-            putClientProperty("JButton.buttonType", "roundRect")
-            font = font.deriveFont(Font.BOLD, 12.5f)
+        val btnSearch = ModernButton(
+            text = "Buscar",
+            icon = ModernIcons.search(14) { Color.WHITE },
+            variant = ModernButton.Variant.PRIMARY,
+        ).apply {
             addActionListener { search() }
         }
         field.addActionListener { search() }
@@ -124,9 +122,11 @@ class SearchScreen(
             border = BorderFactory.createEmptyBorder(4, 12, 4, 12)
             if (onBackToSources != null) {
                 add(
-                    JButton("← Fontes").apply {
-                        font = font.deriveFont(Font.BOLD, 12.5f)
-                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    ModernButton(
+                        text = "Fontes",
+                        icon = ModernIcons.chevronLeft(14) { Theme.TEXT_PRIMARY },
+                        variant = ModernButton.Variant.SURFACE,
+                    ).apply {
                         addActionListener { onBackToSources() }
                     },
                 )
@@ -146,7 +146,7 @@ class SearchScreen(
         add(top, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
 
-        ctx.addThemeListener {
+        val listener = { _: Boolean ->
             background = Theme.BG_APP
             grid.background = Theme.BG_APP
             top.background = Theme.BG_SURFACE
@@ -155,6 +155,8 @@ class SearchScreen(
             grid.repaint()
             repaint()
         }
+        themeListener = listener
+        ctx.addThemeListener(listener)
 
         ctx.addExtensionListener {
             val currentSel = sourceFilter.selectedItem as? String
@@ -167,6 +169,11 @@ class SearchScreen(
         }
 
         loadPopular()
+    }
+
+    fun dispose() {
+        hoverAnimator.stop()
+        themeListener?.let { ctx.removeThemeListener(it) }
     }
 
     fun openSource(sourceName: String) {
@@ -237,7 +244,7 @@ class SearchScreen(
             topRightBadge = hit.item.latestChapter
             topRightColor = Theme.SUCCESS
             selectedState = selected
-            hoveredState = index == hoveredIndex
+            hoverProgress = hoverAnimator.progressFor(index)
         }
     }
 
@@ -275,8 +282,7 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         isOpaque = false
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(60, 20, 40, 20)
-        add(JLabel("🕒", SwingConstants.CENTER).apply {
-            font = font.deriveFont(44f)
+        add(JLabel(ModernIcons.history(48) { Theme.TEXT_MUTED }).apply {
             alignmentX = 0.5f
         })
         add(Box.createVerticalStrut(14))
@@ -303,12 +309,14 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val dateFmt = DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.systemDefault())
     private val itemRenderer = HistoryRowCard()
     private val headerRenderer = HistoryDateHeaderCard()
+    private val hoverAnimator = GridHoverAnimator(list)
+    private var themeListener: ((Boolean) -> Unit)? = null
 
     init {
         background = Theme.BG_APP
         list.background = Theme.BG_APP
         list.border = BorderFactory.createEmptyBorder(12, 20, 18, 20)
-        list.cellRenderer = ListCellRenderer { _, item, _, selected, _ ->
+        list.cellRenderer = ListCellRenderer { _, item, index, selected, _ ->
             when (item) {
                 is HistoryListItem.DateHeader -> headerRenderer.apply { text = item.title }
                 is HistoryListItem.Entry -> {
@@ -323,11 +331,26 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         isFavorite = entry.manga.favorite
                         coverIcon = ctx.covers.get(entry.manga.id, entry.manga.title)
                         selectedState = selected
+                        hoverProgress = hoverAnimator.progressFor(index)
                     }
                 }
             }
         }
+        list.addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val idx = list.locationToIndex(e.point)
+                val valid = if (idx >= 0 && list.getCellBounds(idx, idx)?.contains(e.point) == true &&
+                    model.getElementAt(idx) is HistoryListItem.Entry
+                ) idx else -1
+                list.cursor = if (valid >= 0) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
+                hoverAnimator.setHovered(valid)
+            }
+        })
         list.addMouseListener(object : MouseAdapter() {
+            override fun mouseExited(e: MouseEvent) {
+                hoverAnimator.setHovered(-1)
+            }
+
             override fun mouseClicked(e: MouseEvent) {
                 val idx = list.locationToIndex(e.point)
                 if (idx < 0 || list.getCellBounds(idx, idx)?.contains(e.point) != true) return
@@ -366,8 +389,20 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val top = JPanel(FlowLayout(FlowLayout.LEFT, 10, 10)).apply {
             background = Theme.BG_SURFACE
             border = BorderFactory.createEmptyBorder(4, 12, 4, 12)
-            add(JButton("↻ Atualizar").apply { addActionListener { refresh() } })
-            add(JButton("Limpar histórico").apply { addActionListener { clearAll() } })
+            add(
+                ModernButton(
+                    text = "Atualizar",
+                    icon = ModernIcons.sync(14) { Theme.TEXT_PRIMARY },
+                    variant = ModernButton.Variant.SURFACE,
+                ).apply { addActionListener { refresh() } },
+            )
+            add(
+                ModernButton(
+                    text = "Limpar histórico",
+                    icon = ModernIcons.trash(14) { Color(0xE0, 0x55, 0x65) },
+                    variant = ModernButton.Variant.SURFACE,
+                ).apply { addActionListener { clearAll() } },
+            )
         }
         val scroll = JScrollPane(list).apply {
             border = null
@@ -380,7 +415,7 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         add(top, BorderLayout.NORTH)
         add(centerContainer, BorderLayout.CENTER)
 
-        ctx.addThemeListener {
+        val listener = { _: Boolean ->
             background = Theme.BG_APP
             centerContainer.background = Theme.BG_APP
             list.background = Theme.BG_APP
@@ -390,6 +425,13 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             list.repaint()
             repaint()
         }
+        themeListener = listener
+        ctx.addThemeListener(listener)
+    }
+
+    fun dispose() {
+        hoverAnimator.stop()
+        themeListener?.let { ctx.removeThemeListener(it) }
     }
 
     fun refresh() {
@@ -460,6 +502,7 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         var isFavorite = false
         var coverIcon: ImageIcon? = null
         var selectedState = false
+        var hoverProgress: Float = 0f
 
         init {
             isOpaque = false
@@ -476,6 +519,10 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
             if (selectedState) {
                 g2.color = Theme.BG_CARD_HOVER
+                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
+            } else if (hoverProgress > 0.01f) {
+                val hc = Theme.BG_SURFACE
+                g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress).toInt().coerceIn(0, 255))
                 g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
             }
             g2.color = Theme.BORDER_SUBTLE
@@ -497,31 +544,32 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             g2.color = Color(255, 255, 255, 24)
             g2.drawRoundRect(x + 8, thumbY, thumbW - 1, thumbH - 1, 6, 6)
 
-            // Manga Title
+            // Action button positions
+            val favX = x + w - 74
+            val delX = x + w - 36
             val textX = x + thumbW + 20
+            val maxTextW = (favX - textX - 16).coerceAtLeast(60)
+
+            // Manga Title (ellipsized safely before action buttons)
             g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14.5f)
             g2.color = Theme.TEXT_PRIMARY
-            g2.drawString(mangaTitle, textX, 28)
+            g2.drawString(clipUiText(g2, mangaTitle, maxTextW), textX, 28)
 
             // Chapter name + timestamp
             g2.font = font.deriveFont(Font.PLAIN, 12f)
             g2.color = Theme.TEXT_SECONDARY
             val sub = if (chapterTime.isNotBlank()) "$chapterName  —  $chapterTime" else chapterName
-            g2.drawString(sub, textX, 48)
+            g2.drawString(clipUiText(g2, sub, maxTextW), textX, 48)
 
-            // Action 1: Favorite icon (Heart: solid if favorited, outline if not)
-            val favX = x + w - 74
-            val favY = (h - 24) / 2
-            g2.font = font.deriveFont(Font.PLAIN, 16f)
-            g2.color = if (isFavorite) Theme.ACCENT else Theme.TEXT_MUTED
-            g2.drawString(if (isFavorite) "♥" else "♡", favX + 6, favY + 18)
+            // Action 1: Vector Favorite heart icon
+            val favIcon = ModernIcons.heart(16, filled = isFavorite) {
+                if (isFavorite) Theme.ACCENT else Theme.TEXT_MUTED
+            }
+            favIcon.paintIcon(this, g2, favX + 6, (h - favIcon.iconHeight) / 2)
 
-            // Action 2: Delete icon (Trash bin)
-            val delX = x + w - 36
-            val delY = (h - 24) / 2
-            g2.color = Theme.TEXT_MUTED
-            g2.font = font.deriveFont(Font.PLAIN, 15f)
-            g2.drawString("🗑", delX + 6, delY + 18)
+            // Action 2: Vector Delete trash icon
+            val trashIcon = ModernIcons.trash(15) { Theme.TEXT_MUTED }
+            trashIcon.paintIcon(this, g2, delX + 6, (h - trashIcon.iconHeight) / 2)
 
             g2.dispose()
         }
@@ -538,6 +586,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val model = DefaultListModel<ExtensionUiItem>()
     private val list = JList(model)
     private val footer = JLabel()
+    private var themeListener: ((Boolean) -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -554,7 +603,12 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             isOpaque = false
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(
-                JLabel("⚡ Gerador de Extensões por Link (Beta)").apply {
+                JLabel(
+                    "Gerador de Extensões por Link (Beta)",
+                    ModernIcons.bolt(16) { Theme.ACCENT },
+                    SwingConstants.LEFT,
+                ).apply {
+                    iconTextGap = 8
                     font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
                     foreground = Theme.TEXT_PRIMARY
                 },
@@ -627,8 +681,22 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         urlInput.addActionListener { triggerGenerate() }
         btnGenerate.addActionListener { triggerGenerate() }
 
+        val btnCommunityStore = ModernButton(
+            text = "📦 Catálogo da Comunidade",
+            variant = ModernButton.Variant.SURFACE,
+        ).apply {
+            toolTipText = "Descobrir e instalar extensões comunitárias com 1 clique ou adicionar repositórios JSON"
+            addActionListener {
+                val win = SwingUtilities.getWindowAncestor(this@ExtensionsScreen)
+                CommunityRepoDialog(win, ctx) {
+                    refreshModel()
+                }.isVisible = true
+            }
+        }
+
         val rightControls = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
             isOpaque = false
+            add(btnCommunityStore)
             add(urlInput)
             add(btnGenerate)
         }
@@ -702,10 +770,24 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     g2.color = Theme.TEXT_MUTED
                     g2.drawString("${ext.baseUrl}  │  ${ext.language.uppercase()}", textX, 46)
 
-                    val badge = if (isEnabled) "● Ativa" else "○ Desativada"
-                    g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
-                    g2.color = if (isEnabled) Theme.SUCCESS else Theme.TEXT_MUTED
-                    g2.drawString(badge, x + w - g2.fontMetrics.stringWidth(badge) - 18, (h / 2) + 5)
+                    val badge = if (isEnabled) "Ativa" else "Desativada"
+                    g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
+                    val bFm = g2.fontMetrics
+                    val dotSpace = 12
+                    val bw = dotSpace + bFm.stringWidth(badge) + 18
+                    val bh = 22
+                    val bx = x + w - bw - 14
+                    val by = (h - bh) / 2
+                    g2.color = if (isEnabled) Color(0x2E, 0x9E, 0x6B, 34) else Theme.BG_SURFACE
+                    g2.fillRoundRect(bx, by, bw, bh, 8, 8)
+                    val dotColor = if (isEnabled) Theme.SUCCESS else Theme.TEXT_MUTED
+                    g2.color = dotColor
+                    if (isEnabled) {
+                        g2.fillOval(bx + 9, by + (bh - 6) / 2, 6, 6)
+                    } else {
+                        g2.drawOval(bx + 9, by + (bh - 6) / 2, 6, 6)
+                    }
+                    g2.drawString(badge, bx + 9 + dotSpace, by + ((bh - bFm.height) / 2) + bFm.ascent)
                     g2.dispose()
                 }
             }
@@ -740,7 +822,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             refreshModel()
         }
 
-        ctx.addThemeListener {
+        val listener = { _: Boolean ->
             background = Theme.BG_APP
             betaBar.background = Theme.BG_SURFACE
             betaBar.border = BorderFactory.createCompoundBorder(
@@ -754,9 +836,15 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             list.repaint()
             repaint()
         }
+        themeListener = listener
+        ctx.addThemeListener(listener)
     }
 
-    private fun showExtensionContextMenu(item: ExtensionUiItem, x: Int, y: Int) {
+    fun dispose() {
+        themeListener?.let { ctx.removeThemeListener(it) }
+    }
+
+        private fun showExtensionContextMenu(item: ExtensionUiItem, x: Int, y: Int) {
         val ext = item.source
         val isEnabled = item.isEnabled
         val popup = JPopupMenu().apply {
@@ -802,20 +890,39 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         popup.show(list, x, y)
     }
 
+    private fun findMatchingSourceFile(files: List<File>, ext: ExtensionSource): File? {
+        return files.firstOrNull { f ->
+            runCatching {
+                val text = f.readText()
+                val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                val cfg = json.decodeFromString<mihon.source.ScraperConfig>(text)
+                cfg.name.equals(ext.name, ignoreCase = true) ||
+                    cfg.baseUrl.trimEnd('/').equals(ext.baseUrl.trimEnd('/'), ignoreCase = true)
+            }.getOrDefault(false)
+        } ?: files.firstOrNull { f ->
+            val simple = f.name.removeSuffix(".disabled").removeSuffix(".json")
+            simple.equals(ext.name, ignoreCase = true) || f.name.startsWith("${ext.name}.", ignoreCase = true)
+        }
+    }
+
     private fun enableExtension(ext: ExtensionSource) {
         val sourcesDir = File(System.getProperty("user.home"), ".mihon/sources")
         val disabledFiles = sourcesDir.listFiles { f: File -> f.name.endsWith(".json.disabled", ignoreCase = true) }?.toList().orEmpty()
-        val target = disabledFiles.firstOrNull { f ->
-            f.name.contains(ext.name, ignoreCase = true) ||
-            f.readText().contains(ext.baseUrl, ignoreCase = true)
-        }
+        val target = findMatchingSourceFile(disabledFiles, ext)
 
+        var loadedSource: ExtensionSource = ext
         if (target != null) {
             val enabledName = target.name.removeSuffix(".disabled")
             val enabledFile = File(sourcesDir, enabledName)
-            target.renameTo(enabledFile)
+            if (target.renameTo(enabledFile)) {
+                runCatching {
+                    val cfg = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                        .decodeFromString<mihon.source.ScraperConfig>(enabledFile.readText())
+                    loadedSource = mihon.source.HttpScraperSource(cfg)
+                }
+            }
         }
-        ctx.registerExtension(ext)
+        ctx.registerExtension(loadedSource)
         ctx.setStatus("Extensão '${ext.name}' ativada.")
         refreshModel()
     }
@@ -823,10 +930,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private fun disableExtension(ext: ExtensionSource) {
         val sourcesDir = File(System.getProperty("user.home"), ".mihon/sources")
         val jsonFiles = sourcesDir.listFiles { f: File -> f.extension.equals("json", ignoreCase = true) }?.toList().orEmpty()
-        val target = jsonFiles.firstOrNull { f ->
-            f.name.contains(ext.name, ignoreCase = true) ||
-            f.readText().contains(ext.baseUrl, ignoreCase = true)
-        }
+        val target = findMatchingSourceFile(jsonFiles, ext)
 
         if (target != null) {
             val disabledFile = File(sourcesDir, "${target.name}.disabled")
@@ -850,10 +954,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val jsonFiles = sourcesDir.listFiles { f: File ->
             f.extension.equals("json", ignoreCase = true) || f.name.endsWith(".json.disabled")
         }?.toList().orEmpty()
-        val target = jsonFiles.firstOrNull { f ->
-            f.name.contains(ext.name, ignoreCase = true) ||
-            f.readText().contains(ext.baseUrl, ignoreCase = true)
-        }
+        val target = findMatchingSourceFile(jsonFiles, ext)
 
         target?.delete()
         ctx.unregisterExtension(ext)
@@ -862,17 +963,23 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     fun refreshModel() {
-        model.clear()
         val home = System.getProperty("user.home")
-        val disabledExtensions = mihon.data.extension.ExtensionLoader(File(home, ".mihon/extensions")).loadDisabledExtensions()
+        background(
+            work = {
+                mihon.data.extension.ExtensionLoader(File(home, ".mihon/extensions")).loadDisabledExtensions()
+            },
+            onDone = { res ->
+                val disabledExtensions = res.getOrDefault(emptyList())
+                model.clear()
+                ctx.extensions.forEach { model.addElement(ExtensionUiItem(it, isEnabled = true)) }
+                disabledExtensions.forEach { model.addElement(ExtensionUiItem(it, isEnabled = false)) }
 
-        ctx.extensions.forEach { model.addElement(ExtensionUiItem(it, isEnabled = true)) }
-        disabledExtensions.forEach { model.addElement(ExtensionUiItem(it, isEnabled = false)) }
-
-        val activeCount = ctx.extensions.size
-        val disabledCount = disabledExtensions.size
-        footer.text = "  $activeCount ativa(s)  •  $disabledCount desativada(s)  •  Clique com o botão direito para ativar/desativar"
-        list.repaint()
+                val activeCount = ctx.extensions.size
+                val disabledCount = disabledExtensions.size
+                footer.text = "  $activeCount ativa(s)  •  $disabledCount desativada(s)  •  Clique com o botão direito para ativar/desativar"
+                list.repaint()
+            }
+        )
     }
 }
 
@@ -897,6 +1004,7 @@ class SourcesListScreen(
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(12, 24, 24, 24)
     }
+    private var themeListener: ((Boolean) -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -923,7 +1031,7 @@ class SourcesListScreen(
         }
         add(scroll, BorderLayout.CENTER)
 
-        ctx.addThemeListener {
+        val listener = { _: Boolean ->
             background = Theme.BG_APP
             container.background = Theme.BG_APP
             searchBar.background = Theme.BG_APP
@@ -933,12 +1041,18 @@ class SourcesListScreen(
             rebuildList()
             repaint()
         }
+        themeListener = listener
+        ctx.addThemeListener(listener)
 
         ctx.addExtensionListener {
             rebuildList()
         }
 
         rebuildList()
+    }
+
+    fun dispose() {
+        themeListener?.let { ctx.removeThemeListener(it) }
     }
 
     fun rebuildList() {
@@ -1004,7 +1118,8 @@ class SourcesListScreen(
     private fun addLocalSourceRow() {
         val row = createRowPanel(
             iconImage = null,
-            iconText = "📁",
+            leadingIcon = ModernIcons.folder(20) { Theme.ACCENT },
+            iconText = "",
             title = "Fonte local",
             subtitle = "Local",
             onRecents = onSelectLocalSource,
@@ -1019,6 +1134,7 @@ class SourcesListScreen(
         val iconImg = ctx.covers.getSourceIcon(ext) { rebuildList() }
         val row = createRowPanel(
             iconImage = iconImg,
+            leadingIcon = null,
             iconText = iconText,
             title = ext.name,
             subtitle = ext.language.uppercase(),
@@ -1036,6 +1152,7 @@ class SourcesListScreen(
 
     private fun createRowPanel(
         iconImage: ImageIcon? = null,
+        leadingIcon: javax.swing.Icon? = null,
         iconText: String,
         title: String,
         subtitle: String,
@@ -1046,6 +1163,21 @@ class SourcesListScreen(
     ): JPanel {
         return object : JPanel(BorderLayout(14, 0)) {
             private var hovered = false
+            private var hoverProgress = 0f
+            private val hoverTimer = javax.swing.Timer(14) {
+                val target = if (hovered) 1f else 0f
+                hoverProgress += (target - hoverProgress) * 0.25f
+                if (kotlin.math.abs(target - hoverProgress) < 0.015f) {
+                    hoverProgress = target
+                    (it.source as javax.swing.Timer).stop()
+                }
+                repaint()
+            }
+
+            override fun removeNotify() {
+                hoverTimer.stop()
+                super.removeNotify()
+            }
 
             init {
                 isOpaque = false
@@ -1075,6 +1207,13 @@ class SourcesListScreen(
                             g2.clip = clip
                             g2.drawImage(iconImage.image, 2, 2, width - 4, height - 4, null)
                             g2.clip = null
+                        } else if (leadingIcon != null) {
+                            leadingIcon.paintIcon(
+                                this,
+                                g2,
+                                (width - leadingIcon.iconWidth) / 2,
+                                (height - leadingIcon.iconHeight) / 2,
+                            )
                         } else {
                             g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
                             g2.color = Theme.ACCENT
@@ -1117,29 +1256,21 @@ class SourcesListScreen(
                 val rightActions = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 4)).apply {
                     isOpaque = false
 
-                    val btnRecents = JButton("Recentes").apply {
-                        font = font.deriveFont(Font.BOLD, 11.5f)
-                        foreground = Theme.TEXT_PRIMARY
-                        background = Theme.BG_SURFACE
-                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                        isFocusPainted = false
-                        border = BorderFactory.createCompoundBorder(
-                            BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                            BorderFactory.createEmptyBorder(4, 12, 4, 12),
-                        )
+                    val btnRecents = ModernButton(
+                        text = "Recentes",
+                        variant = ModernButton.Variant.SURFACE,
+                    ).apply {
                         addActionListener { onRecents() }
                     }
                     add(btnRecents)
 
-                    val btnPin = JButton(if (isPinned) "📌" else "📍").apply {
-                        font = font.deriveFont(Font.PLAIN, 15f)
-                        foreground = if (isPinned) Theme.ACCENT else Theme.TEXT_MUTED
-                        isOpaque = false
-                        isContentAreaFilled = false
-                        isBorderPainted = false
-                        isFocusPainted = false
-                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                        toolTipText = if (isPinned) "Desafixar fonte" else "Fixar fonte no topo"
+                    val btnPin = ModernIconButton(
+                        icon = ModernIcons.pin(16, filled = isPinned) { if (isPinned) Theme.ACCENT else Theme.TEXT_MUTED },
+                        tip = if (isPinned) "Desafixar fonte" else "Fixar fonte no topo",
+                        sizePx = 32,
+                        cornerRadius = 8f,
+                    ).apply {
+                        isVisible = onTogglePin != null
                         addActionListener { onTogglePin?.invoke() }
                     }
                     add(btnPin)
@@ -1149,11 +1280,11 @@ class SourcesListScreen(
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseEntered(e: MouseEvent) {
                         hovered = true
-                        repaint()
+                        if (!hoverTimer.isRunning) hoverTimer.start()
                     }
                     override fun mouseExited(e: MouseEvent) {
                         hovered = false
-                        repaint()
+                        if (!hoverTimer.isRunning) hoverTimer.start()
                     }
                     override fun mouseClicked(e: MouseEvent) {
                         onRowClick()
@@ -1162,10 +1293,11 @@ class SourcesListScreen(
             }
 
             override fun paintComponent(g: Graphics) {
-                if (hovered) {
+                if (hoverProgress > 0.01f) {
                     val g2 = g.create() as Graphics2D
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                    g2.color = Theme.BG_CARD_HOVER
+                    val hc = Theme.BG_CARD_HOVER
+                    g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress).toInt().coerceIn(0, 255))
                     g2.fillRoundRect(0, 0, width, height, 10, 10)
                     g2.dispose()
                 }

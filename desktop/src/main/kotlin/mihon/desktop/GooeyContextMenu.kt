@@ -504,6 +504,8 @@ class GooeyContextMenu(
         g2.dispose()
     }
 
+    private val reusableEllipse = Ellipse2D.Double()
+
     /**
      * Renders each circular action button independently with smooth drop shadow.
      * All bridge connections between buttons have been removed for a clean, detached floating layout.
@@ -527,8 +529,8 @@ class GooeyContextMenu(
                         else -> palette.blobBg
                     }
                 }
-                val shape = Ellipse2D.Double(centersX[i] - r, centersY[i] - r, r * 2.0, r * 2.0)
-                g2.fill(shape)
+                reusableEllipse.setFrame(centersX[i] - r, centersY[i] - r, r * 2.0, r * 2.0)
+                g2.fill(reusableEllipse)
             }
         }
 
@@ -537,8 +539,8 @@ class GooeyContextMenu(
             if (palette != null) {
                 g2.color = palette.hubBg
             }
-            val hubShape = Ellipse2D.Double(anchorX - currentHubR, anchorY - currentHubR, currentHubR * 2.0, currentHubR * 2.0)
-            g2.fill(hubShape)
+            reusableEllipse.setFrame(anchorX - currentHubR, anchorY - currentHubR, currentHubR * 2.0, currentHubR * 2.0)
+            g2.fill(reusableEllipse)
         }
     }
 

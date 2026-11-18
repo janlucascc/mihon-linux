@@ -1,0 +1,361 @@
+{
+  "fixtures": [
+    {
+      "file": "manga_en_chapter.cbz",
+      "type": "CBZ",
+      "language": "ENGLISH",
+      "pages": [
+        {
+          "pageIndex": 0,
+          "entryName": "001.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.1,
+                "y": 0.0583,
+                "width": 0.45,
+                "height": 0.1333
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "HELLO HERO!",
+              "expectedPtBr": "OLÁ HERÓI!"
+            },
+            {
+              "bounds": {
+                "x": 0.425,
+                "y": 0.55,
+                "width": 0.4875,
+                "height": 0.1333
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "WHERE ARE WE?",
+              "expectedPtBr": "ONDE ESTAMOS?"
+            }
+          ]
+        },
+        {
+          "pageIndex": 1,
+          "entryName": "002.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.1375,
+                "y": 0.0667,
+                "width": 0.4875,
+                "height": 0.1333
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "WATCH OUT!",
+              "expectedPtBr": "CUIDADO!"
+            },
+            {
+              "bounds": {
+                "x": 0.325,
+                "y": 0.5583,
+                "width": 0.5625,
+                "height": 0.1417
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "THIS WAY NOW!",
+              "expectedPtBr": "POR AQUI AGORA!"
+            }
+          ]
+        },
+        {
+          "pageIndex": 2,
+          "entryName": "003.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.1125,
+                "y": 0.075,
+                "width": 0.525,
+                "height": 0.1417
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "STAY BACK!",
+              "expectedPtBr": "FIQUE PARA TRÁS!"
+            },
+            {
+              "bounds": {
+                "x": 0.3375,
+                "y": 0.7167,
+                "width": 0.55,
+                "height": 0.15
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "HOLD THE LINE!",
+              "expectedPtBr": "SEGURE A LINHA!"
+            }
+          ]
+        },
+        {
+          "pageIndex": 3,
+          "entryName": "004.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.2,
+                "y": 0.0833,
+                "width": 0.6,
+                "height": 0.1333
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "WE MADE IT!",
+              "expectedPtBr": "NÓS CONSEGUIMOS!"
+            },
+            {
+              "bounds": {
+                "x": 0.2,
+                "y": 0.5833,
+                "width": 0.6,
+                "height": 0.1333
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "THE END",
+              "expectedPtBr": "FIM"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "manga_jp_chapter.cbz",
+      "type": "CBZ",
+      "language": "JAPANESE",
+      "pages": [
+        {
+          "pageIndex": 0,
+          "entryName": "001.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.1125,
+                "y": 0.0667,
+                "width": 0.475,
+                "height": 0.125
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "こんにちは",
+              "expectedPtBr": "Olá"
+            },
+            {
+              "bounds": {
+                "x": 0.4125,
+                "y": 0.5583,
+                "width": 0.475,
+                "height": 0.125
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "大丈夫？",
+              "expectedPtBr": "Tudo bem?"
+            }
+          ]
+        },
+        {
+          "pageIndex": 1,
+          "entryName": "002.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.675,
+                "y": 0.0667,
+                "width": 0.2125,
+                "height": 0.325
+              },
+              "orientation": "VERTICAL",
+              "sourceText": "助けて！",
+              "expectedPtBr": "Socorro!"
+            },
+            {
+              "bounds": {
+                "x": 0.125,
+                "y": 0.4667,
+                "width": 0.2125,
+                "height": 0.3333
+              },
+              "orientation": "VERTICAL",
+              "sourceText": "行こう！",
+              "expectedPtBr": "Vamos!"
+            }
+          ]
+        },
+        {
+          "pageIndex": 2,
+          "entryName": "003.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.6625,
+                "y": 0.0583,
+                "width": 0.2125,
+                "height": 0.3
+              },
+              "orientation": "VERTICAL",
+              "sourceText": "待って！",
+              "expectedPtBr": "Espere!"
+            },
+            {
+              "bounds": {
+                "x": 0.15,
+                "y": 0.5667,
+                "width": 0.6625,
+                "height": 0.1333
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "ありがとう！",
+              "expectedPtBr": "Obrigado!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "manga_wide_double.png",
+      "type": "PNG",
+      "language": "ENGLISH",
+      "pages": [
+        {
+          "pageIndex": 0,
+          "entryName": "manga_wide_double.png",
+          "width": 1600,
+          "height": 1000,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.0563,
+                "y": 0.09,
+                "width": 0.2437,
+                "height": 0.17
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "LEFT PANEL",
+              "expectedPtBr": "PAINEL ESQUERDO"
+            },
+            {
+              "bounds": {
+                "x": 0.2,
+                "y": 0.45,
+                "width": 0.2437,
+                "height": 0.16
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "HOLD ON!",
+              "expectedPtBr": "AGUENTE!"
+            },
+            {
+              "bounds": {
+                "x": 0.5563,
+                "y": 0.09,
+                "width": 0.2437,
+                "height": 0.17
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "RIGHT PANEL",
+              "expectedPtBr": "PAINEL DIREITO"
+            },
+            {
+              "bounds": {
+                "x": 0.6937,
+                "y": 0.45,
+                "width": 0.2437,
+                "height": 0.16
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "ATTACK NOW!",
+              "expectedPtBr": "ATAQUE AGORA!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "manga_blank_and_dark.png",
+      "type": "PNG",
+      "language": "ENGLISH",
+      "pages": [
+        {
+          "pageIndex": 0,
+          "entryName": "manga_blank_and_dark.png",
+          "width": 800,
+          "height": 1200,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.1625,
+                "y": 0.6333,
+                "width": 0.675,
+                "height": 0.1667
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "DARK PANEL TEXT",
+              "expectedPtBr": "TEXTO PAINEL ESCURO"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "manga_webtoon_strip.png",
+      "type": "PNG",
+      "language": "ENGLISH",
+      "pages": [
+        {
+          "pageIndex": 0,
+          "entryName": "manga_webtoon_strip.png",
+          "width": 800,
+          "height": 2400,
+          "blocks": [
+            {
+              "bounds": {
+                "x": 0.175,
+                "y": 0.05,
+                "width": 0.65,
+                "height": 0.0708
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "TOP BUBBLE",
+              "expectedPtBr": "BALÃO SUPERIOR"
+            },
+            {
+              "bounds": {
+                "x": 0.175,
+                "y": 0.3917,
+                "width": 0.65,
+                "height": 0.0708
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "MIDDLE BUBBLE",
+              "expectedPtBr": "BALÃO DO MEIO"
+            },
+            {
+              "bounds": {
+                "x": 0.175,
+                "y": 0.725,
+                "width": 0.65,
+                "height": 0.0708
+              },
+              "orientation": "HORIZONTAL",
+              "sourceText": "BOTTOM BUBBLE",
+              "expectedPtBr": "BALÃO INFERIOR"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

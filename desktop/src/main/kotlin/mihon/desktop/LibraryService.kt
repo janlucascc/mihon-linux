@@ -8,6 +8,9 @@ import mihon.source.MangaResult
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import tachiyomi.domain.bookmark.model.Bookmark
+import tachiyomi.domain.bookmark.model.BookmarkType
+import tachiyomi.domain.bookmark.repository.BookmarkRepository
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterRemoteUpdate
 import tachiyomi.domain.chapter.model.ChapterUpdate
@@ -137,9 +140,10 @@ data class HistoryEntry(
  * downloads remote chapters as `.cbz`, manages categories, and tracks reading history.
  */
 class LibraryService(
-    private val mangas: MangaRepository,
-    private val chapters: ChapterRepository,
+    val mangas: MangaRepository,
+    val chapters: ChapterRepository,
     private val history: HistoryRepository,
+    private val bookmarks: BookmarkRepository,
     val downloadsDir: File = File(System.getProperty("user.home"), ".mihon/downloads"),
 ) {
     val httpClient = OkHttpClient.Builder()
@@ -486,8 +490,17 @@ class LibraryService(
                             .header("Referer", if (isMangaDex) "https://mangadex.org/" else "${source.baseUrl}/")
                             .build()
                         val rawBytes = httpClient.newCall(req).execute().use { resp ->
-                            if (!resp.isSuccessful) throw IOException("Falha HTTP ${resp.code} na página ${idx + 1}")
-                            resp.body?.bytes() ?: throw IOException("Página ${idx + 1} vazia")
+                            if (resp.code == 403) {
+                                resp.close()
+                                val http1Client = httpClient.newBuilder().protocols(listOf(okhttp3.Protocol.HTTP_1_1)).build()
+                                http1Client.newCall(req).execute().use { retryResp ->
+                                    if (!retryResp.isSuccessful) throw IOException("Falha HTTP ${retryResp.code} na página ${idx + 1}")
+                                    retryResp.body?.bytes() ?: throw IOException("Página ${idx + 1} vazia")
+                                }
+                            } else {
+                                if (!resp.isSuccessful) throw IOException("Falha HTTP ${resp.code} na página ${idx + 1}")
+                                resp.body?.bytes() ?: throw IOException("Página ${idx + 1} vazia")
+                            }
                         }
                         val (finalBytes, finalExt) = MangaImageEnhancer.enhanceForInstall(
                             rawBytes = rawBytes,
@@ -573,18 +586,32 @@ class LibraryService(
                 }
             },
         )
+        if (readState) {
+            chaptersToUpdate
+                .groupBy { it.mangaId }
+                .forEach { (mangaId, list) ->
+                    val maxChap = list.maxOfOrNull { it.chapterNumber.toInt() } ?: 0
+                    if (maxChap > 0) {
+                        TrackerService.onChapterRead(httpClient, mangaId, maxChap)
+                    }
+                }
+        }
     }
 
     /** Records reading progress; marks the chapter as read when the last page was reached. */
     suspend fun saveProgress(chapter: Chapter, page: Int, pageCount: Int, sessionMillis: Long = 0, incognitoMode: Boolean = false) {
+        val finished = pageCount > 0 && page >= pageCount - 1
         chapters.update(
             ChapterUpdate(chapter.id) {
                 lastPageRead = page
-                if (pageCount > 0 && page >= pageCount - 1) read = true
+                if (finished) read = true
             },
         )
         if (!incognitoMode) {
             history.upsert(HistoryUpdate(chapter.id, Clock.System.now(), sessionMillis))
+            if (finished) {
+                TrackerService.onChapterRead(httpClient, chapter.mangaId, chapter.chapterNumber.toInt().coerceAtLeast(1))
+            }
         }
     }
 
@@ -607,6 +634,34 @@ class LibraryService(
     suspend fun deleteHistoryEntry(chapterId: Long) {
         history.deleteByChapterId(chapterId)
     }
+
+    // Bookmark methods
+    suspend fun getBookmarksByChapterId(chapterId: Long): List<Bookmark> =
+        bookmarks.getBookmarksByChapterId(chapterId)
+
+    fun getBookmarksByChapterIdAsFlow(chapterId: Long) =
+        bookmarks.getBookmarksByChapterIdAsFlow(chapterId)
+
+    suspend fun getAllBookmarks(): List<Bookmark> =
+        bookmarks.getAllBookmarks()
+
+    suspend fun addBookmark(chapterId: Long, page: Int): Bookmark =
+        bookmarks.upsert(Bookmark.create(chapterId = chapterId, page = page, type = BookmarkType.BOOKMARK))
+
+    suspend fun addNote(chapterId: Long, page: Int, note: String): Bookmark =
+        bookmarks.addNote(chapterId, page, note)
+
+    suspend fun addHighlight(chapterId: Long, page: Int, color: String): Bookmark =
+        bookmarks.addHighlight(chapterId, page, color)
+
+    suspend fun toggleBookmark(chapterId: Long, page: Int): Boolean =
+        bookmarks.toggleBookmark(chapterId, page)
+
+    suspend fun deleteBookmark(id: Long) =
+        bookmarks.delete(id)
+
+    suspend fun deleteBookmarksByChapterId(chapterId: Long) =
+        bookmarks.deleteByChapterId(chapterId)
 
     suspend fun toggleFavorite(mangaId: Long): Boolean {
         val current = mangas.getMangaById(mangaId) ?: return false
@@ -703,7 +758,7 @@ class LibraryService(
         val topGenresList = genreCounts.entries.sortedByDescending { it.value }.take(5).map { it.key to it.value }
 
         // Most active reading day
-        val dayFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE", java.util.Locale("pt", "BR"))
+        val dayFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE", java.util.Locale.Builder().setLanguage("pt").setRegion("BR").build())
         val dayCounts = hist.mapNotNull { entry ->
             entry.history.readAt?.let {
                 dayFormatter.format(java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()).atZone(java.time.ZoneId.systemDefault()))

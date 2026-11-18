@@ -11,6 +11,13 @@ interface ExtensionSource {
     fun getPopularManga(): List<MangaResult> = searchManga("a")
     fun getMangaDetails(url: String): MangaDetails
     fun getChapterImages(url: String): List<String>
+
+    /**
+     * Optional health check to verify the source is reachable and functional.
+     * Default implementation returns true.
+     * Override to provide custom health checks (e.g., ping API, check auth status).
+     */
+    fun healthCheck(): Boolean = true
 }
 
 data class MangaResult(

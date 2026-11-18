@@ -21,6 +21,9 @@ object ArchiveFilter {
         "gif",
         "bmp",
         "webp",
+        "avif",
+        "heic",
+        "heif",
     )
 
     /**
