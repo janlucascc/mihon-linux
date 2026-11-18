@@ -466,9 +466,9 @@ class FloatingSpeedPill(
     override fun paintComponent(g: Graphics) {
         val g2 = g.create() as Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-        g2.color = Color(20, 22, 28, 230)
+        g2.color = Color(0x17, 0x17, 0x1C, 235)
         g2.fillRoundRect(0, 0, width, height, 22, 22)
-        g2.color = Theme.BORDER_SUBTLE
+        g2.color = Color(255, 255, 255, 20)
         g2.drawRoundRect(0, 0, width - 1, height - 1, 22, 22)
         g2.dispose()
         super.paintComponent(g)
@@ -584,7 +584,24 @@ class ReaderWindow(
         }
     }
 
-    private val pageLabel = JLabel(" ")
+    private val pageLabel = object : JLabel(" ") {
+        init {
+            font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12f)
+            foreground = Color.WHITE
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(4, 11, 4, 11)
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val arc = height.toFloat().coerceAtLeast(18f)
+            g2.color = Color(255, 255, 255, 26)
+            g2.fill(java.awt.geom.RoundRectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat(), arc, arc))
+            g2.dispose()
+            super.paintComponent(g)
+        }
+    }
     private var updatingSlider = false
     private val pageSlider = JSlider(1, max(pageCount, 1), (currentPage + 1).coerceIn(1, max(pageCount, 1))).apply {
         isFocusable = false
@@ -700,7 +717,7 @@ class ReaderWindow(
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             val arc = height.toFloat().coerceAtLeast(24f)
-            g2.color = Color(18, 20, 26, 224)
+            g2.color = Color(0x17, 0x17, 0x1C, 235)
             g2.fill(java.awt.geom.RoundRectangle2D.Float(0f, 0f, width - 1f, height - 1f, arc, arc))
             val c = translatorPillTint
             g2.color = Color(c.red, c.green, c.blue, 145)
@@ -1079,9 +1096,17 @@ class ReaderWindow(
             webtoon.invalidateScaledCache()
             applyView()
         }
-        topHud = JPanel(FlowLayout(FlowLayout.CENTER, 7, 6)).apply {
-            background = Color(18, 19, 24, 242)
-            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Color(255, 255, 255, 26))
+        topHud = object : JPanel(FlowLayout(FlowLayout.CENTER, 7, 6)) {
+            override fun paintComponent(g: Graphics) {
+                val g2 = g.create() as Graphics2D
+                g2.color = Color(0x17, 0x17, 0x1C, 235)
+                g2.fillRect(0, 0, width, height)
+                g2.dispose()
+                super.paintComponent(g)
+            }
+        }.apply {
+            isOpaque = false
+            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Color(255, 255, 255, 20))
             add(modeBox)
             add(fitBox)
             add(qualityBox)
@@ -1146,10 +1171,18 @@ class ReaderWindow(
         }
 
         // Mihon BottomReaderBar + ReaderPageIndicator + Slider
-        bottomHud = JPanel(BorderLayout(12, 0)).apply {
-            background = Color(18, 19, 24, 242)
+        bottomHud = object : JPanel(BorderLayout(12, 0)) {
+            override fun paintComponent(g: Graphics) {
+                val g2 = g.create() as Graphics2D
+                g2.color = Color(0x17, 0x17, 0x1C, 235)
+                g2.fillRect(0, 0, width, height)
+                g2.dispose()
+                super.paintComponent(g)
+            }
+        }.apply {
+            isOpaque = false
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, Color(255, 255, 255, 26)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Color(255, 255, 255, 20)),
                 BorderFactory.createEmptyBorder(6, 16, 6, 16),
             )
             val leftNav = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {

@@ -107,6 +107,10 @@ internal fun configureTheme(presetName: String? = null) {
     UIManager.put("Label.foreground", ColorUIResource(Theme.TEXT_PRIMARY))
     UIManager.put("ToggleButton.selectedBackground", ColorUIResource(Theme.BG_PILL_ACTIVE))
     UIManager.put("ToggleButton.selectedForeground", ColorUIResource(Theme.TEXT_PRIMARY))
+    UIManager.put("Component.focusColor", ColorUIResource(Theme.ACCENT))
+    UIManager.put("Component.focusedBorderColor", ColorUIResource(Theme.ACCENT))
+    UIManager.put("Button.focusedBorderColor", ColorUIResource(Theme.ACCENT))
+    UIManager.put("ProgressBar.foreground", ColorUIResource(Theme.PRIMARY))
     UIManager.put("Component.arc", 999) // M3 Pill shapes
     UIManager.put("Button.arc", 999)
     UIManager.put("TextComponent.arc", 16)
@@ -115,13 +119,9 @@ internal fun configureTheme(presetName: String? = null) {
     UIManager.put("ScrollBar.width", 10)
 }
 
-internal fun applyTheme(preset: Theme.ThemePreset) {
-    prefs.put(PREF_PRESET, preset.name)
-    prefs.putBoolean(PREF_DARK, preset.isDark)
-    configureTheme(preset.name)
-
+private fun resetComponentStylesAndRefreshWindows() {
     fun resetComponentStyles(comp: java.awt.Component) {
-        if (comp is JButton || comp is JComboBox<*>) {
+        if ((comp is JButton && comp !is ModernButton && comp !is ModernIconButton) || comp is JComboBox<*>) {
             comp.background = null
             comp.foreground = null
         }
@@ -141,6 +141,13 @@ internal fun applyTheme(preset: Theme.ThemePreset) {
         win.repaint()
     }
     FlatLaf.updateUI()
+}
+
+internal fun applyTheme(preset: Theme.ThemePreset) {
+    prefs.put(PREF_PRESET, preset.name)
+    prefs.putBoolean(PREF_DARK, preset.isDark)
+    configureTheme(preset.name)
+    resetComponentStylesAndRefreshWindows()
 }
 
 internal fun applyCustomTheme(bgApp: Color, bgSidebar: Color, bgSurface: Color, accent: Color, textPrimary: Color) {
@@ -152,28 +159,7 @@ internal fun applyCustomTheme(bgApp: Color, bgSidebar: Color, bgSurface: Color, 
     prefs.putInt(PREF_CUSTOM_TEXT, textPrimary.rgb and 0xFFFFFF)
 
     configureTheme(Theme.ThemePreset.CUSTOM.name)
-
-    fun resetComponentStyles(comp: java.awt.Component) {
-        if (comp is JButton || comp is JComboBox<*>) {
-            comp.background = null
-            comp.foreground = null
-        }
-        if (comp is JCheckBox) {
-            comp.background = null
-            comp.foreground = null
-            comp.isOpaque = false
-        }
-        if (comp is java.awt.Container) {
-            comp.components.forEach { resetComponentStyles(it) }
-        }
-    }
-
-    java.awt.Window.getWindows().forEach { win ->
-        resetComponentStyles(win)
-        SwingUtilities.updateComponentTreeUI(win)
-        win.repaint()
-    }
-    FlatLaf.updateUI()
+    resetComponentStylesAndRefreshWindows()
 }
 
 fun main() {
@@ -827,6 +813,12 @@ class M3Switch(
         }.also { it.start() }
     }
 
+    override fun removeNotify() {
+        animTimer?.stop()
+        animTimer = null
+        super.removeNotify()
+    }
+
     init {
         isOpaque = false
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
@@ -872,9 +864,8 @@ class M3Switch(
         val p = animProgress // 0f (off) -> 1f (on)
 
         // Track fill color blending
-        val inactiveBg = if (isHovered) (if (Theme.isDark) Color(0x28, 0x28, 0x28) else Color(0xEE, 0xF0, 0xF4))
-                         else (if (Theme.isDark) Color(0x12, 0x12, 0x12) else Color(0xFA, 0xFA, 0xFA))
-        val activeBg = if (Theme.isDark) Color(0xFF, 0xFF, 0xFF) else Color(0x1C, 0x1D, 0x1F)
+        val inactiveBg = if (isHovered) Theme.BG_CARD_HOVER else Theme.BG_SURFACE
+        val activeBg = Theme.PRIMARY
         val currentTrackBg = blendColor(inactiveBg, activeBg, p)
 
         g2.color = currentTrackBg
@@ -902,10 +893,8 @@ class M3Switch(
         val thumbY = trackY + (trackH - thumbD) / 2f
 
         // Thumb color interpolation:
-        // Off: Light translucent (dark theme) / Dark translucent (light theme)
-        // On: Contrast against active track (Black on white in dark mode, White on dark in light mode)
-        val offThumbColor = if (Theme.isDark) Color(255, 255, 255, 200) else Color(0, 0, 0, 160)
-        val onThumbColor = if (Theme.isDark) Color(0x00, 0x00, 0x00) else Color(0xFF, 0xFF, 0xFF)
+        val offThumbColor = if (Theme.isDark) Color(255, 255, 255, 200) else Color(22, 23, 34, 160)
+        val onThumbColor = Color.WHITE
         val currentThumbColor = blendColor(offThumbColor, onThumbColor, p)
 
         g2.color = currentThumbColor

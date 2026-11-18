@@ -462,6 +462,13 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             topHeader.background = Theme.BG_APP
             tabsBar.background = Theme.BG_SURFACE
             titleLabel.foreground = Theme.TEXT_PRIMARY
+            filterField.foreground = Theme.TEXT_PRIMARY
+            filterField.background = Theme.BG_CARD
+            filterField.caretColor = Theme.ACCENT
+            filterField.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
+                BorderFactory.createEmptyBorder(6, 12, 6, 12),
+            )
             btnSearch.foreground = Theme.TEXT_PRIMARY
             btnFilter.foreground = Theme.TEXT_PRIMARY
             btnOverflow.foreground = Theme.TEXT_PRIMARY
@@ -817,9 +824,9 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 val ph = 20
                 rightX -= pw
                 val py = (h - ph) / 2
+                g2.color = Theme.PRIMARY
+                g2.fillRoundRect(rightX, py, pw, ph, ph, ph)
                 g2.color = Color.WHITE
-                g2.fillRoundRect(rightX, py, pw, ph, 10, 10)
-                g2.color = Color.BLACK
                 g2.drawString(uStr, rightX + (pw - fm.stringWidth(uStr)) / 2, py + ((ph - fm.height) / 2) + fm.ascent)
                 rightX -= 8
             }
@@ -830,8 +837,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     downloadsCount,
                     rightX,
                     (h - 20) / 2,
-                    Color(0x1B, 0x3B, 0x2B),
-                    Color(0x52, 0xD1, 0x92),
+                    Theme.TERTIARY,
+                    Color.WHITE,
                     alignRight = true,
                 )
                 rightX -= pw + 10

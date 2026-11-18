@@ -382,40 +382,40 @@ class GooeyContextMenu(
             }
             preset == Theme.ThemePreset.DARK -> {
                 GooeyPalette(
-                    blobBg = Color(0x23, 0x26, 0x2D),
-                    blobHoverBg = Color(0x32, 0x36, 0x40),
-                    iconColor = Color(0xF5, 0xF5, 0xF7),
-                    hubBg = Color(0x3E, 0x44, 0x52),
-                    dangerBg = Color(0xE0, 0x3E, 0x4E),
+                    blobBg = Color(0x20, 0x21, 0x26),
+                    blobHoverBg = Color(0x2E, 0x30, 0x3A),
+                    iconColor = Color(0xEA, 0xEB, 0xF2),
+                    hubBg = Theme.PRIMARY,
+                    dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(0, 0, 0, 120),
-                    outlineColor = Color(255, 255, 255, 45),
+                    shadowColor = Color(0, 0, 0, 125),
+                    outlineColor = Color(255, 255, 255, 34),
                 )
             }
             !dark -> {
-                // Material Light theme
+                // Mihon Light theme
                 GooeyPalette(
-                    blobBg = Color(0xEA, 0xED, 0xF3),
-                    blobHoverBg = Color(0xDC, 0xE0, 0xE8),
-                    iconColor = Color(0x1C, 0x1D, 0x1F),
-                    hubBg = Color(0x2D, 0x31, 0x39),
-                    dangerBg = Color(0xE0, 0x3E, 0x4E),
+                    blobBg = Color(0xFF, 0xFF, 0xFF),
+                    blobHoverBg = Color(0xEE, 0xEF, 0xF7),
+                    iconColor = Color(0x16, 0x17, 0x22),
+                    hubBg = Theme.PRIMARY,
+                    dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(0, 0, 0, 45),
-                    outlineColor = Color(0, 0, 0, 28),
+                    shadowColor = Color(22, 23, 34, 48),
+                    outlineColor = Color(22, 23, 34, 28),
                 )
             }
             else -> {
                 // AMOLED
                 GooeyPalette(
-                    blobBg = Color(0x1C, 0x1C, 0x1E),
-                    blobHoverBg = Color(0x2C, 0x2C, 0x30),
-                    iconColor = Color(0xFF, 0xFF, 0xFF),
-                    hubBg = Color(0x3A, 0x3A, 0x3E),
-                    dangerBg = Color(0xE0, 0x3E, 0x4E),
+                    blobBg = Color(0x14, 0x15, 0x1B),
+                    blobHoverBg = Color(0x22, 0x24, 0x2E),
+                    iconColor = Color.WHITE,
+                    hubBg = Theme.PRIMARY,
+                    dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(0, 0, 0, 140),
-                    outlineColor = Color(255, 255, 255, 38),
+                    shadowColor = Color(0, 0, 0, 145),
+                    outlineColor = Color(255, 255, 255, 34),
                 )
             }
         }
@@ -487,8 +487,7 @@ class GooeyContextMenu(
         // 5. Draw Central Hub Morph Icon (≡ -> ✕)
         val hubS = hubScale.value.toFloat().coerceAtLeast(0f)
         if (hubS > 0.08f) {
-            val hubIconColor = if (Theme.currentPreset == Theme.ThemePreset.LIGHT) Color.WHITE else Color.WHITE
-            drawHubMorphIcon(g2, cx, cy, hubS, crossMorph.value.toFloat().coerceIn(0f, 1f), hubIconColor)
+            drawHubMorphIcon(g2, cx, cy, hubS, crossMorph.value.toFloat().coerceIn(0f, 1f), Color.WHITE)
         }
 
         // 6. Floating Tooltip Pill for hovered option

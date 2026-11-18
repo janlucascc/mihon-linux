@@ -5,6 +5,8 @@ import java.awt.Color
 import java.awt.GradientPaint
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.geom.Ellipse2D
+import java.awt.geom.Line2D
 import java.awt.geom.Path2D
 import java.awt.geom.RoundRectangle2D
 import java.awt.image.BufferedImage
@@ -13,80 +15,93 @@ import javax.swing.ImageIcon
 
 /**
  * Procedural vector icon generator for Mihon Linux:
- * Features the signature geometric open-book & origami bookmark symbol inside a sleek rounded squircle.
+ * Renders the indigo rounded-squircle open book mark with dual-tone leaves and cyan completion badge.
  */
 object AppIcon {
 
+    private const val ICON_VERSION = "v2-indigo-book"
+
+    val CANONICAL_SVG: String = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+          <rect x="8" y="8" width="112" height="112" rx="26" fill="#5B5BD6"/>
+          <path d="M28 38c0-5 4-9 9-9h24c7 0 12 5 12 12v52c-6-5-12-7-20-7H28V38z" fill="#F7F7FA"/>
+          <path d="M100 38c0-5-4-9-9-9H67c-7 0-12 5-12 12v52c6-5 12-7 20-7h25V38z" fill="#E8E9FF"/>
+          <path d="M64 41v45" fill="none" stroke="#5B5BD6" stroke-width="5" stroke-linecap="round"/>
+          <path d="M37 46h18M37 58h18M73 46h18M73 58h18" fill="none" stroke="#8D8DE8" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="94" cy="94" r="18" fill="#36C5F0"/>
+          <path d="M86 94l6 6 11-13" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    """.trimIndent() + "\n"
+
     fun createImage(size: Int): BufferedImage {
-        val img = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
+        val safeSize = size.coerceAtLeast(1)
+        val img = BufferedImage(safeSize, safeSize, BufferedImage.TYPE_INT_ARGB)
         val g2 = img.createGraphics()
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
         g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
 
-        val s = size.toFloat()
-        val corner = s * 0.24f
+        val scale = safeSize / 128.0
+        g2.scale(scale, scale)
 
-        // Squircle background with deep modern gradient (Indigo / Violet into Deep Obsidian)
-        val bgGrad = GradientPaint(
-            0f, 0f, Color(0x3B, 0x36, 0x4C),
-            s, s, Color(0x18, 0x17, 0x22),
-        )
-        g2.paint = bgGrad
-        g2.fill(RoundRectangle2D.Float(0f, 0f, s, s, corner, corner))
+        // Rounded squircle container (#5B5BD6, rx=26 -> arc diameter 52 in 128x128 viewBox)
+        g2.color = Color(0x5B, 0x5B, 0xD6)
+        g2.fill(RoundRectangle2D.Float(8f, 8f, 112f, 112f, 52f, 52f))
 
-        // Subtle squircle border
-        g2.color = Color(255, 255, 255, 45)
-        g2.stroke = BasicStroke(s * 0.03f)
-        g2.draw(RoundRectangle2D.Float(s * 0.015f, s * 0.015f, s * 0.97f, s * 0.97f, corner, corner))
-
-        // Open book pages & bookmark symbol
-        // Left Page
+        // Left page (#F7F7FA)
         val leftPage = Path2D.Float().apply {
-            moveTo(s * 0.50f, s * 0.72f)
-            quadTo(s * 0.35f, s * 0.67f, s * 0.20f, s * 0.73f)
-            lineTo(s * 0.20f, s * 0.33f)
-            quadTo(s * 0.35f, s * 0.27f, s * 0.50f, s * 0.33f)
+            moveTo(28f, 38f)
+            curveTo(28f, 33f, 32f, 29f, 37f, 29f)
+            lineTo(61f, 29f)
+            curveTo(68f, 29f, 73f, 34f, 73f, 41f)
+            lineTo(73f, 93f)
+            curveTo(67f, 88f, 61f, 86f, 53f, 86f)
+            lineTo(28f, 86f)
             closePath()
         }
-        val pageGradLeft = GradientPaint(
-            s * 0.20f, s * 0.30f, Color(0xFA, 0xFA, 0xFA),
-            s * 0.50f, s * 0.70f, Color(0xDE, 0xE2, 0xE6),
-        )
-        g2.paint = pageGradLeft
+        g2.color = Color(0xF7, 0xF7, 0xFA)
         g2.fill(leftPage)
 
-        // Right Page
+        // Right page (#E8E9FF)
         val rightPage = Path2D.Float().apply {
-            moveTo(s * 0.50f, s * 0.72f)
-            quadTo(s * 0.65f, s * 0.67f, s * 0.80f, s * 0.73f)
-            lineTo(s * 0.80f, s * 0.33f)
-            quadTo(s * 0.65f, s * 0.27f, s * 0.50f, s * 0.33f)
+            moveTo(100f, 38f)
+            curveTo(100f, 33f, 96f, 29f, 91f, 29f)
+            lineTo(67f, 29f)
+            curveTo(60f, 29f, 55f, 34f, 55f, 41f)
+            lineTo(55f, 93f)
+            curveTo(61f, 88f, 67f, 86f, 75f, 86f)
+            lineTo(100f, 86f)
             closePath()
         }
-        val pageGradRight = GradientPaint(
-            s * 0.50f, s * 0.30f, Color(0xFA, 0xFA, 0xFA),
-            s * 0.80f, s * 0.70f, Color(0xDE, 0xE2, 0xE6),
-        )
-        g2.paint = pageGradRight
+        g2.color = Color(0xE8, 0xE9, 0xFF)
         g2.fill(rightPage)
 
-        // Book spine line
-        g2.color = Color(0x8A, 0x8D, 0x98)
-        g2.stroke = BasicStroke(s * 0.035f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
-        g2.drawLine((s * 0.50f).toInt(), (s * 0.31f).toInt(), (s * 0.50f).toInt(), (s * 0.73f).toInt())
+        // Center spine (#5B5BD6)
+        g2.color = Color(0x5B, 0x5B, 0xD6)
+        g2.stroke = BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g2.draw(Line2D.Float(64f, 41f, 64f, 86f))
 
-        // Vibrant Red / Scarlet Ribbon Bookmark falling from top
-        val ribbon = Path2D.Float().apply {
-            moveTo(s * 0.44f, s * 0.25f)
-            lineTo(s * 0.56f, s * 0.25f)
-            lineTo(s * 0.56f, s * 0.55f)
-            lineTo(s * 0.50f, s * 0.48f)
-            lineTo(s * 0.44f, s * 0.55f)
-            closePath()
+        // Page line rules (#8D8DE8)
+        g2.color = Color(0x8D, 0x8D, 0xE8)
+        g2.stroke = BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g2.draw(Line2D.Float(37f, 46f, 55f, 46f))
+        g2.draw(Line2D.Float(37f, 58f, 55f, 58f))
+        g2.draw(Line2D.Float(73f, 46f, 91f, 46f))
+        g2.draw(Line2D.Float(73f, 58f, 91f, 58f))
+
+        // Cyan completion badge (#36C5F0)
+        g2.color = Color(0x36, 0xC5, 0xF0)
+        g2.fill(Ellipse2D.Float(76f, 76f, 36f, 36f))
+
+        // White checkmark (#FFFFFF)
+        val check = Path2D.Float().apply {
+            moveTo(86f, 94f)
+            lineTo(92f, 100f)
+            lineTo(103f, 87f)
         }
-        g2.color = Color(0xEF, 0x44, 0x44)
-        g2.fill(ribbon)
+        g2.color = Color.WHITE
+        g2.stroke = BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g2.draw(check)
 
         g2.dispose()
         return img
@@ -127,44 +142,31 @@ object AppIcon {
             runCatching {
                 val home = java.io.File(System.getProperty("user.home"))
                 val hicolor = java.io.File(home, ".local/share/icons/hicolor")
+                val versionMarker = java.io.File(hicolor, ".mihon-linux-icon-version")
+                val needsRefresh = !versionMarker.exists() ||
+                    runCatching { versionMarker.readText().trim() != ICON_VERSION }.getOrDefault(true)
                 val sizes = listOf(16, 24, 32, 48, 64, 128, 256, 512)
                 for (sz in sizes) {
                     val dir = java.io.File(hicolor, "${sz}x${sz}/apps")
                     if (!dir.exists()) dir.mkdirs()
+                    val rendered by lazy { createImage(sz) }
                     val pngFile = java.io.File(dir, "mihon-linux.png")
-                    if (!pngFile.exists() || pngFile.length() < 100L) {
-                        javax.imageio.ImageIO.write(createImage(sz), "PNG", pngFile)
+                    if (needsRefresh || !pngFile.exists() || pngFile.length() < 100L) {
+                        javax.imageio.ImageIO.write(rendered, "PNG", pngFile)
                     }
                     // Also write alias matching StartupWMClass for Wayland compositors
                     val wmClassPng = java.io.File(dir, "mihon-desktop-MainKt.png")
-                    if (!wmClassPng.exists()) {
-                        javax.imageio.ImageIO.write(createImage(sz), "PNG", wmClassPng)
+                    if (needsRefresh || !wmClassPng.exists() || wmClassPng.length() < 100L) {
+                        javax.imageio.ImageIO.write(rendered, "PNG", wmClassPng)
                     }
                 }
 
                 val scalableDir = java.io.File(hicolor, "scalable/apps").apply { mkdirs() }
                 val svgFile = java.io.File(scalableDir, "mihon-linux.svg")
-                svgFile.writeText(
-                    """
-                    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-                      <defs>
-                        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stop-color="#3B364C"/>
-                          <stop offset="100%" stop-color="#181722"/>
-                        </linearGradient>
-                        <linearGradient id="pg" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stop-color="#FAFAFA"/>
-                          <stop offset="100%" stop-color="#DEE2E6"/>
-                        </linearGradient>
-                      </defs>
-                      <rect width="256" height="256" rx="60" fill="url(#bg)" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="6"/>
-                      <path d="M128 184 Q90 171 51 187 L51 84 Q90 69 128 84 Z" fill="url(#pg)"/>
-                      <path d="M128 184 Q166 171 205 187 L205 84 Q166 69 128 84 Z" fill="url(#pg)"/>
-                      <line x1="128" y1="79" x2="128" y2="187" stroke="#8A8D98" stroke-width="9" stroke-linecap="round"/>
-                      <path d="M113 64 L143 64 L143 141 L128 123 L113 141 Z" fill="#EF4444"/>
-                    </svg>
-                    """.trimIndent(),
-                )
+                svgFile.writeText(CANONICAL_SVG)
+                if (needsRefresh) {
+                    runCatching { versionMarker.writeText(ICON_VERSION) }
+                }
 
                 val mainIconFile = java.io.File(hicolor, "256x256/apps/mihon-linux.png")
                 val appsDir = java.io.File(home, ".local/share/applications").apply { mkdirs() }

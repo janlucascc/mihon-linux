@@ -7,6 +7,7 @@ import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.geom.RoundRectangle2D
 import javax.swing.ImageIcon
 import javax.swing.JPanel
 
@@ -57,12 +58,23 @@ class MangaPosterCard : JPanel() {
         g2.color = Color(0, 0, 0, shadowAlphaInner)
         g2.fillRoundRect(coverX + 2, coverY + 4 + (1f * hp).toInt(), COVER_W, COVER_H, COVER_ARC, COVER_ARC)
 
-        // Cover image
+        // Cover image clipped cleanly to COVER_ARC (ensures 14px corners even for pre-cached covers)
+        val coverShape = RoundRectangle2D.Float(
+            coverX.toFloat(),
+            coverY.toFloat(),
+            COVER_W.toFloat(),
+            COVER_H.toFloat(),
+            COVER_ARC.toFloat(),
+            COVER_ARC.toFloat(),
+        )
         coverIcon?.image?.let { img ->
+            val prevClip = g2.clip
+            g2.clip = coverShape
             g2.drawImage(img, coverX, coverY, COVER_W, COVER_H, null)
+            g2.clip = prevClip
         }
 
-        // Top-left: Material 3 Unread Badge + crisp vector Downloads Badge
+        // Top-left: Brand Indigo Unread Badge + crisp vector Downloads Badge
         var badgeCursorX = coverX + 8
         val badgeY = coverY + 8
 
@@ -86,30 +98,33 @@ class MangaPosterCard : JPanel() {
         }
         if (downloadsBadgeCount == 0 && unreadBadgeCount == 0) {
             topLeftBadge?.takeIf { it.isNotBlank() }?.let { badge ->
-                drawStamp(g2, badge, badgeCursorX, badgeY, Color(13, 13, 15, 225), Theme.TEXT_PRIMARY, alignRight = false)
+                drawStamp(g2, badge, badgeCursorX, badgeY, Color(0x17, 0x17, 0x1C, 222), Color.WHITE, alignRight = false)
             }
         }
 
         // Top-right badge (Language / Source or chapter tag)
         val rightLabel = if (downloadsBadgeCount > 0 || unreadBadgeCount > 0) topLeftBadge else topRightBadge
-        val rightColor = if (downloadsBadgeCount > 0 || unreadBadgeCount > 0) Color(13, 13, 15, 225) else topRightColor
+        val rightColor = if (downloadsBadgeCount > 0 || unreadBadgeCount > 0) Color(0x17, 0x17, 0x1C, 222) else topRightColor
         rightLabel?.takeIf { it.isNotBlank() }?.let { badge ->
             drawStamp(g2, badge, coverX + COVER_W - 8, badgeY, rightColor, Color.WHITE, alignRight = true)
         }
 
         // Crisp focus/hover frame & subtle edge border around the book cover
         if (selectedState) {
-            g2.color = Theme.ACCENT
+            g2.color = Theme.PRIMARY
             g2.stroke = BasicStroke(2f)
             g2.drawRoundRect(coverX, coverY, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
         } else if (hp > 0.02f) {
-            val frameAlpha = (180 * hp).toInt().coerceIn(0, 220)
-            val baseCol = Theme.TEXT_PRIMARY
-            g2.color = Color(baseCol.red, baseCol.green, baseCol.blue, frameAlpha)
-            g2.stroke = BasicStroke(1.3f)
+            val baseCol = blendUiColor(
+                if (Theme.isDark) Color(255, 255, 255, 24) else Color(22, 23, 34, 24),
+                Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 145),
+                hp,
+            )
+            g2.color = baseCol
+            g2.stroke = BasicStroke(1.25f)
             g2.drawRoundRect(coverX, coverY, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
-        } else if (Theme.isDark) {
-            g2.color = Color(255, 255, 255, 22)
+        } else {
+            g2.color = if (Theme.isDark) Color(255, 255, 255, 22) else Color(22, 23, 34, 22)
             g2.stroke = BasicStroke(1f)
             g2.drawRoundRect(coverX, coverY, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
         }
@@ -120,15 +135,18 @@ class MangaPosterCard : JPanel() {
         if (compactOverlayMode) {
             val gradH = 74
             val gradY = coverY + COVER_H - gradH
+            val prevClip = g2.clip
+            g2.clip = coverShape
             g2.paint = java.awt.GradientPaint(
                 0f,
                 gradY.toFloat(),
                 Color(0, 0, 0, 0),
                 0f,
                 (coverY + COVER_H).toFloat(),
-                Color(13, 13, 15, 235),
+                Color(0x17, 0x17, 0x1C, 235),
             )
-            g2.fillRoundRect(coverX, gradY, COVER_W, gradH, COVER_ARC, COVER_ARC)
+            g2.fillRect(coverX, gradY, COVER_W, gradH)
+            g2.clip = prevClip
 
             g2.font = font.deriveFont(Font.BOLD, 12.5f)
             val lines = wrapTwoLines(g2, titleText, maxTextW - 6)
@@ -136,14 +154,14 @@ class MangaPosterCard : JPanel() {
             lines.forEach { line ->
                 g2.color = Color(0, 0, 0, 200)
                 g2.drawString(line, textX + 5, ty + 1)
-                g2.color = Theme.TEXT_PRIMARY
+                g2.color = Color.WHITE
                 g2.drawString(line, textX + 4, ty)
                 ty += 15
             }
         } else {
             var textY = coverY + COVER_H + 18
             g2.font = font.deriveFont(Font.BOLD, 13f)
-            g2.color = if (hoveredState) (if (Theme.isDark) Color.WHITE else Color(0x00, 0x55, 0xAA)) else Theme.TEXT_PRIMARY
+            g2.color = blendUiColor(Theme.TEXT_PRIMARY, Theme.ACCENT, hp)
             val lines = wrapTwoLines(g2, titleText, maxTextW)
             lines.forEach { line ->
                 g2.drawString(line, textX, textY)
@@ -161,8 +179,7 @@ class MangaPosterCard : JPanel() {
     }
 
     /**
-     * Material 3 Unread Pill Badge (Solid white rounded container with bold black tabular numbers,
-     * matching the official Mihon Android UI seen on the screenshots).
+     * Brand Unread Pill Badge (`#5B5BD6` indigo pill with crisp bold white tabular numbers).
      */
     private fun drawM3UnreadPill(
         g2: Graphics2D,
@@ -174,19 +191,19 @@ class MangaPosterCard : JPanel() {
         val fm = g2.fontMetrics
         val textW = fm.stringWidth(text)
         val h = 20
-        val w = (textW + 10).coerceAtLeast(h)
-        val arc = 10
+        val w = (textW + 12).coerceAtLeast(h)
+        val arc = h
 
         // Subtle drop shadow
         g2.color = Color(0, 0, 0, 95)
         g2.fillRoundRect(x, y + 1, w, h, arc, arc)
 
-        // White solid pill container
-        g2.color = Color.WHITE
+        // Indigo solid pill container (#5B5BD6)
+        g2.color = Theme.PRIMARY
         g2.fillRoundRect(x, y, w, h, arc, arc)
 
-        // High-contrast black digits
-        g2.color = Color.BLACK
+        // High-contrast crisp white digits
+        g2.color = Color.WHITE
         val textX = x + (w - textW) / 2
         val textY = y + ((h - fm.height) / 2) + fm.ascent
         g2.drawString(text, textX, textY)
@@ -204,15 +221,15 @@ class MangaPosterCard : JPanel() {
     ): Int {
         g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
         val fm = g2.fontMetrics
-        val w = fm.stringWidth(text) + 12
+        val w = fm.stringWidth(text) + 14
         val h = 20
         val x = if (alignRight) anchorX - w else anchorX
         g2.color = bg
-        g2.fillRoundRect(x, y, w, h, 5, 5)
+        g2.fillRoundRect(x, y, w, h, h, h)
         g2.color = Color(255, 255, 255, 42)
-        g2.drawRoundRect(x, y, w - 1, h - 1, 5, 5)
+        g2.drawRoundRect(x, y, w - 1, h - 1, h, h)
         g2.color = fg
-        g2.drawString(text, x + 6, y + ((h - fm.height) / 2) + fm.ascent)
+        g2.drawString(text, x + 7, y + ((h - fm.height) / 2) + fm.ascent)
         return w
     }
 
@@ -292,10 +309,10 @@ internal fun drawVectorDownloadPill(
     val h = 20
     val x = if (alignRight) anchorX - w else anchorX
     g2.color = bg
-    g2.fillRoundRect(x, y, w, h, 6, 6)
+    g2.fillRoundRect(x, y, w, h, h, h)
     g2.color = Color(255, 255, 255, 42)
     g2.stroke = BasicStroke(1f)
-    g2.drawRoundRect(x, y, w - 1, h - 1, 6, 6)
+    g2.drawRoundRect(x, y, w - 1, h - 1, h, h)
 
     val ix = x + 6
     val iy = y + 5

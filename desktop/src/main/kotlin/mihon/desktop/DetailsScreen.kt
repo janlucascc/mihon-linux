@@ -112,7 +112,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
     private val btnCancelStreaming = ModernButton(
         text = "Cancelar",
-        icon = ModernIcons.close(12) { Color(0xE0, 0x55, 0x65) },
+        icon = ModernIcons.close(12) { Theme.DANGER },
         variant = ModernButton.Variant.SURFACE,
     ).apply {
         isVisible = false
@@ -241,8 +241,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     val miTrack = JMenuItem("Configurar Rastreamento (AniList / MAL)…", ModernIcons.sync(14) { Theme.TEXT_PRIMARY }).apply {
                         addActionListener { openTrackerDialog() }
                     }
-                    val miRemove = JMenuItem("Remover da biblioteca", ModernIcons.trash(14) { Color(0xE0, 0x55, 0x65) }).apply {
-                        foreground = Color(0xE0, 0x55, 0x65)
+                    val miRemove = JMenuItem("Remover da biblioteca", ModernIcons.trash(14) { Theme.DANGER }).apply {
+                        foreground = Theme.DANGER
                         addActionListener { removeCurrent() }
                     }
                     add(miMarkRead)
@@ -940,8 +940,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 g2.color = Theme.BG_CARD_HOVER
                 g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
             } else if (hoverProgress > 0.01f) {
-                val hc = Theme.BG_SURFACE
-                g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress).toInt().coerceIn(0, 255))
+                val hc = Theme.BG_CARD_HOVER
+                g2.color = Color(hc.red, hc.green, hc.blue, (210 * hoverProgress).toInt().coerceIn(0, 255))
                 g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
             }
 
@@ -951,7 +951,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
             // Left vertical Hanko accent bar for unread or partially read chapters
             if (!isRead) {
-                g2.color = if (lastPage > 0) Theme.ACCENT else Color(0xE0, 0x4F, 0x3E, 140)
+                g2.color = if (lastPage > 0) Theme.ACCENT else Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 175)
                 g2.fillRoundRect(x + 4, 12, 3, h - 24, 2, 2)
             }
 
@@ -963,14 +963,14 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 else -> "Ler capítulo"
             }
             val pillBg = when {
-                isDownloaded -> Color(0x2E, 0x9E, 0x6B, 38)
-                isDownloading -> Color(245, 158, 11, 40)
-                else -> Color(0xE0, 0x4F, 0x3E, 32)
+                isDownloaded -> Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 38)
+                isDownloading -> Color(Theme.WARNING.red, Theme.WARNING.green, Theme.WARNING.blue, 38)
+                else -> Theme.ACCENT_SOFT
             }
             val pillFg = when {
                 isDownloaded -> Theme.SUCCESS
-                isDownloading -> Color(251, 191, 36)
-                else -> Theme.ACCENT_HOVER
+                isDownloading -> Theme.WARNING
+                else -> Theme.ACCENT
             }
             val pillIcon = when {
                 isDownloaded -> ModernIcons.check(12) { pillFg }

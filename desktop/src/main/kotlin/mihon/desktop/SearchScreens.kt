@@ -58,11 +58,13 @@ class SearchScreen(
 
     private val field = JTextField(26).apply {
         putClientProperty("JTextField.placeholderText", "Pesquisar mangá (ex: One Piece, Naruto, Solo Leveling)…")
+        putClientProperty("JComponent.roundRect", true)
     }
     private val sourceFilter = JComboBox(
         (listOf("Todas as fontes") + ctx.extensions.map { it.name }).toTypedArray(),
     )
     private var themeListener: ((Boolean) -> Unit)? = null
+    private var extensionListener: (() -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -158,7 +160,7 @@ class SearchScreen(
         themeListener = listener
         ctx.addThemeListener(listener)
 
-        ctx.addExtensionListener {
+        val extListener = {
             val currentSel = sourceFilter.selectedItem as? String
             sourceFilter.removeAllItems()
             sourceFilter.addItem("Todas as fontes")
@@ -167,6 +169,8 @@ class SearchScreen(
                 sourceFilter.selectedItem = currentSel
             }
         }
+        extensionListener = extListener
+        ctx.addExtensionListener(extListener)
 
         loadPopular()
     }
@@ -174,6 +178,7 @@ class SearchScreen(
     fun dispose() {
         hoverAnimator.stop()
         themeListener?.let { ctx.removeThemeListener(it) }
+        extensionListener?.let { ctx.removeExtensionListener(it) }
     }
 
     fun openSource(sourceName: String) {
@@ -399,7 +404,7 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             add(
                 ModernButton(
                     text = "Limpar histórico",
-                    icon = ModernIcons.trash(14) { Color(0xE0, 0x55, 0x65) },
+                    icon = ModernIcons.trash(14) { Theme.DANGER },
                     variant = ModernButton.Variant.SURFACE,
                 ).apply { addActionListener { clearAll() } },
             )
@@ -587,6 +592,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val list = JList(model)
     private val footer = JLabel()
     private var themeListener: ((Boolean) -> Unit)? = null
+    private var extensionListener: (() -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -623,6 +629,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         val urlInput = JTextField(26).apply {
             putClientProperty("JTextField.placeholderText", "Cole o link do site (ex: https://meumanga.com)…")
+            putClientProperty("JComponent.roundRect", true)
             preferredSize = Dimension(280, 34)
         }
         val btnGenerate = ModernButton("+ Transformar Link em Extensão", variant = ModernButton.Variant.PRIMARY).apply {
@@ -778,8 +785,8 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     val bh = 22
                     val bx = x + w - bw - 14
                     val by = (h - bh) / 2
-                    g2.color = if (isEnabled) Color(0x2E, 0x9E, 0x6B, 34) else Theme.BG_SURFACE
-                    g2.fillRoundRect(bx, by, bw, bh, 8, 8)
+                    g2.color = if (isEnabled) Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 34) else Theme.BG_SURFACE
+                    g2.fillRoundRect(bx, by, bw, bh, bh, bh)
                     val dotColor = if (isEnabled) Theme.SUCCESS else Theme.TEXT_MUTED
                     g2.color = dotColor
                     if (isEnabled) {
@@ -818,9 +825,11 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         add(footer, BorderLayout.SOUTH)
 
-        ctx.addExtensionListener {
+        val extListener = {
             refreshModel()
         }
+        extensionListener = extListener
+        ctx.addExtensionListener(extListener)
 
         val listener = { _: Boolean ->
             background = Theme.BG_APP
@@ -842,6 +851,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     fun dispose() {
         themeListener?.let { ctx.removeThemeListener(it) }
+        extensionListener?.let { ctx.removeExtensionListener(it) }
     }
 
         private fun showExtensionContextMenu(item: ExtensionUiItem, x: Int, y: Int) {
@@ -998,6 +1008,7 @@ class SourcesListScreen(
     private val pinnedSources = mutableSetOf<String>()
     private val searchField = JTextField(24).apply {
         putClientProperty("JTextField.placeholderText", "Pesquisar fontes...")
+        putClientProperty("JComponent.roundRect", true)
     }
     private val container = JPanel().apply {
         background = Theme.BG_APP
@@ -1005,6 +1016,7 @@ class SourcesListScreen(
         border = BorderFactory.createEmptyBorder(12, 24, 24, 24)
     }
     private var themeListener: ((Boolean) -> Unit)? = null
+    private var extensionListener: (() -> Unit)? = null
 
     init {
         background = Theme.BG_APP
@@ -1044,15 +1056,18 @@ class SourcesListScreen(
         themeListener = listener
         ctx.addThemeListener(listener)
 
-        ctx.addExtensionListener {
+        val extListener = {
             rebuildList()
         }
+        extensionListener = extListener
+        ctx.addExtensionListener(extListener)
 
         rebuildList()
     }
 
     fun dispose() {
         themeListener?.let { ctx.removeThemeListener(it) }
+        extensionListener?.let { ctx.removeExtensionListener(it) }
     }
 
     fun rebuildList() {

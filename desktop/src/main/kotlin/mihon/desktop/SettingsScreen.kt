@@ -100,6 +100,12 @@ class SegmentedPillSelector<T>(
         })
     }
 
+    override fun removeNotify() {
+        animTimer?.stop()
+        animTimer = null
+        super.removeNotify()
+    }
+
     fun setSelectedValue(value: T, animate: Boolean = false) {
         val idx = options.indexOfFirst { it.first == value }
         if (idx >= 0 && idx != selectedIndex) {
@@ -171,9 +177,9 @@ class SegmentedPillSelector<T>(
         val h = height.toFloat()
         val arc = h
 
-        // Outer pill track (AntiGravity dark capsule)
-        val trackBg = if (Theme.isDark) Color(0x14, 0x15, 0x18) else Color(0xEC, 0xEE, 0xF2)
-        val trackBorder = if (Theme.isDark) Color(255, 255, 255, 24) else Color(0, 0, 0, 24)
+        // Outer pill track
+        val trackBg = if (Theme.isDark) Theme.BG_APP else Color(0xEA, 0xEC, 0xF4)
+        val trackBorder = Theme.BORDER_SUBTLE
         g2.color = trackBg
         g2.fill(RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, arc, arc))
         g2.color = trackBorder
@@ -203,9 +209,9 @@ class SegmentedPillSelector<T>(
             val indH = h - 6f
             val indArc = indH
 
-            // Active segment pill (AntiGravity elevated charcoal pill)
-            val activeBg = if (Theme.isDark) Color(0x2B, 0x2D, 0x33) else Color(0xFF, 0xFF, 0xFF)
-            val activeBorder = if (Theme.isDark) Color(255, 255, 255, 32) else Color(0, 0, 0, 22)
+            // Active segment pill
+            val activeBg = Theme.BG_CARD
+            val activeBorder = Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 95)
             g2.color = activeBg
             g2.fill(RoundRectangle2D.Float(indX, indY, indW, indH, indArc, indArc))
             g2.color = activeBorder
@@ -279,8 +285,8 @@ class SettingsGroupCard : JPanel() {
         val h = height.toFloat()
         val arc = 14f
 
-        val cardBg = if (Theme.isDark) Color(0x16, 0x17, 0x1B) else Theme.BG_SURFACE
-        val borderColor = if (Theme.isDark) Color(255, 255, 255, 20) else Color(0, 0, 0, 22)
+        val cardBg = Theme.BG_SURFACE
+        val borderColor = Theme.BORDER_SUBTLE
 
         g2.color = cardBg
         g2.fill(RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, arc, arc))
@@ -372,7 +378,7 @@ class AntiGravityCategoryButton(
             g2.fillRoundRect(2, 2, w - 4, h - 4, arc, arc)
         }
         if (activeProgress > 0.01f) {
-            val activeBg = if (Theme.isDark) Color(0x28, 0x2A, 0x30) else Theme.BG_PILL_ACTIVE
+            val activeBg = Theme.BG_PILL_ACTIVE
             g2.color = Color(activeBg.red, activeBg.green, activeBg.blue, (activeBg.alpha * activeProgress).toInt().coerceIn(0, 255))
             g2.fillRoundRect(2, 2, w - 4, h - 4, arc, arc)
             val barH = ((h - 16) * activeProgress).toInt().coerceAtLeast(4)

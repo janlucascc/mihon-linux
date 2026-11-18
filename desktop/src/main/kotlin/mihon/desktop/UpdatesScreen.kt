@@ -570,16 +570,16 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 else -> "NOVO"
             }
             val badgeBg = when {
-                isDownloaded -> Color(0x2E, 0x9E, 0x6B, 38)
-                isDownloading -> Color(245, 158, 11, 40)
+                isDownloaded -> Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 38)
+                isDownloading -> Color(Theme.WARNING.red, Theme.WARNING.green, Theme.WARNING.blue, 38)
                 isRead -> Theme.BG_SURFACE
-                else -> Color(Theme.ACCENT.red, Theme.ACCENT.green, Theme.ACCENT.blue, 36)
+                else -> Theme.ACCENT_SOFT
             }
             val badgeFg = when {
                 isDownloaded -> Theme.SUCCESS
-                isDownloading -> Color(251, 191, 36)
+                isDownloading -> Theme.WARNING
                 isRead -> Theme.TEXT_MUTED
-                else -> Theme.ACCENT_HOVER
+                else -> Theme.ACCENT
             }
             val badgeIcon = when {
                 isDownloaded -> ModernIcons.check(12) { badgeFg }
@@ -595,7 +595,7 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val bx = x + w - bw - 16
             val by = (h - 26) / 2
             g2.color = badgeBg
-            g2.fillRoundRect(bx, by, bw, 26, 8, 8)
+            g2.fillRoundRect(bx, by, bw, 26, 26, 26)
             if (badgeIcon != null) {
                 badgeIcon.paintIcon(this, g2, bx + 9, (h - badgeIcon.iconHeight) / 2)
             }

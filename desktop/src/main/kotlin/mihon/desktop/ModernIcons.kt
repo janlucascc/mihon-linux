@@ -1139,10 +1139,10 @@ class ModernButton(
 
         when (variant) {
             Variant.PRIMARY -> {
-                val baseTop = blendUiColor(Color(0x5B, 0x5E, 0xF0), Color(0x6D, 0x70, 0xF8), hp)
-                val topColor = blendUiColor(baseTop, Color(0x43, 0x38, 0xCA), pp)
-                val baseBot = blendUiColor(Color(0x48, 0x40, 0xDC), Color(0x56, 0x4E, 0xE8), hp)
-                val botColor = blendUiColor(baseBot, Color(0x37, 0x30, 0xA3), pp)
+                val baseTop = blendUiColor(Theme.PRIMARY, Color(0x6D, 0x6D, 0xE2), hp)
+                val topColor = blendUiColor(baseTop, Theme.PRIMARY_PRESS, pp)
+                val baseBot = blendUiColor(Theme.PRIMARY_HOVER, Color(0x55, 0x55, 0xD2), hp)
+                val botColor = blendUiColor(baseBot, Color(0x31, 0x31, 0x96), pp)
                 g2.paint = java.awt.GradientPaint(0f, 1f, topColor, 0f, h - 1f, botColor)
                 g2.fill(shape)
 
@@ -1194,24 +1194,23 @@ class ModernButton(
 
             Variant.HUD -> {
                 val bg = blendUiColor(
-                    blendUiColor(Color(34, 37, 46, 215), Color(50, 54, 68, 235), hp),
-                    Color(24, 26, 34, 245),
+                    blendUiColor(Color(0x22, 0x23, 0x2B, 224), Color(0x32, 0x34, 0x42, 238), hp),
+                    Color(0x17, 0x17, 0x1C, 245),
                     pp,
                 )
                 g2.color = bg
                 g2.fill(shape)
-                g2.color = Color(255, 255, 255, (28 + 26 * hp).toInt().coerceIn(0, 80))
+                g2.color = Color(255, 255, 255, (24 + 26 * hp).toInt().coerceIn(0, 80))
                 g2.stroke = BasicStroke(1f)
                 g2.draw(shape)
-                foreground = blendUiColor(Color(228, 231, 238), Color.WHITE, hp)
+                foreground = blendUiColor(Color(232, 234, 242), Color.WHITE, hp)
             }
 
             Variant.HUD_ACCENT -> {
-                val accent = Theme.ACCENT
-                val base = Color(accent.red, accent.green, accent.blue, (52 + 28 * hp + 20 * pp).toInt().coerceIn(0, 140))
-                g2.color = base
+                val base = blendUiColor(Theme.PRIMARY, Color(0x6D, 0x6D, 0xE2), hp)
+                g2.color = Color(base.red, base.green, base.blue, (92 + 40 * hp + 20 * pp).toInt().coerceIn(0, 210))
                 g2.fill(shape)
-                g2.color = Color(accent.red, accent.green, accent.blue, (165 + 55 * hp).toInt().coerceIn(0, 230))
+                g2.color = Color(Theme.ACCENT.red, Theme.ACCENT.green, Theme.ACCENT.blue, (175 + 55 * hp).toInt().coerceIn(0, 235))
                 g2.stroke = BasicStroke(1f)
                 g2.draw(shape)
                 foreground = Color.WHITE

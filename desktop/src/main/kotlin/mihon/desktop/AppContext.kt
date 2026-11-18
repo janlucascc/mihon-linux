@@ -33,38 +33,41 @@ import javax.swing.SwingUtilities
 
 const val COVER_W = 176
 const val COVER_H = 252
-const val COVER_ARC = 10
+const val COVER_ARC = 14
 
 /**
- * Authentic Material 3 AMOLED Dark palette (based on Mihon Android screenshots):
- * - Pure Black AMOLED Background: `#000000`
- * - Material 3 Surface & Containers: `#121212`, `#1E1E1E`, `#262626`
- * - Material 3 Muted Gray Pill Selection: `#4A4A4A` / `#5C5C5C`
- * - Material 3 Outline Hairlines: `#2C2C2C`
- * - High-contrast Pure White Text: `#FFFFFF`
- * - Secondary M3 Text: `#9E9E9E` / `#B0B0B0`
- * - M3 Clean Sans-serif Font Hierarchy
+ * Mihon Linux desktop visual identity palette:
+ * - Signature Indigo Primary: `#5B5BD6` (`#A6A6FF` high-contrast accent on dark surfaces)
+ * - Signature Cyan Accent: `#36C5F0`
+ * - Calm neutral surfaces (`#202126` dark, `#000000` AMOLED, `#F7F7FA` light)
+ * - Semantic colors harmonized for both dark and light surfaces
  */
 object Theme {
     var isDark: Boolean = true
         private set
 
-    var BG_APP = Color(0x00, 0x00, 0x00) // Pure Black AMOLED (Mihon Android)
-    var BG_SIDEBAR = Color(0x08, 0x08, 0x08)
-    var BG_SURFACE = Color(0x12, 0x12, 0x12)
-    var BG_CARD = Color(0x18, 0x18, 0x18)
-    var BG_CARD_HOVER = Color(0x26, 0x26, 0x26)
-    var BG_PILL_ACTIVE = Color(0x4A, 0x4A, 0x4A) // M3 Pill Selection Container
-    var BORDER_SUBTLE = Color(255, 255, 255, 26) // Hairline divider
-    var ACCENT = Color(0xFF, 0xFF, 0xFF) // M3 Primary high-contrast White
-    var ACCENT_HOVER = Color(0xE0, 0xE0, 0xE0)
-    var ACCENT_SOFT = Color(255, 255, 255, 36)
-    val TERTIARY = Color(0x2E, 0x9E, 0x6B) // Offline Matcha
-    var TEXT_PRIMARY = Color(0xFF, 0xFF, 0xFF) // Pure White
-    var TEXT_SECONDARY = Color(0xCC, 0xCC, 0xCC)
-    var TEXT_MUTED = Color(0x9E, 0x9E, 0x9E) // M3 onSurfaceVariant
-    val SUCCESS = Color(0x2E, 0x9E, 0x6B)
-    val DANGER = Color(0xEF, 0x53, 0x50)
+    val PRIMARY = Color(0x5B, 0x5B, 0xD6)
+    val PRIMARY_HOVER = Color(0x49, 0x49, 0xC7)
+    val PRIMARY_PRESS = Color(0x3C, 0x3C, 0xB0)
+    val ACCENT_CYAN = Color(0x36, 0xC5, 0xF0)
+
+    var BG_APP = Color(0x00, 0x00, 0x00)
+    var BG_SIDEBAR = Color(0x07, 0x08, 0x0B)
+    var BG_SURFACE = Color(0x0E, 0x0F, 0x14)
+    var BG_CARD = Color(0x14, 0x15, 0x1B)
+    var BG_CARD_HOVER = Color(0x20, 0x22, 0x2C)
+    var BG_PILL_ACTIVE = Color(0x5B, 0x5B, 0xD6, 52)
+    var BORDER_SUBTLE = Color(255, 255, 255, 22)
+    var ACCENT = Color(0xA6, 0xA6, 0xFF)
+    var ACCENT_HOVER = Color(0x8D, 0x8D, 0xE8)
+    var ACCENT_SOFT = Color(0x5B, 0x5B, 0xD6, 46)
+    var TERTIARY = Color(0x78, 0xB8, 0x86)
+    var TEXT_PRIMARY = Color(0xF4, 0xF5, 0xFA)
+    var TEXT_SECONDARY = Color(0xC2, 0xC6, 0xD6)
+    var TEXT_MUTED = Color(0x90, 0x94, 0xA8)
+    var SUCCESS = Color(0x78, 0xB8, 0x86)
+    var WARNING = Color(0xF4, 0xC8, 0x75)
+    var DANGER = Color(0xFF, 0x8B, 0x8B)
 
     val FONT_DISPLAY: Font by lazy {
         val candidates = listOf("Inter", "Roboto", "Cantarell", "Noto Sans", "Liberation Sans", "SansSerif")
@@ -96,35 +99,35 @@ object Theme {
             "AMOLED Puro (Preto Total)",
             true,
             Color(0x00, 0x00, 0x00),
-            Color(0x08, 0x08, 0x08),
-            Color(0x12, 0x12, 0x12),
-            Color(0x18, 0x18, 0x18),
-            Color(0x26, 0x26, 0x26),
-            Color(0x4A, 0x4A, 0x4A),
-            Color(255, 255, 255, 18),
-            Color(0xFF, 0xFF, 0xFF),
-            Color(0xE0, 0xE0, 0xE0),
-            Color(255, 255, 255, 36),
-            Color(0xFF, 0xFF, 0xFF),
-            Color(0xCC, 0xCC, 0xCC),
-            Color(0x9E, 0x9E, 0x9E),
+            Color(0x07, 0x08, 0x0B),
+            Color(0x0E, 0x0F, 0x14),
+            Color(0x14, 0x15, 0x1B),
+            Color(0x20, 0x22, 0x2C),
+            Color(0x5B, 0x5B, 0xD6, 52),
+            Color(255, 255, 255, 22),
+            Color(0xA6, 0xA6, 0xFF),
+            Color(0x8D, 0x8D, 0xE8),
+            Color(0x5B, 0x5B, 0xD6, 46),
+            Color(0xF4, 0xF5, 0xFA),
+            Color(0xC2, 0xC6, 0xD6),
+            Color(0x90, 0x94, 0xA8),
         ),
         DARK(
-            "Material 3 Dark (Grafite)",
+            "Dark Indigo (Grafite)",
             true,
-            Color(0x12, 0x13, 0x16),
-            Color(0x1A, 0x1B, 0x1F),
-            Color(0x20, 0x22, 0x27),
-            Color(0x28, 0x2A, 0x30),
-            Color(0x35, 0x38, 0x41),
-            Color(0x43, 0x47, 0x52),
-            Color(255, 255, 255, 20),
-            Color(0xFF, 0xFF, 0xFF),
-            Color(0xE5, 0xE7, 0xEB),
-            Color(255, 255, 255, 40),
-            Color(0xFA, 0xFA, 0xFA),
-            Color(0xD1, 0xD5, 0xDB),
-            Color(0x9C, 0xA3, 0xAF),
+            Color(0x16, 0x17, 0x1C),
+            Color(0x1B, 0x1C, 0x22),
+            Color(0x20, 0x21, 0x26),
+            Color(0x26, 0x28, 0x2F),
+            Color(0x30, 0x33, 0x3C),
+            Color(0x5B, 0x5B, 0xD6, 56),
+            Color(255, 255, 255, 22),
+            Color(0xA6, 0xA6, 0xFF),
+            Color(0x8D, 0x8D, 0xE8),
+            Color(0x5B, 0x5B, 0xD6, 48),
+            Color(0xEA, 0xEB, 0xF2),
+            Color(0xB8, 0xBC, 0xCE),
+            Color(0x8C, 0x91, 0xA4),
         ),
         MIDNIGHT_BLUE(
             "Midnight Navy (Azul Noturno)",
@@ -144,38 +147,38 @@ object Theme {
             Color(0x8B, 0x94, 0x9E),
         ),
         LIGHT(
-            "Material 3 Claro (Padrão)",
+            "Claro Indigo (Padrão)",
             false,
-            Color(0xF4, 0xF5, 0xF8),
-            Color(0xEA, 0xED, 0xF2),
+            Color(0xF7, 0xF7, 0xFA),
+            Color(0xEE, 0xEF, 0xF5),
             Color(0xFF, 0xFF, 0xFF),
             Color(0xFF, 0xFF, 0xFF),
-            Color(0xDF, 0xE3, 0xE8),
-            Color(0xD0, 0xD6, 0xE0),
-            Color(0, 0, 0, 18),
-            Color(0x1F, 0x1F, 0x1F),
-            Color(0x33, 0x33, 0x33),
-            Color(0, 0, 0, 20),
-            Color(0x1C, 0x1D, 0x1F),
-            Color(0x4A, 0x4E, 0x54),
-            Color(0x71, 0x76, 0x80),
+            Color(0xE8, 0xE9, 0xF5),
+            Color(0x5B, 0x5B, 0xD6, 36),
+            Color(22, 23, 34, 22),
+            Color(0x5B, 0x5B, 0xD6),
+            Color(0x49, 0x49, 0xC7),
+            Color(0x5B, 0x5B, 0xD6, 30),
+            Color(0x16, 0x17, 0x22),
+            Color(0x56, 0x58, 0x6B),
+            Color(0x78, 0x7B, 0x8F),
         ),
         CUSTOM(
             "Personalizado...",
             true,
-            Color(0x14, 0x14, 0x14),
-            Color(0x1A, 0x1A, 0x1A),
-            Color(0x22, 0x22, 0x22),
-            Color(0x28, 0x28, 0x28),
-            Color(0x36, 0x36, 0x36),
-            Color(0x4D, 0x4D, 0x4D),
-            Color(255, 255, 255, 30),
-            Color(0xFF, 0xFF, 0xFF),
-            Color(0xE0, 0xE0, 0xE0),
-            Color(255, 255, 255, 36),
-            Color(0xFF, 0xFF, 0xFF),
-            Color(0xCC, 0xCC, 0xCC),
-            Color(0x9E, 0x9E, 0x9E),
+            Color(0x16, 0x17, 0x1C),
+            Color(0x1B, 0x1C, 0x22),
+            Color(0x20, 0x21, 0x26),
+            Color(0x26, 0x28, 0x2F),
+            Color(0x30, 0x33, 0x3C),
+            Color(0x5B, 0x5B, 0xD6, 56),
+            Color(255, 255, 255, 26),
+            Color(0xA6, 0xA6, 0xFF),
+            Color(0x8D, 0x8D, 0xE8),
+            Color(0x5B, 0x5B, 0xD6, 46),
+            Color(0xEA, 0xEB, 0xF2),
+            Color(0xB8, 0xBC, 0xCE),
+            Color(0x8C, 0x91, 0xA4),
         ),
     }
 
@@ -208,7 +211,22 @@ object Theme {
         TEXT_PRIMARY = preset.textPrimary
         TEXT_SECONDARY = preset.textSecondary
         TEXT_MUTED = preset.textMuted
-        listeners.forEach { runCatching { it(isDark) } }
+        applySemanticPalette(isDark)
+        listeners.toList().forEach { runCatching { it(isDark) } }
+    }
+
+    private fun applySemanticPalette(dark: Boolean) {
+        if (dark) {
+            SUCCESS = Color(0x78, 0xB8, 0x86)
+            WARNING = Color(0xF4, 0xC8, 0x75)
+            DANGER = Color(0xFF, 0x8B, 0x8B)
+            TERTIARY = SUCCESS
+        } else {
+            SUCCESS = Color(0x2F, 0xB3, 0x44)
+            WARNING = Color(0xE5, 0xA5, 0x0A)
+            DANGER = Color(0xE0, 0x1B, 0x24)
+            TERTIARY = SUCCESS
+        }
     }
 
     fun setCustomColors(
@@ -233,13 +251,26 @@ object Theme {
                          else Color((bgSurface.red - 40).coerceAtLeast(0), (bgSurface.green - 40).coerceAtLeast(0), (bgSurface.blue - 40).coerceAtLeast(0))
         BORDER_SUBTLE = if (isDark) Color(255, 255, 255, 28) else Color(0, 0, 0, 24)
         ACCENT = accent
-        ACCENT_HOVER = accent
-        ACCENT_SOFT = if (isDark) Color(accent.red, accent.green, accent.blue, 45) else Color(accent.red, accent.green, accent.blue, 30)
+        ACCENT_HOVER = if (isDark) {
+            Color(
+                (accent.red + 24).coerceAtMost(255),
+                (accent.green + 24).coerceAtMost(255),
+                (accent.blue + 24).coerceAtMost(255),
+            )
+        } else {
+            Color(
+                (accent.red - 20).coerceAtLeast(0),
+                (accent.green - 20).coerceAtLeast(0),
+                (accent.blue - 20).coerceAtLeast(0),
+            )
+        }
+        ACCENT_SOFT = if (isDark) Color(accent.red, accent.green, accent.blue, 46) else Color(accent.red, accent.green, accent.blue, 30)
         TEXT_PRIMARY = textPrimary
         TEXT_SECONDARY = if (isDark) Color(200, 200, 200) else Color(70, 70, 70)
         TEXT_MUTED = if (isDark) Color(150, 150, 150) else Color(110, 110, 110)
+        applySemanticPalette(isDark)
 
-        listeners.forEach { runCatching { it(isDark) } }
+        listeners.toList().forEach { runCatching { it(isDark) } }
     }
 
     fun setDarkMode(dark: Boolean) {
@@ -299,7 +330,7 @@ class AppContext(
     fun setOfflineFilter(value: Boolean) {
         if (onlyOfflineFilter != value) {
             onlyOfflineFilter = value
-            offlineFilterListeners.forEach { it(value) }
+            offlineFilterListeners.toList().forEach { it(value) }
         }
     }
 
@@ -332,12 +363,12 @@ class AppContext(
         } else {
             extensions.add(ext)
         }
-        extensionListeners.forEach { it.invoke() }
+        extensionListeners.toList().forEach { it.invoke() }
     }
 
     fun unregisterExtension(ext: ExtensionSource) {
         extensions.removeIf { it.id == ext.id || it.baseUrl.equals(ext.baseUrl, ignoreCase = true) }
-        extensionListeners.forEach { it.invoke() }
+        extensionListeners.toList().forEach { it.invoke() }
     }
 
     fun sourceFor(sourceId: Long): ExtensionSource? =
@@ -534,7 +565,7 @@ class CoverCache(
                     (thumbUrl.startsWith("http://") || thumbUrl.startsWith("https://"))
                 val cacheKey = if (hasRemoteThumb) "manga_${manga.id}_" + sha1(thumbUrl) else "manga_${manga.id}"
                 val cachedFile = File(cacheDir, "$cacheKey.png")
-                val urlCachedFile = if (hasRemoteThumb) File(cacheDir, "url_" + sha1(thumbUrl!!)) else null
+                val urlCachedFile = if (hasRemoteThumb) File(cacheDir, "url_" + sha1(thumbUrl) + ".png") else null
 
                 val cachedImg = when {
                     cachedFile.exists() -> runCatching { readCachedImageFile(cachedFile) }.getOrNull()
@@ -709,22 +740,23 @@ class CoverCache(
         val out = BufferedImage(COVER_W, COVER_H, BufferedImage.TYPE_INT_ARGB)
         val g = out.createGraphics()
         setupQuality(g)
+        // Soft 145deg gradient combining Mihon indigo (#5B5BD6 @ 24%) and cyan (#36C5F0 @ 12%) over calm dark slate
         g.paint = GradientPaint(
-            0f, 0f, Color(0x1E, 0x20, 0x2A),
-            COVER_W.toFloat(), COVER_H.toFloat(), Color(0x12, 0x13, 0x18),
+            0f, 0f, Color(0x28, 0x2A, 0x48),
+            COVER_W.toFloat(), COVER_H.toFloat(), Color(0x1B, 0x27, 0x33),
         )
         g.fillRoundRect(0, 0, COVER_W, COVER_H, COVER_ARC, COVER_ARC)
 
         // Subtle decorative inner ring
-        g.color = Color(255, 255, 255, 16)
+        g.color = Color(0xA6, 0xA6, 0xFF, 42)
         g.drawOval(COVER_W / 2 - 36, COVER_H / 2 - 42, 72, 72)
 
-        g.color = Color(242, 239, 233, 85)
+        g.color = Color(0xEA, 0xEB, 0xF2, 165)
         g.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 34f)
         val fm = g.fontMetrics
         g.drawString(initials, (COVER_W - fm.stringWidth(initials)) / 2, (COVER_H + fm.ascent) / 2 - 8)
 
-        g.color = Color(255, 255, 255, 34)
+        g.color = Color(0xA6, 0xA6, 0xFF, 52)
         g.drawRoundRect(0, 0, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
         g.dispose()
         return out
