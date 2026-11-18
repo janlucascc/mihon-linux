@@ -83,7 +83,11 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val tabsBar = LibraryTabsBar()
     private val centerCards = java.awt.CardLayout()
     private val centerContainer = JPanel(centerCards)
-    private val emptyIconLbl = JLabel(ModernIcons.library(56) { Theme.TEXT_MUTED })
+    private val emptyIconLbl = JLabel(
+        ModernIcons.library(56) {
+            Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 185)
+        },
+    )
     private val emptyTitleLbl = JLabel("Sua biblioteca está vazia")
     private val emptySubLbl = JLabel("Explore fontes online ou importe arquivos locais (.cbz/.zip) para começar.")
     private val emptyActionBtn = ModernButton("Explorar Fontes", ModernIcons.browse(15) { Color.WHITE }, ModernButton.Variant.PRIMARY)
@@ -1125,8 +1129,12 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 tabBounds.add(status to rect)
 
                 if (hovered && !active) {
-                    g2.color = Color(255, 255, 255, 12)
-                    g2.fillRoundRect(x + 2, 4, tabW - 4, h - 8, 10, 10)
+                    g2.color = if (Theme.isDark) {
+                        Color(255, 255, 255, 16)
+                    } else {
+                        Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 20)
+                    }
+                    g2.fillRoundRect(x + 2, 4, tabW - 4, h - 8, h - 8, h - 8)
                 }
 
                 // Tab label
@@ -1139,8 +1147,12 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 val pillX = x + 14 + labelW + 8
                 val pillH = 19
                 val pillY = (h - pillH) / 2
-                g2.color = if (active) Theme.ACCENT_SOFT else Color(255, 255, 255, 18)
-                g2.fillRoundRect(pillX, pillY, pillW, pillH, 10, 10)
+                g2.color = when {
+                    active -> Theme.ACCENT_SOFT
+                    Theme.isDark -> Color(255, 255, 255, 18)
+                    else -> Color(22, 23, 34, 16)
+                }
+                g2.fillRoundRect(pillX, pillY, pillW, pillH, pillH, pillH)
                 g2.font = font.deriveFont(Font.BOLD, 11f)
                 g2.color = if (active) Theme.ACCENT_HOVER else Theme.TEXT_MUTED
                 g2.drawString(countStr, pillX + 7, pillY + (pillH - bFm.height) / 2 + bFm.ascent)

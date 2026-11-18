@@ -260,6 +260,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
             }).isVisible = true
         },
         onOpenStatistics = { StatisticsDialog(this, ctx).isVisible = true },
+        onOpenBookmarks = { AllBookmarksDialog(this, ctx).isVisible = true },
         onOpenStorageManager = {
             StorageManagerDialog(
                 owner = this,
@@ -349,22 +350,30 @@ class MihonApp : JFrame("Mihon"), Navigator {
                 ctx.setStatus(if (ctx.incognitoMode) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
             },
             onExit = {
-                System.exit(0)
+                shutdownGracefully()
             },
         )
-        // Handle window close: minimize to tray if enabled, otherwise exit
+        // Handle window close: minimize to tray if enabled, otherwise shut down cleanly
         defaultCloseOperation = WindowConstants.DO_NOTHING_ON_CLOSE
         addWindowListener(object : java.awt.event.WindowAdapter() {
             override fun windowClosing(e: java.awt.event.WindowEvent) {
                 if (SystemTrayManager.minimizeToTray && SystemTrayManager.isSupported) {
                     SystemTrayManager.minimizeToTray()
                 } else {
-                    System.exit(0)
+                    shutdownGracefully()
                 }
             }
         })
         LibraryUpdateScheduler.start(ctx)
         isVisible = true
+    }
+
+    private fun shutdownGracefully() {
+        runCatching { ReaderWindow.activeReader?.takeIf { it.isDisplayable }?.dispose() }
+        runCatching { LibraryUpdateScheduler.stop() }
+        runCatching { db.checkpoint() }
+        dispose()
+        System.exit(0)
     }
 
     override fun showLibrary() {
@@ -1360,6 +1369,7 @@ class MoreScreen(
     private val onOpenDownloadsQueue: () -> Unit,
     private val onOpenCategories: () -> Unit,
     private val onOpenStatistics: () -> Unit,
+    private val onOpenBookmarks: () -> Unit = {},
     private val onOpenStorageManager: () -> Unit,
     private val onOpenSettings: () -> Unit,
     private val onOpenAbout: () -> Unit,
@@ -1586,6 +1596,15 @@ class MoreScreen(
                 desc = "Visualize seu tempo total de leitura, obras lidas e progresso de capítulos.",
                 rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
                 onClick = onOpenStatistics,
+            ),
+        )
+        libraryCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.bookmark(20) { Theme.TEXT_PRIMARY },
+                title = "Bookmarks e anotações",
+                desc = "Acesse todos os marcadores, notas e destaques salvos nos capítulos.",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                onClick = onOpenBookmarks,
             ),
         )
         content.add(libraryCard)

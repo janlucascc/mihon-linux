@@ -417,7 +417,7 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
             if (ms <= 0L) return "0m"
             val totalSeconds = (ms / 1000L).coerceAtLeast(1L)
             if (totalSeconds < 60L) return "${totalSeconds}s"
-            val totalMinutes = Math.round(totalSeconds / 60.0).toLong().coerceAtLeast(1L)
+            val totalMinutes = Math.round(totalSeconds / 60.0).coerceAtLeast(1L)
             return if (totalMinutes >= 60L) {
                 "${totalMinutes / 60L}h ${totalMinutes % 60L}m"
             } else {
@@ -477,15 +477,20 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                 // Top Manga Hero Card (Spotify Wrapped Style)
                 val topManga = stats.topMangas.firstOrNull()
                 val heroCard = JPanel(BorderLayout(12, 12)).apply {
-                    background = Color(24, 26, 34)
+                    background = Color(0x17, 0x17, 0x1C)
                     border = BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(Color(90, 100, 140, 120), 1),
+                        BorderFactory.createLineBorder(Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 140), 1),
                         BorderFactory.createEmptyBorder(16, 16, 16, 16),
                     )
 
-                    val topBadge = JLabel("👑 MANGÁ #1 MAIS LIDO").apply {
+                    val topBadge = JLabel(
+                        "MANGÁ #1 MAIS LIDO",
+                        ModernIcons.sparkles(14) { Theme.WARNING },
+                        SwingConstants.LEFT,
+                    ).apply {
+                        iconTextGap = 6
                         font = font.deriveFont(Font.BOLD, 11f)
-                        foreground = Color(255, 215, 0)
+                        foreground = Color(0xF4, 0xC8, 0x75)
                     }
                     add(topBadge, BorderLayout.NORTH)
 
@@ -666,7 +671,12 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
 
                     if (stats.mostActiveDay != null) {
                         add(Box.createVerticalStrut(8))
-                        val dayLbl = JLabel("📅 Dia mais ativo de leitura: ${stats.mostActiveDay}").apply {
+                        val dayLbl = JLabel(
+                            "Dia mais ativo de leitura: ${stats.mostActiveDay}",
+                            ModernIcons.history(14) { Theme.SUCCESS },
+                            SwingConstants.LEFT,
+                        ).apply {
+                            iconTextGap = 6
                             font = font.deriveFont(Font.BOLD, 11.5f)
                             foreground = Theme.SUCCESS
                             alignmentX = 0f
@@ -923,11 +933,12 @@ class NoteDialog(
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
             isOpaque = false
-            add(JButton("Cancelar").apply {
+            border = BorderFactory.createEmptyBorder(14, 0, 0, 0)
+            add(ModernButton("Cancelar", variant = ModernButton.Variant.SURFACE).apply {
                 isFocusable = false
                 addActionListener { dispose() }
             })
-            add(JButton("Salvar").apply {
+            add(ModernButton("Salvar", variant = ModernButton.Variant.PRIMARY).apply {
                 isFocusable = false
                 addActionListener {
                     val note = textArea.text.trim()
@@ -990,34 +1001,51 @@ class HighlightColorDialog(
         }
 
         presetColors.forEach { (hex, name) ->
+            val swatchColor = Color.decode(hex)
             val btn = object : JPanel(BorderLayout()) {
+                private var hovered = false
+
                 init {
                     isOpaque = false
-                    background = Color.decode(hex)
+                    background = swatchColor
                     preferredSize = Dimension(56, 56)
-                    border = BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 2),
-                        BorderFactory.createEmptyBorder(2, 2, 2, 2),
-                    )
+                    border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
                     cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                     addMouseListener(object : java.awt.event.MouseAdapter() {
                         override fun mouseClicked(e: java.awt.event.MouseEvent) {
                             onColorSelected(hex)
                             dispose()
                         }
+
                         override fun mouseEntered(e: java.awt.event.MouseEvent) {
-                            border = BorderFactory.createLineBorder(Theme.ACCENT, 3)
+                            hovered = true
+                            repaint()
                         }
+
                         override fun mouseExited(e: java.awt.event.MouseEvent) {
-                            border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 2)
+                            hovered = false
+                            repaint()
                         }
                     })
                 }
+
+                override fun paintComponent(g: java.awt.Graphics) {
+                    val g2 = g.create() as java.awt.Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = swatchColor
+                    g2.fillRoundRect(1, 1, width - 2, height - 2, 12, 12)
+                    g2.color = if (hovered) Theme.PRIMARY else Theme.BORDER_SUBTLE
+                    g2.stroke = java.awt.BasicStroke(if (hovered) 2.5f else 1.2f)
+                    g2.drawRoundRect(1, 1, width - 3, height - 3, 12, 12)
+                    g2.dispose()
+                    super.paintComponent(g)
+                }
             }
+            val lum = 0.299 * swatchColor.red + 0.587 * swatchColor.green + 0.114 * swatchColor.blue
             val label = JLabel(name, SwingConstants.CENTER).apply {
-                font = font.deriveFont(11f)
-                foreground = if (Color.decode(hex).getRed() + Color.decode(hex).getGreen() + Color.decode(hex).getBlue() > 384) Color.BLACK else Color.WHITE
-                border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+                font = font.deriveFont(Font.BOLD, 10.5f)
+                foreground = if (lum > 145) Color(0x16, 0x17, 0x22) else Color.WHITE
+                border = BorderFactory.createEmptyBorder(2, 2, 4, 2)
             }
             btn.add(label, BorderLayout.SOUTH)
             grid.add(btn)
@@ -1027,7 +1055,8 @@ class HighlightColorDialog(
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             isOpaque = false
-            add(JButton("Cancelar").apply {
+            border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
+            add(ModernButton("Cancelar", variant = ModernButton.Variant.SURFACE).apply {
                 isFocusable = false
                 addActionListener { dispose() }
             })
@@ -1080,7 +1109,8 @@ class BookmarksListDialog(
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
             isOpaque = false
-            add(JButton("Fechar").apply {
+            border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
+            add(ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
                 isFocusable = false
                 addActionListener { dispose() }
             })
@@ -1135,12 +1165,11 @@ class BookmarksListDialog(
     private fun createBookmarkRow(bm: tachiyomi.domain.bookmark.model.Bookmark): JPanel {
         val isNote = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.NOTE
         val isHighlight = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.HIGHLIGHT
-        val isBookmark = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.BOOKMARK
 
         val typeIcon = when {
-            isNote -> "📝"
-            isHighlight -> "🖍️"
-            else -> "🔖"
+            isNote -> ModernIcons.edit(14) { Theme.ACCENT }
+            isHighlight -> ModernIcons.sparkles(14) { Theme.WARNING }
+            else -> ModernIcons.bookmark(14) { Theme.PRIMARY }
         }
         val typeLabel = when {
             isNote -> "Nota"
@@ -1160,7 +1189,8 @@ class BookmarksListDialog(
         val left = JPanel().apply {
             isOpaque = false
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(JLabel("$typeIcon $typeLabel • Página ${bm.page + 1}/$pageCount").apply {
+            add(JLabel("$typeLabel • Página ${bm.page + 1}/$pageCount", typeIcon, SwingConstants.LEFT).apply {
+                iconTextGap = 7
                 font = font.deriveFont(Font.BOLD, 12.5f)
                 foreground = Theme.TEXT_PRIMARY
             })
@@ -1177,7 +1207,7 @@ class BookmarksListDialog(
                     add(Box.createVerticalStrut(4))
                     val colorPanel = JPanel().apply {
                         isOpaque = true
-                        background = Color.decode(color)
+                        background = runCatching { Color.decode(color) }.getOrDefault(Theme.WARNING)
                         preferredSize = Dimension(120, 18)
                         border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
                     }
@@ -1191,7 +1221,7 @@ class BookmarksListDialog(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
         }
 
-        val goToBtn = JButton("Ir para a página").apply {
+        val goToBtn = ModernButton("Ir para a página", variant = ModernButton.Variant.PRIMARY, compact = true).apply {
             isFocusable = false
             addActionListener {
                 onNavigateToPage(bm.page)
@@ -1202,12 +1232,12 @@ class BookmarksListDialog(
         right.add(Box.createVerticalStrut(6))
 
         if (isNote) {
-            val editBtn = JButton("Editar nota").apply {
+            val editBtn = ModernButton("Editar nota", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                 isFocusable = false
                 addActionListener {
                     NoteDialog(owner, "Editar Nota", bm.note) { newNote ->
                         background({
-                            ctx.service.addNote(bm.chapterId, bm.page, newNote)
+                            ctx.service.updateNote(bm, newNote)
                         }) { _ ->
                             refreshBookmarks()
                         }
@@ -1218,9 +1248,8 @@ class BookmarksListDialog(
             right.add(Box.createVerticalStrut(6))
         }
 
-        val deleteBtn = JButton("Excluir").apply {
+        val deleteBtn = ModernButton("Excluir", ModernIcons.trash(13) { Theme.DANGER }, ModernButton.Variant.SURFACE, compact = true).apply {
             isFocusable = false
-            foreground = Theme.DANGER
             addActionListener {
                 val confirm = JOptionPane.showConfirmDialog(
                     this@BookmarksListDialog,
@@ -1284,7 +1313,8 @@ class AllBookmarksDialog(
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
             isOpaque = false
-            add(JButton("Fechar").apply {
+            border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
+            add(ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
                 isFocusable = false
                 addActionListener { dispose() }
             })
@@ -1332,7 +1362,11 @@ class AllBookmarksDialog(
                                         background({ ctx.service.mangas.getMangaById(chapter.mangaId) }) { mRes ->
                                             mRes.onSuccess { manga ->
                                                 SwingUtilities.invokeLater {
-                                                    addChapterSection(manga!!.title, chapter.name, bms)
+                                                    addChapterSection(
+                                                        manga?.title ?: "Mangá #${chapter.mangaId}",
+                                                        chapter.name,
+                                                        bms,
+                                                    )
                                                 }
                                             }
                                         }
@@ -1379,12 +1413,11 @@ class AllBookmarksDialog(
     ): JPanel {
         val isNote = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.NOTE
         val isHighlight = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.HIGHLIGHT
-        val isBookmark = bm.type == tachiyomi.domain.bookmark.model.BookmarkType.BOOKMARK
 
         val typeIcon = when {
-            isNote -> "📝"
-            isHighlight -> "🖍️"
-            else -> "🔖"
+            isNote -> ModernIcons.edit(14) { Theme.ACCENT }
+            isHighlight -> ModernIcons.sparkles(14) { Theme.WARNING }
+            else -> ModernIcons.bookmark(14) { Theme.PRIMARY }
         }
         val typeLabel = when {
             isNote -> "Nota"
@@ -1404,7 +1437,8 @@ class AllBookmarksDialog(
         val left = JPanel().apply {
             isOpaque = false
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(JLabel("$typeIcon $typeLabel • Página ${bm.page + 1}").apply {
+            add(JLabel("$typeLabel • Página ${bm.page + 1}", typeIcon, SwingConstants.LEFT).apply {
+                iconTextGap = 7
                 font = font.deriveFont(Font.BOLD, 12f)
                 foreground = Theme.TEXT_PRIMARY
             })
@@ -1421,7 +1455,7 @@ class AllBookmarksDialog(
                     add(Box.createVerticalStrut(4))
                     val colorPanel = JPanel().apply {
                         isOpaque = true
-                        background = Color.decode(color)
+                        background = runCatching { Color.decode(color) }.getOrDefault(Theme.WARNING)
                         preferredSize = Dimension(120, 18)
                         border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
                     }
@@ -1435,9 +1469,8 @@ class AllBookmarksDialog(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
         }
 
-        val deleteBtn = JButton("Excluir").apply {
+        val deleteBtn = ModernButton("Excluir", ModernIcons.trash(13) { Theme.DANGER }, ModernButton.Variant.SURFACE, compact = true).apply {
             isFocusable = false
-            foreground = Theme.DANGER
             addActionListener {
                 val confirm = JOptionPane.showConfirmDialog(
                     this@AllBookmarksDialog,

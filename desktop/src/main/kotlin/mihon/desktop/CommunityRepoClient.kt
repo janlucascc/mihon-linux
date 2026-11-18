@@ -233,7 +233,12 @@ class CommunityRepoDialog(
             )
         }
 
-        val title = JLabel("📦 Loja & Repositórios da Comunidade").apply {
+        val title = JLabel(
+            "Loja & Repositórios da Comunidade",
+            ModernIcons.browse(18) { Theme.ACCENT },
+            javax.swing.SwingConstants.LEFT,
+        ).apply {
+            iconTextGap = 8
             font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 17f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f

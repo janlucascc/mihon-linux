@@ -416,18 +416,17 @@ class CoverCache(
     fun getOrReadDisk(manga: Manga): ImageIcon {
         synchronized(iconsLock) { icons[manga.id] }?.let { return it }
         val thumbUrl = manga.thumbnailUrl?.trim()
-        val hasRemoteThumb = !thumbUrl.isNullOrBlank() &&
-            (thumbUrl.startsWith("http://") || thumbUrl.startsWith("https://"))
-        if (hasRemoteThumb) {
-            synchronized(urlIconsLock) { urlIcons[thumbUrl] }?.let { icon ->
+        val remoteThumb = thumbUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        if (remoteThumb != null) {
+            synchronized(urlIconsLock) { urlIcons[remoteThumb] }?.let { icon ->
                 synchronized(iconsLock) { icons[manga.id] = icon }
                 return icon
             }
         }
         val candidates = buildList {
-            if (hasRemoteThumb) {
-                add(File(cacheDir, "manga_${manga.id}_${sha1(thumbUrl!!)}.png"))
-                add(File(cacheDir, "url_${sha1(thumbUrl)}.png"))
+            if (remoteThumb != null) {
+                add(File(cacheDir, "manga_${manga.id}_${sha1(remoteThumb)}.png"))
+                add(File(cacheDir, "url_${sha1(remoteThumb)}.png"))
             }
             add(File(cacheDir, "manga_${manga.id}.png"))
             cacheDir.listFiles { _, name -> name.startsWith("manga_${manga.id}_") && name.endsWith(".png") }

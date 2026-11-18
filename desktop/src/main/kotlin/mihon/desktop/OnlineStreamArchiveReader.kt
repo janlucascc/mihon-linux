@@ -163,6 +163,8 @@ class OnlineStreamArchiveReader(
 
     override fun close() {
         isClosed = true
+        inFlightFetches.values.forEach { it.cancel(true) }
+        inFlightFetches.clear()
         synchronized(memoryLock) { memoryCache.clear() }
         runCatching { diskCacheDir.deleteRecursively() }
     }

@@ -143,4 +143,23 @@ class LibraryServiceTest {
         assertEquals("Saved", restored.title)
         assertEquals(LibraryCategory.COMPLETED, restored.status)
     }
+
+    @Test
+    fun `updateNote edits existing note in place instead of creating duplicate`() = runBlocking {
+        val manga = service.addLocal(cbz("Notes.cbz", 3))
+        val chapter = service.chaptersOf(manga.id).single()
+
+        val created = service.addNote(chapter.id, 1, "Initial draft")
+        val updated = service.updateNote(created, "Edited note")
+
+        val allNotes = service.getBookmarksByChapterId(chapter.id)
+        assertEquals(1, allNotes.size)
+        assertEquals(created.id, updated.id)
+        assertEquals("Edited note", allNotes.single().note)
+
+        assertTrue(service.toggleBookmark(chapter.id, 2))
+        assertEquals(2, service.getBookmarksByChapterId(chapter.id).size)
+        assertEquals(false, service.toggleBookmark(chapter.id, 2))
+        assertEquals(1, service.getBookmarksByChapterId(chapter.id).size)
+    }
 }

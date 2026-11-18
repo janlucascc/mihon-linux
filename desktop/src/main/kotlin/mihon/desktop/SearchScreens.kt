@@ -588,6 +588,7 @@ data class ExtensionUiItem(
 )
 
 class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
+    private val lenientJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     private val model = DefaultListModel<ExtensionUiItem>()
     private val list = JList(model)
     private val footer = JLabel()
@@ -689,7 +690,8 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         btnGenerate.addActionListener { triggerGenerate() }
 
         val btnCommunityStore = ModernButton(
-            text = "📦 Catálogo da Comunidade",
+            text = "Catálogo da Comunidade",
+            icon = ModernIcons.browse(15) { Theme.TEXT_PRIMARY },
             variant = ModernButton.Variant.SURFACE,
         ).apply {
             toolTipText = "Descobrir e instalar extensões comunitárias com 1 clique ou adicionar repositórios JSON"
@@ -904,8 +906,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         return files.firstOrNull { f ->
             runCatching {
                 val text = f.readText()
-                val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                val cfg = json.decodeFromString<mihon.source.ScraperConfig>(text)
+                val cfg = lenientJson.decodeFromString<mihon.source.ScraperConfig>(text)
                 cfg.name.equals(ext.name, ignoreCase = true) ||
                     cfg.baseUrl.trimEnd('/').equals(ext.baseUrl.trimEnd('/'), ignoreCase = true)
             }.getOrDefault(false)
@@ -926,8 +927,7 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val enabledFile = File(sourcesDir, enabledName)
             if (target.renameTo(enabledFile)) {
                 runCatching {
-                    val cfg = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                        .decodeFromString<mihon.source.ScraperConfig>(enabledFile.readText())
+                    val cfg = lenientJson.decodeFromString<mihon.source.ScraperConfig>(enabledFile.readText())
                     loadedSource = mihon.source.HttpScraperSource(cfg)
                 }
             }

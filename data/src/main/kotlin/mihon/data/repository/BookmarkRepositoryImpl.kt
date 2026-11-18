@@ -56,12 +56,11 @@ class BookmarkRepositoryImpl(
 
     override suspend fun getBookmarksByChapterId(chapterId: Long): List<Bookmark> = withContext(dispatcher) {
         transaction(databaseManager.database) {
-            @Suppress("UNCHECKED_CAST")
             BookmarkTable
                 .selectAll()
                 .where { BookmarkTable.chapterId eq chapterId }
                 .orderBy(BookmarkTable.page to SortOrder.ASC, BookmarkTable.createdAt to SortOrder.DESC)
-                .map { it.toBookmark() } as List<Bookmark>
+                .map { it.toBookmark() }
         }
     }
 
@@ -74,11 +73,10 @@ class BookmarkRepositoryImpl(
 
     override suspend fun getAllBookmarks(): List<Bookmark> = withContext(dispatcher) {
         transaction(databaseManager.database) {
-            @Suppress("UNCHECKED_CAST")
             BookmarkTable
                 .selectAll()
                 .orderBy(BookmarkTable.createdAt, SortOrder.DESC)
-                .map { it.toBookmark() } as List<Bookmark>
+                .map { it.toBookmark() }
         }
     }
 
@@ -157,24 +155,22 @@ class BookmarkRepositoryImpl(
     override suspend fun getBookmarksByChapterIds(chapterIds: List<Long>): Map<Long, List<Bookmark>> = withContext(dispatcher) {
         if (chapterIds.isEmpty()) return@withContext emptyMap()
         transaction(databaseManager.database) {
-            @Suppress("UNCHECKED_CAST")
             val bookmarks = BookmarkTable
                 .selectAll()
                 .where { BookmarkTable.chapterId inList chapterIds }
                 .orderBy(BookmarkTable.page to SortOrder.ASC, BookmarkTable.createdAt to SortOrder.DESC)
-                .map { it.toBookmark() } as List<Bookmark>
+                .map { it.toBookmark() }
             bookmarks.groupBy { it.chapterId }
         }
     }
 
     override suspend fun getBookmarksByType(type: BookmarkType): List<Bookmark> = withContext(dispatcher) {
         transaction(databaseManager.database) {
-            @Suppress("UNCHECKED_CAST")
             BookmarkTable
                 .selectAll()
                 .where { BookmarkTable.type eq type.value }
                 .orderBy(BookmarkTable.createdAt, SortOrder.DESC)
-                .map { it.toBookmark() } as List<Bookmark>
+                .map { it.toBookmark() }
         }
     }
 

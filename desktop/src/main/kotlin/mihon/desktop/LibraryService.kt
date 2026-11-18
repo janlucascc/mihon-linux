@@ -651,6 +651,9 @@ class LibraryService(
     suspend fun addNote(chapterId: Long, page: Int, note: String): Bookmark =
         bookmarks.addNote(chapterId, page, note)
 
+    suspend fun updateNote(bookmark: Bookmark, newNote: String): Bookmark =
+        bookmarks.upsert(bookmark.copy(note = newNote))
+
     suspend fun addHighlight(chapterId: Long, page: Int, color: String): Bookmark =
         bookmarks.addHighlight(chapterId, page, color)
 

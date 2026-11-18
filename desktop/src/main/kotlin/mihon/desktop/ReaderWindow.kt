@@ -495,12 +495,12 @@ class ReaderWindow(
     private var onNextChapter: (() -> Unit)? = null,
     private var onProgress: (page: Int, pageCount: Int, sessionMillis: Long) -> Unit = { _, _, _ -> },
     // Bookmark integration
-    private val chapterId: Long = -1,
-    private val mangaTitle: String = "",
-    private val onToggleBookmark: ((Long, Int) -> Boolean)? = null,
-    private val onAddNote: ((Long, Int, String) -> Unit)? = null,
-    private val onAddHighlight: ((Long, Int, String) -> Unit)? = null,
-    private val onShowBookmarks: ((Long, String, Int, (Int) -> Unit) -> Unit)? = null,
+    private var chapterId: Long = -1,
+    private var mangaTitle: String = "",
+    private var onToggleBookmark: ((Long, Int) -> Boolean)? = null,
+    private var onAddNote: ((Long, Int, String) -> Unit)? = null,
+    private var onAddHighlight: ((Long, Int, String) -> Unit)? = null,
+    private var onShowBookmarks: ((Long, String, Int, (Int) -> Unit) -> Unit)? = null,
 ) : JFrame("Mihon Linux - $title") {
 
     private var reader: ArchiveReader = when (source) {
@@ -880,10 +880,10 @@ class ReaderWindow(
                 g2.composite = java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, toastAlpha.coerceIn(0f, 1f))
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                 val arc = height.toFloat().coerceAtLeast(28f)
-                g2.color = Color(18, 20, 26, 232)
+                g2.color = Color(0x17, 0x17, 0x1C, 235)
                 g2.fill(java.awt.geom.RoundRectangle2D.Float(0f, 0f, width - 1f, height - 1f, arc, arc))
                 val c = Theme.ACCENT
-                g2.color = Color(c.red, c.green, c.blue, 140)
+                g2.color = Color(c.red, c.green, c.blue, 145)
                 g2.stroke = java.awt.BasicStroke(1.2f)
                 g2.draw(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, width - 2f, height - 2f, arc, arc))
                 super.paint(g2)
@@ -1280,8 +1280,20 @@ class ReaderWindow(
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 markUserInteraction()
+                val hasModifiers = e.isControlDown || e.isAltDown || e.isMetaDown
                 when {
-                    ReaderAction.matches(ReaderAction.TOGGLE_AUTO_SCROLL, e.keyCode) -> {
+                    // Highlight shortcut (Shift+H) must run before plain TOGGLE_HUD (H)
+                    e.keyCode == KeyEvent.VK_H && e.isShiftDown && !hasModifiers -> {
+                        val addHighlight = onAddHighlight
+                        if (chapterId > 0 && addHighlight != null) {
+                            HighlightColorDialog(this@ReaderWindow) { color ->
+                                addHighlight(chapterId, currentPage, color)
+                                showToast("Destaque adicionado na página ${currentPage + 1}")
+                                loadBookmarksForCurrentChapter()
+                            }.isVisible = true
+                        }
+                    }
+                    ReaderAction.matches(ReaderAction.TOGGLE_AUTO_SCROLL, e) -> {
                         if (!isWebtoon) {
                             mode = ReadMode.WEBTOON
                             modeBox.selectedIndex = mode.ordinal
@@ -1292,51 +1304,55 @@ class ReaderWindow(
                         }
                         autoScroll.toggle()
                     }
-                    e.keyCode == KeyEvent.VK_SPACE -> {
+                    e.keyCode == KeyEvent.VK_SPACE && !hasModifiers -> {
                         if (isWebtoon || autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.toggle()
                         } else {
                             next()
                         }
                     }
-                    ReaderAction.matches(ReaderAction.NEXT_PAGE, e.keyCode) -> next()
-                    ReaderAction.matches(ReaderAction.PREV_PAGE, e.keyCode) -> prev()
-                    ReaderAction.matches(ReaderAction.NEXT_CHAPTER, e.keyCode) -> {
+                    ReaderAction.matches(ReaderAction.NEXT_PAGE, e) -> {
+                        if (!handleZoomedHorizontalPan(e.keyCode)) next()
+                    }
+                    ReaderAction.matches(ReaderAction.PREV_PAGE, e) -> {
+                        if (!handleZoomedHorizontalPan(e.keyCode)) prev()
+                    }
+                    ReaderAction.matches(ReaderAction.NEXT_CHAPTER, e) -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(1)
-                        } else if (onNextChapter != null) {
+                        } else {
                             onNextChapter?.invoke()
                         }
                     }
-                    ReaderAction.matches(ReaderAction.PREV_CHAPTER, e.keyCode) -> {
+                    ReaderAction.matches(ReaderAction.PREV_CHAPTER, e) -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(-1)
-                        } else if (onPrevChapter != null) {
+                        } else {
                             onPrevChapter?.invoke()
                         }
                     }
-                    ReaderAction.matches(ReaderAction.TOGGLE_HUD, e.keyCode) -> toggleHud()
-                    ReaderAction.matches(ReaderAction.TOGGLE_FULLSCREEN, e.keyCode) -> toggleFullscreen()
+                    ReaderAction.matches(ReaderAction.TOGGLE_HUD, e) -> toggleHud()
+                    ReaderAction.matches(ReaderAction.TOGGLE_FULLSCREEN, e) -> toggleFullscreen()
                     ReaderAction.matches(ReaderAction.TOGGLE_TRANSLATOR, e) -> toggleTranslator()
                     ReaderAction.matches(ReaderAction.ZOOM_IN, e.keyCode) -> adjustZoom(1.15)
                     ReaderAction.matches(ReaderAction.ZOOM_OUT, e.keyCode) -> adjustZoom(0.87)
-                    ReaderAction.matches(ReaderAction.ZOOM_RESET, e.keyCode) -> resetZoom()
-                    e.keyCode == KeyEvent.VK_DOWN -> {
+                    ReaderAction.matches(ReaderAction.ZOOM_RESET, e) -> resetZoom()
+                    e.keyCode == KeyEvent.VK_DOWN && !hasModifiers -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(1)
                         } else {
                             scrollBy(64)
                         }
                     }
-                    e.keyCode == KeyEvent.VK_UP -> {
+                    e.keyCode == KeyEvent.VK_UP && !hasModifiers -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.adjustSpeed(-1)
                         } else {
                             scrollBy(-64)
                         }
                     }
-                    e.keyCode == KeyEvent.VK_HOME -> goTo(0)
-                    e.keyCode == KeyEvent.VK_END -> goTo(pageCount - 1)
+                    e.keyCode == KeyEvent.VK_HOME && !hasModifiers -> goTo(0)
+                    e.keyCode == KeyEvent.VK_END && !hasModifiers -> goTo(pageCount - 1)
                     e.keyCode == KeyEvent.VK_ESCAPE -> {
                         if (autoScroll.state != AutoScrollState.STOPPED) {
                             autoScroll.stop()
@@ -1347,30 +1363,22 @@ class ReaderWindow(
                         }
                     }
                     // B - Toggle bookmark on current page
-                    e.keyCode == KeyEvent.VK_B -> {
-                        if (chapterId > 0 && onToggleBookmark != null) {
-                            val added = onToggleBookmark!!(chapterId, currentPage)
-                            val msg = if (added) "🔖 Bookmark adicionado na página ${currentPage + 1}" else "🔖 Bookmark removido da página ${currentPage + 1}"
+                    e.keyCode == KeyEvent.VK_B && !e.isShiftDown && !hasModifiers -> {
+                        val toggleBm = onToggleBookmark
+                        if (chapterId > 0 && toggleBm != null) {
+                            val added = toggleBm(chapterId, currentPage)
+                            val msg = if (added) "Bookmark adicionado na página ${currentPage + 1}" else "Bookmark removido da página ${currentPage + 1}"
                             showToast(msg)
                             loadBookmarksForCurrentChapter()
                         }
                     }
                     // N - Add note on current page
-                    e.keyCode == KeyEvent.VK_N -> {
-                        if (chapterId > 0 && onAddNote != null) {
+                    e.keyCode == KeyEvent.VK_N && !e.isShiftDown && !hasModifiers -> {
+                        val addNote = onAddNote
+                        if (chapterId > 0 && addNote != null) {
                             NoteDialog(this@ReaderWindow, "Nova Nota - Página ${currentPage + 1}") { note ->
-                                onAddNote!!(chapterId, currentPage, note)
-                                showToast("📝 Nota adicionada na página ${currentPage + 1}")
-                                loadBookmarksForCurrentChapter()
-                            }.isVisible = true
-                        }
-                    }
-                    // H - Toggle highlight color picker (Shift+H for highlight)
-                    e.keyCode == KeyEvent.VK_H && e.isShiftDown -> {
-                        if (chapterId > 0 && onAddHighlight != null) {
-                            HighlightColorDialog(this@ReaderWindow) { color ->
-                                onAddHighlight!!(chapterId, currentPage, color)
-                                showToast("🖍️ Destaque adicionado na página ${currentPage + 1}")
+                                addNote(chapterId, currentPage, note)
+                                showToast("Nota adicionada na página ${currentPage + 1}")
                                 loadBookmarksForCurrentChapter()
                             }.isVisible = true
                         }
@@ -1380,58 +1388,62 @@ class ReaderWindow(
         })
 
         // Context menu (right-click)
+        val miBookmark = JMenuItem("Adicionar Bookmark (B)", ModernIcons.bookmark(14) { Theme.TEXT_PRIMARY }).apply {
+            addActionListener {
+                val toggleBm = onToggleBookmark ?: return@addActionListener
+                if (chapterId > 0) {
+                    val added = toggleBm(chapterId, currentPage)
+                    val msg = if (added) "Bookmark adicionado na página ${currentPage + 1}" else "Bookmark removido da página ${currentPage + 1}"
+                    showToast(msg)
+                    loadBookmarksForCurrentChapter()
+                }
+            }
+        }
+        val miAddNote = JMenuItem("Adicionar Nota (N)", ModernIcons.edit(14) { Theme.TEXT_PRIMARY }).apply {
+            addActionListener {
+                val addNote = onAddNote ?: return@addActionListener
+                if (chapterId > 0) {
+                    NoteDialog(this@ReaderWindow, "Nova Nota - Página ${currentPage + 1}") { note ->
+                        addNote(chapterId, currentPage, note)
+                        showToast("Nota adicionada na página ${currentPage + 1}")
+                        loadBookmarksForCurrentChapter()
+                    }.isVisible = true
+                }
+            }
+        }
+        val miAddHighlight = JMenuItem("Adicionar Destaque (Shift+H)", ModernIcons.sparkles(14) { Theme.TEXT_PRIMARY }).apply {
+            addActionListener {
+                val addHighlight = onAddHighlight ?: return@addActionListener
+                if (chapterId > 0) {
+                    HighlightColorDialog(this@ReaderWindow) { color ->
+                        addHighlight(chapterId, currentPage, color)
+                        showToast("Destaque adicionado na página ${currentPage + 1}")
+                        loadBookmarksForCurrentChapter()
+                    }.isVisible = true
+                }
+            }
+        }
+        val miShowBookmarks = JMenuItem("Ver Bookmarks do Capítulo").apply {
+            addActionListener {
+                val showBms = onShowBookmarks ?: return@addActionListener
+                if (chapterId > 0) {
+                    showBms(chapterId, mangaTitle, pageCount) { page ->
+                        goTo(page)
+                    }
+                }
+            }
+        }
         val contextMenu = JPopupMenu().apply {
             add(JMenuItem("Alternar Tradutor Simultâneo (T)", ModernIcons.translateIcon(15)).apply {
                 name = "translatorContextMenuItem"
                 addActionListener { toggleTranslator() }
             })
             addSeparator()
-            add(JMenuItem("Adicionar Bookmark (B)").apply {
-                isEnabled = chapterId > 0 && onToggleBookmark != null
-                addActionListener {
-                    if (chapterId > 0 && onToggleBookmark != null) {
-                        val added = onToggleBookmark!!(chapterId, currentPage)
-                        val msg = if (added) "🔖 Bookmark adicionado na página ${currentPage + 1}" else "🔖 Bookmark removido da página ${currentPage + 1}"
-                        showToast(msg)
-                        loadBookmarksForCurrentChapter()
-                    }
-                }
-            })
-            add(JMenuItem("Adicionar Nota (N)").apply {
-                isEnabled = chapterId > 0 && onAddNote != null
-                addActionListener {
-                    if (chapterId > 0 && onAddNote != null) {
-                        NoteDialog(this@ReaderWindow, "Nova Nota - Página ${currentPage + 1}") { note ->
-                            onAddNote!!(chapterId, currentPage, note)
-                            showToast("📝 Nota adicionada na página ${currentPage + 1}")
-                            loadBookmarksForCurrentChapter()
-                        }.isVisible = true
-                    }
-                }
-            })
-            add(JMenuItem("Adicionar Destaque (Shift+H)").apply {
-                isEnabled = chapterId > 0 && onAddHighlight != null
-                addActionListener {
-                    if (chapterId > 0 && onAddHighlight != null) {
-                        HighlightColorDialog(this@ReaderWindow) { color ->
-                            onAddHighlight!!(chapterId, currentPage, color)
-                            showToast("🖍️ Destaque adicionado na página ${currentPage + 1}")
-                            loadBookmarksForCurrentChapter()
-                        }.isVisible = true
-                    }
-                }
-            })
+            add(miBookmark)
+            add(miAddNote)
+            add(miAddHighlight)
             addSeparator()
-            add(JMenuItem("Ver Bookmarks do Capítulo").apply {
-                isEnabled = chapterId > 0 && onShowBookmarks != null
-                addActionListener {
-                    if (chapterId > 0 && onShowBookmarks != null) {
-                        onShowBookmarks!!(chapterId, mangaTitle, pageCount) { page ->
-                            goTo(page)
-                        }
-                    }
-                }
-            })
+            add(miShowBookmarks)
             addSeparator()
             add(JMenuItem("Copiar número da página").apply {
                 addActionListener {
@@ -1440,13 +1452,17 @@ class ReaderWindow(
                         java.awt.datatransfer.StringSelection(pageStr),
                         null,
                     )
-                    showToast("📋 $pageStr copiado")
+                    showToast("$pageStr copiado")
                 }
             })
         }
 
         val showContextMenu = { e: MouseEvent ->
             if (e.isPopupTrigger) {
+                miBookmark.isEnabled = chapterId > 0 && onToggleBookmark != null
+                miAddNote.isEnabled = chapterId > 0 && onAddNote != null
+                miAddHighlight.isEnabled = chapterId > 0 && onAddHighlight != null
+                miShowBookmarks.isEnabled = chapterId > 0 && onShowBookmarks != null
                 contextMenu.show(e.component, e.x, e.y)
             }
         }
@@ -1463,8 +1479,7 @@ class ReaderWindow(
             override fun mouseReleased(e: MouseEvent) { showContextMenu(e) }
         })
 
-        // Install custom scrollbar with bookmark indicators
-        installBookmarkScrollbarIndicators()
+        // Keep scrollbar sleek with FlatLaf rounded styling (avoid overriding with legacy BasicScrollBarUI)
 
         scroll.viewport.addComponentListener(object : ComponentAdapter() {
             override fun componentResized(e: ComponentEvent) {
@@ -1583,15 +1598,18 @@ class ReaderWindow(
         translatorController.onChapterChanged(generation.toLong())
         LensOverlayRenderer.clearPatchCache()
 
-        // Update bookmark integration params
-        // Note: We can't reassign val properties, so we use a mutable holder or just update what we can
-        // For now, we'll use a different approach - the callbacks are passed at construction time
-        // and we assume they're long-lived (from the service)
+        chapterId = newChapterId
+        mangaTitle = newMangaTitle
+        onToggleBookmark = newOnToggleBookmark
+        onAddNote = newOnAddNote
+        onAddHighlight = newOnAddHighlight
+        onShowBookmarks = newOnShowBookmarks
 
         title = "Mihon Linux - $newTitle"
         onPrevChapter = newPrevChapter
         onNextChapter = newNextChapter
         onProgress = newOnProgress
+        loadBookmarksForCurrentChapter()
 
         btnPrevChapter.isVisible = newPrevChapter != null
         btnNextChapter.isVisible = newNextChapter != null
@@ -1662,7 +1680,35 @@ class ReaderWindow(
     }
 
     private fun scrollBy(dy: Int) {
-        scroll.verticalScrollBar.value += dy
+        val vBar = scroll.verticalScrollBar
+        val maxVal = (vBar.maximum - vBar.visibleAmount).coerceAtLeast(0)
+        vBar.value = (vBar.value + dy).coerceIn(vBar.minimum, maxVal)
+    }
+
+    private fun handleZoomedHorizontalPan(keyCode: Int): Boolean {
+        val hBar = scroll.horizontalScrollBar
+        val maxH = hBar.maximum - hBar.visibleAmount
+        if (maxH <= 6) return false
+        val step = (scroll.viewport.width / 4).coerceAtLeast(120)
+        return when (keyCode) {
+            KeyEvent.VK_RIGHT -> {
+                if (hBar.value < maxH - 2) {
+                    hBar.value = (hBar.value + step).coerceAtMost(maxH)
+                    true
+                } else {
+                    false
+                }
+            }
+            KeyEvent.VK_LEFT -> {
+                if (hBar.value > hBar.minimum + 2) {
+                    hBar.value = (hBar.value - step).coerceAtLeast(hBar.minimum)
+                    true
+                } else {
+                    false
+                }
+            }
+            else -> false
+        }
     }
 
     private fun adjustZoom(factor: Double) {
@@ -1754,10 +1800,11 @@ class ReaderWindow(
             if (images.any { it == null }) {
                 paged.setSlots(emptyList(), "Não foi possível decodificar a página")
             } else {
-                val contentSlots = if (isWideSingle && images.firstOrNull() != null && indexes.isNotEmpty()) {
+                val firstImg = images.firstOrNull()
+                val contentSlots = if (isWideSingle && firstImg != null && indexes.isNotEmpty()) {
                     val isSecondHalf = (currentSubPage == 1)
                     val half = ReaderEngine.getHalfPage(
-                        images.first()!!,
+                        firstImg,
                         isSecondHalf = isSecondHalf,
                         isRtl = splitWideRtl,
                     )
@@ -1953,11 +2000,54 @@ class ReaderWindow(
         private var previewSrcKey = ""
         private var previewImages: List<BufferedImage> = emptyList()
 
+        private var dragStartX = 0
+        private var dragStartY = 0
+        private var dragStartH = 0
+        private var dragStartV = 0
+        private var draggedSincePress = false
+
         init {
             background = Color.BLACK
-            addMouseListener(object : MouseAdapter() {
+            val panAdapter = object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) {
+                    if (!SwingUtilities.isLeftMouseButton(e)) return
+                    dragStartX = e.xOnScreen
+                    dragStartY = e.yOnScreen
+                    dragStartH = scroll.horizontalScrollBar.value
+                    dragStartV = scroll.verticalScrollBar.value
+                    draggedSincePress = false
+                }
+
+                override fun mouseDragged(e: MouseEvent) {
+                    if (!SwingUtilities.isLeftMouseButton(e)) return
+                    val hBar = scroll.horizontalScrollBar
+                    val vBar = scroll.verticalScrollBar
+                    val maxH = (hBar.maximum - hBar.visibleAmount).coerceAtLeast(0)
+                    val maxV = (vBar.maximum - vBar.visibleAmount).coerceAtLeast(0)
+                    if (maxH <= 2 && maxV <= 2) return
+                    val dx = e.xOnScreen - dragStartX
+                    val dy = e.yOnScreen - dragStartY
+                    if (!draggedSincePress && kotlin.math.hypot(dx.toDouble(), dy.toDouble()) >= 6.0) {
+                        draggedSincePress = true
+                        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.MOVE_CURSOR)
+                    }
+                    if (draggedSincePress) {
+                        if (maxH > 2) hBar.value = (dragStartH - dx).coerceIn(0, maxH)
+                        if (maxV > 2) vBar.value = (dragStartV - dy).coerceIn(0, maxV)
+                    }
+                }
+
+                override fun mouseReleased(e: MouseEvent) {
+                    cursor = java.awt.Cursor.getDefaultCursor()
+                }
+
                 override fun mouseClicked(e: MouseEvent) {
                     requestFocusInWindow()
+                    if (draggedSincePress) {
+                        draggedSincePress = false
+                        return
+                    }
+                    if (!SwingUtilities.isLeftMouseButton(e)) return
                     // Mihon 3-zone ReaderNavigationOverlay (left third, center third, right third)
                     val ratio = e.x.toDouble() / max(width, 1)
                     if (ratio in 0.35..0.65) {
@@ -1968,7 +2058,9 @@ class ReaderWindow(
                     val forward = if (mode == ReadMode.DOUBLE_RTL || (mode == ReadMode.SINGLE && splitWideRtl)) leftSide else !leftSide
                     if (forward) next() else prev()
                 }
-            })
+            }
+            addMouseListener(panAdapter)
+            addMouseMotionListener(panAdapter)
         }
 
         fun invalidateCache() {
@@ -2524,70 +2616,6 @@ class ReaderWindow(
             (if (orientation == SwingConstants.VERTICAL) visibleRect.height else visibleRect.width) * 9 / 10
         override fun getScrollableTracksViewportWidth() = fit != FitMode.ORIGINAL
         override fun getScrollableTracksViewportHeight() = false
-    }
-
-    // Bookmark scrollbar indicators
-    private fun installBookmarkScrollbarIndicators() {
-        val scrollBar = scroll.verticalScrollBar
-        val originalUI = scrollBar.ui
-
-        // Custom scrollbar UI that paints bookmark indicators on the track
-        scrollBar.ui = object : javax.swing.plaf.basic.BasicScrollBarUI() {
-            override fun paintTrack(g: Graphics, c: javax.swing.JComponent, trackBounds: Rectangle) {
-                super.paintTrack(g, c, trackBounds)
-                if (pageCount <= 0) return
-
-                val g2 = g.create() as Graphics2D
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-
-                // Get bookmarks for current chapter
-                // We'll use a simple approach: draw small markers on the track
-                val bookmarks = getBookmarksForCurrentChapter()
-                if (bookmarks.isEmpty()) {
-                    g2.dispose()
-                    return
-                }
-
-                val trackHeight = trackBounds.height
-                val trackY = trackBounds.y
-
-                bookmarks.forEach { bm ->
-                    // Calculate position on scrollbar track (0.0 to 1.0)
-                    val relativePos = if (pageCount > 1) bm.page.toDouble() / (pageCount - 1) else 0.0
-                    val markerY = trackY + (trackHeight * relativePos).toInt()
-
-                    // Draw marker based on type
-                    when (bm.type) {
-                        BookmarkType.BOOKMARK -> {
-                            g2.color = Theme.ACCENT
-                            g2.fillRoundRect(trackBounds.x + 2, markerY - 2, trackBounds.width - 4, 4, 2, 2)
-                        }
-                        BookmarkType.NOTE -> {
-                            g2.color = Color(0x4E, 0xCD, 0xC4) // Turquoise
-                            g2.fillOval(trackBounds.x + 2, markerY - 3, trackBounds.width - 4, 6)
-                        }
-                        BookmarkType.HIGHLIGHT -> {
-                            val color = bm.color?.let { Color.decode(it) } ?: Color.YELLOW
-                            g2.color = color
-                            g2.fillRect(trackBounds.x, markerY - 1, trackBounds.width, 3)
-                        }
-                    }
-                }
-                g2.dispose()
-            }
-
-            override fun paintThumb(g: Graphics, c: javax.swing.JComponent, thumbBounds: Rectangle) {
-                super.paintThumb(g, c, thumbBounds)
-            }
-        }
-    }
-
-    private fun getBookmarksForCurrentChapter(): List<Bookmark> {
-        // This would ideally come from the service, but for visual indicators
-        // we can load them synchronously or use a cached version
-        // For now, return empty list - the visual indicators will be updated
-        // when bookmarks are added/removed via the callbacks
-        return emptyList()
     }
 
     companion object {

@@ -248,15 +248,19 @@ class TesseractJnaEngine internal constructor(
         val jpnVertTarget = resolveOptionalLanguage("jpn_vert") ?: jpnHorizTarget
 
         // If only one language is installed, run directly without probing
-        if (engTarget == null && jpnHorizTarget == null) {
-            val fallbackTarget = resolveTargetFor(TranslatorLanguage.AUTO, TextOrientation.HORIZONTAL)
-            return recognizeRegionsWithSingleTarget(lib, image, regions, fallbackTarget, TranslatorLanguage.AUTO)
-        }
-        if (jpnHorizTarget == null && engTarget != null) {
-            return recognizeRegionsWithSingleTarget(lib, image, regions, engTarget, TranslatorLanguage.ENGLISH)
-        }
-        if (engTarget == null && jpnHorizTarget != null) {
-            return recognizeRegionsWithExplicitLang(lib, image, regions, TranslatorLanguage.JAPANESE)
+        if (engTarget == null || jpnHorizTarget == null || jpnVertTarget == null) {
+            return when {
+                engTarget == null && jpnHorizTarget == null -> {
+                    val fallbackTarget = resolveTargetFor(TranslatorLanguage.AUTO, TextOrientation.HORIZONTAL)
+                    recognizeRegionsWithSingleTarget(lib, image, regions, fallbackTarget, TranslatorLanguage.AUTO)
+                }
+                jpnHorizTarget == null && engTarget != null -> {
+                    recognizeRegionsWithSingleTarget(lib, image, regions, engTarget, TranslatorLanguage.ENGLISH)
+                }
+                else -> {
+                    recognizeRegionsWithExplicitLang(lib, image, regions, TranslatorLanguage.JAPANESE)
+                }
+            }
         }
 
         val orderedResults = arrayOfNulls<OcrSnippet>(regions.size)
@@ -265,7 +269,7 @@ class TesseractJnaEngine internal constructor(
             for ((idx, region) in validRegions) {
                 if (closed.get()) break
                 val roi = toRoiGrayData(image, region.bounds) ?: continue
-                val engItem = RegionWorkItem(idx, region, engTarget!!, PSM_SINGLE_BLOCK)
+                val engItem = RegionWorkItem(idx, region, engTarget, PSM_SINGLE_BLOCK)
                 val engRes = recognizeRoiWithCli(roi, engItem, TranslatorLanguage.ENGLISH)
                 if (engRes != null) {
                     orderedResults[idx] = engRes
@@ -277,12 +281,13 @@ class TesseractJnaEngine internal constructor(
             if (!strongEnglishPage) {
                 for ((idx, region) in validRegions) {
                     if (closed.get()) break
-                    val jTarget = if (region.orientation == TextOrientation.VERTICAL) jpnVertTarget!! else jpnHorizTarget!!
+                    val jTarget = if (region.orientation == TextOrientation.VERTICAL) jpnVertTarget else jpnHorizTarget
                     val psm = selectPsm(TranslatorLanguage.JAPANESE, region.orientation, jTarget.ocrLang)
                     val jItem = RegionWorkItem(idx, region, jTarget, psm)
                     val roi = toRoiGrayData(image, region.bounds) ?: continue
                     val jRes = recognizeRoiWithCli(roi, jItem, TranslatorLanguage.JAPANESE)
-                    if (jRes != null && (orderedResults[idx] == null || jRes.confidence > orderedResults[idx]!!.confidence + 0.08f)) {
+                    val existing = orderedResults[idx]
+                    if (jRes != null && (existing == null || jRes.confidence > existing.confidence + 0.08f)) {
                         orderedResults[idx] = jRes
                     }
                 }
@@ -299,7 +304,7 @@ class TesseractJnaEngine internal constructor(
             if (roiCache.isEmpty()) return emptyList()
 
             // Pass 1: Run crisp horizontal English model first (never pollutes English spacing with jpn)
-            val engHandle = ensureInitializedHandleLocked(lib, engTarget!!.datapath.absolutePath, engTarget.ocrLang)
+            val engHandle = ensureInitializedHandleLocked(lib, engTarget.datapath.absolutePath, engTarget.ocrLang)
             for ((idx, region) in validRegions) {
                 if (closed.get()) break
                 val roi = roiCache[idx] ?: continue
@@ -343,7 +348,7 @@ class TesseractJnaEngine internal constructor(
                 for ((idx, region) in sortedMissed) {
                     if (closed.get()) break
                     val roi = roiCache[idx] ?: continue
-                    val jTarget = if (region.orientation == TextOrientation.VERTICAL) jpnVertTarget!! else jpnHorizTarget!!
+                    val jTarget = if (region.orientation == TextOrientation.VERTICAL) jpnVertTarget else jpnHorizTarget
                     val psm = selectPsm(TranslatorLanguage.JAPANESE, region.orientation, jTarget.ocrLang)
                     val jHandle = ensureInitializedHandleLocked(lib, jTarget.datapath.absolutePath, jTarget.ocrLang)
                     val jRes = recognizeSingleRoiLocked(

@@ -682,42 +682,77 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
+    private fun launchOrReuseReader(current: Manga, chapter: Chapter, readerSource: Any) {
+        val idx = chapters.indexOfFirst { it.id == chapter.id }
+        val prevChap = if (idx > 0) chapters[idx - 1] else null
+        val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
+
+        triggerAutoPrefetch(current, idx)
+
+        val title = "${current.title} - ${chapter.name}"
+        val startPage = if (chapter.read) 0 else chapter.lastPageRead
+        val prevAction = prevChap?.let { { openChapter(current, it) } }
+        val nextAction = nextChap?.let { { openChapter(current, it) } }
+        val progressCallback: (Int, Int, Long) -> Unit = { page, count, deltaMillis ->
+            background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
+        }
+        val toggleBookmarkCb: (Long, Int) -> Boolean = { chId, page ->
+            kotlinx.coroutines.runBlocking { ctx.service.toggleBookmark(chId, page) }
+        }
+        val addNoteCb: (Long, Int, String) -> Unit = { chId, page, note ->
+            background({ ctx.service.addNote(chId, page, note) }) {}
+        }
+        val addHighlightCb: (Long, Int, String) -> Unit = { chId, page, color ->
+            background({ ctx.service.addHighlight(chId, page, color) }) {}
+        }
+        val showBookmarksCb: (Long, String, Int, (Int) -> Unit) -> Unit = { chId, _, pgCount, onNavigate ->
+            BookmarksListDialog(
+                owner = ReaderWindow.activeReader,
+                ctx = ctx,
+                chapterId = chId,
+                chapterName = chapter.name,
+                pageCount = pgCount,
+                onNavigateToPage = onNavigate,
+            ).isVisible = true
+        }
+
+        val existing = ReaderWindow.activeReader
+        if (existing != null && existing.isDisplayable) {
+            existing.loadChapter(
+                newTitle = title,
+                newSource = readerSource,
+                startPage = startPage,
+                newPrevChapter = prevAction,
+                newNextChapter = nextAction,
+                newOnProgress = progressCallback,
+                newChapterId = chapter.id,
+                newMangaTitle = current.title,
+                newOnToggleBookmark = toggleBookmarkCb,
+                newOnAddNote = addNoteCb,
+                newOnAddHighlight = addHighlightCb,
+                newOnShowBookmarks = showBookmarksCb,
+            )
+        } else {
+            ReaderWindow(
+                title = title,
+                source = readerSource,
+                startPage = startPage,
+                onPrevChapter = prevAction,
+                onNextChapter = nextAction,
+                onProgress = progressCallback,
+                chapterId = chapter.id,
+                mangaTitle = current.title,
+                onToggleBookmark = toggleBookmarkCb,
+                onAddNote = addNoteCb,
+                onAddHighlight = addHighlightCb,
+                onShowBookmarks = showBookmarksCb,
+            )
+        }
+    }
+
     private fun openReaderArchive(current: Manga, chapter: Chapter, reader: mihon.core.archive.ArchiveReader) {
         try {
-            val idx = chapters.indexOfFirst { it.id == chapter.id }
-            val prevChap = if (idx > 0) chapters[idx - 1] else null
-            val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
-
-            triggerAutoPrefetch(current, idx)
-
-            val title = "${current.title} - ${chapter.name}"
-            val startPage = if (chapter.read) 0 else chapter.lastPageRead
-            val prevAction = prevChap?.let { { openChapter(current, it) } }
-            val nextAction = nextChap?.let { { openChapter(current, it) } }
-            val progressCallback: (Int, Int, Long) -> Unit = { page, count, deltaMillis ->
-                background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
-            }
-
-            val existing = ReaderWindow.activeReader
-            if (existing != null && existing.isDisplayable) {
-                existing.loadChapter(
-                    newTitle = title,
-                    newSource = reader,
-                    startPage = startPage,
-                    newPrevChapter = prevAction,
-                    newNextChapter = nextAction,
-                    newOnProgress = progressCallback,
-                )
-            } else {
-                ReaderWindow(
-                    title = title,
-                    source = reader,
-                    startPage = startPage,
-                    onPrevChapter = prevAction,
-                    onNextChapter = nextAction,
-                    onProgress = progressCallback,
-                )
-            }
+            launchOrReuseReader(current, chapter, reader)
         } catch (e: Exception) {
             JOptionPane.showMessageDialog(this, "Não foi possível abrir o leitor: ${e.message}", "Erro", JOptionPane.ERROR_MESSAGE)
         }
@@ -725,40 +760,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private fun openReaderFile(current: Manga, chapter: Chapter, file: java.io.File, canRetryDownload: Boolean = true) {
         try {
-            val idx = chapters.indexOfFirst { it.id == chapter.id }
-            val prevChap = if (idx > 0) chapters[idx - 1] else null
-            val nextChap = if (idx >= 0 && idx + 1 < chapters.size) chapters[idx + 1] else null
-
-            triggerAutoPrefetch(current, idx)
-
-            val title = "${current.title} - ${chapter.name}"
-            val startPage = if (chapter.read) 0 else chapter.lastPageRead
-            val prevAction = prevChap?.let { { openChapter(current, it) } }
-            val nextAction = nextChap?.let { { openChapter(current, it) } }
-            val progressCallback: (Int, Int, Long) -> Unit = { page, count, deltaMillis ->
-                background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
-            }
-
-            val existing = ReaderWindow.activeReader
-            if (existing != null && existing.isDisplayable) {
-                existing.loadChapter(
-                    newTitle = title,
-                    newSource = file,
-                    startPage = startPage,
-                    newPrevChapter = prevAction,
-                    newNextChapter = nextAction,
-                    newOnProgress = progressCallback,
-                )
-            } else {
-                ReaderWindow(
-                    title = title,
-                    source = file,
-                    startPage = startPage,
-                    onPrevChapter = prevAction,
-                    onNextChapter = nextAction,
-                    onProgress = progressCallback,
-                )
-            }
+            launchOrReuseReader(current, chapter, file)
         } catch (e: Exception) {
             if (!current.isLocal && canRetryDownload && file.exists()) {
                 file.delete()

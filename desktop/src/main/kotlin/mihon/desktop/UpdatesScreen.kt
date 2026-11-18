@@ -109,6 +109,11 @@ object LibraryUpdateScheduler {
         reschedule(ctx, runImmediateIfStartup = true)
     }
 
+    fun stop() {
+        scheduledTask?.cancel(false)
+        scheduledTask = null
+    }
+
     private fun reschedule(ctx: AppContext, runImmediateIfStartup: Boolean) {
         scheduledTask?.cancel(false)
         scheduledTask = null
