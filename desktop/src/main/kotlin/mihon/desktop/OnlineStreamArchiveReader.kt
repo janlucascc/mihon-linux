@@ -50,12 +50,23 @@ class OnlineStreamArchiveReader(
 
     private val diskCacheDir = File(
         System.getProperty("java.io.tmpdir"),
-        "mihon_stream_cache/${sourceName.hashCode()}_${instanceCounter.incrementAndGet()}",
-    ).apply { mkdirs() }
+        "mihon_stream_cache/${safeDirKey(sourceName)}_${instanceCounter.incrementAndGet()}",
+    ).apply {
+        mkdirs()
+        deleteOnExit()
+    }
     private val inFlightFetches = ConcurrentHashMap<Int, CompletableFuture<ByteArray>>()
     private val memoryLock = Any()
-    private val memoryCache = object : LinkedHashMap<Int, ByteArray>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, ByteArray>): Boolean = size > 24
+    private val memoryCache = object : LinkedHashMap<Int, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, ByteArray>): Boolean =
+            size > MemoryManager.streamRawCacheMaxEntries()
+    }
+    private val trimCallback: () -> Unit = {
+        synchronized(memoryLock) { memoryCache.clear() }
+    }
+
+    init {
+        MemoryManager.registerTrimCallback(trimCallback)
     }
 
     override fun getPageStream(page: ArchivePage): InputStream {
@@ -163,6 +174,7 @@ class OnlineStreamArchiveReader(
 
     override fun close() {
         isClosed = true
+        MemoryManager.unregisterTrimCallback(trimCallback)
         inFlightFetches.values.forEach { it.cancel(true) }
         inFlightFetches.clear()
         synchronized(memoryLock) { memoryCache.clear() }
@@ -171,5 +183,10 @@ class OnlineStreamArchiveReader(
 
     private companion object {
         val instanceCounter = AtomicLong(0L)
+
+        fun safeDirKey(name: String): String {
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(name.toByteArray())
+            return digest.take(6).joinToString("") { "%02x".format(it) }
+        }
     }
 }

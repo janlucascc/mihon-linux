@@ -12,6 +12,8 @@ import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
@@ -48,29 +50,63 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var filterMode = 0 // 0 = All, 1 = Unread, 2 = Downloaded
     private var reverseOrder = detailsPrefs.getBoolean("details_reverse_order", false)
 
-    private val header = object : JPanel(BorderLayout(22, 0)) {
+    private val header = object : JPanel(BorderLayout(20, 14)) {
         init {
             isOpaque = false
-            border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
+            border = BorderFactory.createEmptyBorder(16, Theme.PAGE_GUTTER, 16, Theme.PAGE_GUTTER)
         }
 
         override fun paintComponent(g: Graphics) {
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             val base = Theme.BG_SURFACE
-            val glow = blendUiColor(base, Theme.ACCENT, if (Theme.isDark) 0.08f else 0.05f)
-            g2.paint = java.awt.GradientPaint(0f, 0f, glow, 0f, height.toFloat(), base)
+            val wash = blendUiColor(base, Theme.PRIMARY, if (Theme.isDark) 0.07f else 0.05f)
+            g2.paint = java.awt.GradientPaint(0f, 0f, wash, 0f, height.toFloat(), base)
             g2.fillRect(0, 0, width, height)
             g2.color = Theme.BORDER_SUBTLE
             g2.drawLine(0, height - 1, width, height - 1)
             g2.dispose()
         }
     }
+    private var lastHeaderStacked = false
+    private val chapterErrorLabel = JLabel("").apply {
+        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+        foreground = Theme.DANGER
+    }
+    private val chapterErrorBtn = ModernButton("Tentar novamente", variant = ModernButton.Variant.SURFACE, compact = true).apply {
+        addActionListener { reloadChapters() }
+    }
+    private val chapterErrorBanner = JPanel(BorderLayout(12, 0)).apply {
+        isOpaque = true
+        background = Theme.BG_SURFACE
+        border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.DANGER),
+            BorderFactory.createEmptyBorder(8, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER),
+        )
+        add(chapterErrorLabel, BorderLayout.CENTER)
+        add(chapterErrorBtn, BorderLayout.EAST)
+        isVisible = false
+    }
     private val chapterHeaderLabel = JLabel("0 capítulos").apply {
         foreground = Theme.TEXT_PRIMARY
-        font = font.deriveFont(Font.BOLD, 14f)
+        font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
     }
-    private val filterCombo = JComboBox(arrayOf("Todos os capítulos", "Apenas não lidos", "Apenas baixados"))
+    private val chapterSearchField = mihon.desktop.ui.components.MihonSearchField(
+        columns = 16,
+        placeholder = "Filtrar capítulo ou scan…",
+        compact = true,
+        shortcutBadge = null,
+        debounceMs = 90,
+    ).apply {
+        preferredSize = Dimension(190, 34)
+        onDebouncedChange = { applyChapterListFilter() }
+        onSubmit = { applyChapterListFilter() }
+    }
+    private val filterCombo = mihon.desktop.ui.components.MihonDropdown(
+        arrayOf("Todos", "Não lidos", "Baixados"),
+    ).apply {
+        preferredSize = Dimension(136, Theme.CONTROL_HEIGHT_COMPACT)
+    }
     private val sortOrderBtn = ModernButton(
         text = if (reverseOrder) "Mais antigos" else "Mais recentes",
         icon = if (reverseOrder) ModernIcons.arrowUp(14) { Theme.TEXT_PRIMARY } else ModernIcons.arrowDown(14) { Theme.TEXT_PRIMARY },
@@ -93,7 +129,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             ModernIcons.arrowDown(14) { Theme.TEXT_PRIMARY }
         }
     }
-    private val catPicker = JComboBox(
+    private val catPicker = mihon.desktop.ui.components.MihonDropdown(
         LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }.map { it.second }.toTypedArray(),
     )
     private val btnFavorite = ModernButton(
@@ -113,9 +149,11 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
     private val btnContinue = ModernButton(
         text = "Continuar Leitura",
-        icon = ModernIcons.play(13) { Color.WHITE },
+        icon = ModernIcons.play(14) { Color.WHITE },
         variant = ModernButton.Variant.PRIMARY,
     ).apply {
+        minHeightOverride = Theme.CONTROL_HEIGHT_PRIMARY
+        font = font.deriveFont(Font.BOLD, 13.5f)
         addActionListener { continueReading() }
     }
     private val progressBar = JProgressBar(0, 100).apply {
@@ -157,6 +195,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 isRead = ch.read
                 isDownloaded = downloaded
                 isDownloading = downloading
+                isOpening = (openingChapterId == ch.id)
                 lastPage = ch.lastPageRead
                 selectedState = selected
                 hoverProgress = hoverAnimator.progressFor(index)
@@ -234,45 +273,38 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             addActionListener { refreshRemoteChapters() }
         }
 
-        val btnOverflow = ModernButton(
-            text = "",
+        val btnOverflow = ModernIconButton(
             icon = ModernIcons.moreVert(18) { Theme.TEXT_PRIMARY },
-            variant = ModernButton.Variant.SURFACE,
+            tip = "Mais opções",
+            sizePx = Theme.CONTROL_HEIGHT_COMPACT,
+            surfaceStyled = true,
         ).apply {
-            toolTipText = "Mais opções"
             addActionListener {
-                val menu = JPopupMenu().apply {
-                    val miMarkRead = JMenuItem("Marcar selecionados como lidos", ModernIcons.check(14) { Theme.TEXT_PRIMARY }).apply {
-                        addActionListener { markSelected(true) }
-                    }
-                    val miMarkUnread = JMenuItem("Marcar selecionados como não lidos").apply {
-                        addActionListener { markSelected(false) }
-                    }
-                    val miExport = JMenuItem("Exportar selecionados (PDF / EPUB)…", ModernIcons.downloads(14) { Theme.TEXT_PRIMARY }).apply {
-                        addActionListener { exportSelected() }
-                    }
-                    val miTrack = JMenuItem("Configurar Rastreamento (AniList / MAL)…", ModernIcons.sync(14) { Theme.TEXT_PRIMARY }).apply {
-                        addActionListener { openTrackerDialog() }
-                    }
-                    val miRemove = JMenuItem("Remover da biblioteca", ModernIcons.trash(14) { Theme.DANGER }).apply {
-                        foreground = Theme.DANGER
-                        addActionListener { removeCurrent() }
-                    }
-                    add(miMarkRead)
-                    add(miMarkUnread)
+                val menu = mihon.desktop.ui.components.MihonPopupMenu.create().apply {
+                    add(mihon.desktop.ui.components.MihonPopupMenu.item("Marcar selecionados como lidos", ModernIcons.check(14) { Theme.TEXT_PRIMARY }) {
+                        markSelected(true)
+                    })
+                    add(mihon.desktop.ui.components.MihonPopupMenu.item("Marcar selecionados como não lidos") {
+                        markSelected(false)
+                    })
                     addSeparator()
-                    add(miExport)
-                    add(miTrack)
+                    add(mihon.desktop.ui.components.MihonPopupMenu.item("Exportar selecionados (PDF / EPUB)…", ModernIcons.downloads(14) { Theme.TEXT_PRIMARY }) {
+                        exportSelected()
+                    })
+                    add(mihon.desktop.ui.components.MihonPopupMenu.item("Configurar Rastreamento (AniList / MAL)…", ModernIcons.sync(14) { Theme.TEXT_PRIMARY }) {
+                        openTrackerDialog()
+                    })
                     addSeparator()
-                    add(miRemove)
+                    add(mihon.desktop.ui.components.MihonPopupMenu.item("Remover da biblioteca", ModernIcons.trash(14) { Theme.DANGER }, danger = true) {
+                        removeCurrent()
+                    })
                 }
-                menu.show(this, 0, height)
+                menu.show(this, 0, height + 4)
             }
         }
 
         catPicker.apply {
-            putClientProperty("JComboBox.buttonType", "roundRect")
-            preferredSize = Dimension(140, 32)
+            preferredSize = Dimension(148, Theme.CONTROL_HEIGHT_COMPACT)
         }
 
         val leftActions = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
@@ -285,8 +317,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             add(btnDownload)
             add(btnSync)
             add(JLabel("Categoria:").apply {
-                foreground = Theme.TEXT_MUTED
-                font = font.deriveFont(Font.PLAIN, 12f)
+                foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
             })
             add(catPicker)
             add(btnOverflow)
@@ -294,19 +326,19 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         val actions = JPanel(BorderLayout(8, 0)).apply {
             background = Theme.BG_APP
-            border = BorderFactory.createEmptyBorder(8, 16, 8, 16)
+            border = BorderFactory.createEmptyBorder(8, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER)
             add(leftActions, BorderLayout.WEST)
             add(rightActions, BorderLayout.EAST)
         }
 
-        // Mihon ChapterHeader bar (chapter count + filter + sort toggle)
-        val chapterHeaderBar = JPanel(BorderLayout()).apply {
+        val chapterHeaderBar = JPanel(BorderLayout(12, 8)).apply {
             background = Theme.BG_APP
-            border = BorderFactory.createEmptyBorder(8, 24, 2, 24)
+            border = BorderFactory.createEmptyBorder(10, Theme.PAGE_GUTTER + 4, 4, Theme.PAGE_GUTTER + 4)
             add(chapterHeaderLabel, BorderLayout.WEST)
             add(
                 JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                     isOpaque = false
+                    add(chapterSearchField)
                     add(filterCombo)
                     add(sortOrderBtn)
                 },
@@ -316,16 +348,26 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         val progressWrap = JPanel(BorderLayout(8, 0)).apply {
             isOpaque = false
-            border = BorderFactory.createEmptyBorder(0, 20, 4, 20)
+            border = BorderFactory.createEmptyBorder(0, Theme.PAGE_GUTTER, 4, Theme.PAGE_GUTTER)
             add(progressBar, BorderLayout.CENTER)
             add(btnCancelStreaming, BorderLayout.EAST)
         }
 
         val bottomBar = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
-            add(progressWrap, BorderLayout.NORTH)
+            add(chapterErrorBanner, BorderLayout.NORTH)
+            add(progressWrap, BorderLayout.CENTER)
             add(chapterHeaderBar, BorderLayout.SOUTH)
         }
+
+        header.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) {
+                val stacked = header.width in 1..660
+                if (stacked != lastHeaderStacked) {
+                    manga?.let { renderHeader(it) }
+                }
+            }
+        })
 
         val top = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
@@ -348,6 +390,8 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             header.repaint()
             actions.background = Theme.BG_APP
             bottomBar.background = Theme.BG_APP
+            chapterErrorBanner.background = Theme.BG_SURFACE
+            chapterErrorLabel.foreground = Theme.DANGER
             chapterHeaderBar.background = Theme.BG_APP
             chapterList.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
@@ -430,10 +474,19 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             )
         )
 
-        GooeyContextMenu(gooeyItems).showAt(chapterList, x, y)
+        GooeyContextMenu.showSmart(gooeyItems, chapterList, x, y)
     }
 
     fun show(manga: Manga) {
+        val switchingManga = this.manga?.id != manga.id
+        if (switchingManga) {
+            cancelStreamingTask?.invoke()
+            cancelStreamingTask = null
+            openingChapterId = null
+            if (chapterSearchField.text.isNotEmpty()) {
+                chapterSearchField.text = ""
+            }
+        }
         this.manga = manga
         updatingCategory = true
         val validCats = LibraryCategory.entries.filter { it.first != LibraryCategory.ALL }
@@ -454,77 +507,196 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private fun renderHeader(manga: Manga) {
         header.removeAll()
         val coverIcon = ctx.covers.get(manga.id, manga.title)
+        val detailW = 148
+        val detailH = 220
+        val stacked = header.width in 1..660
+        lastHeaderStacked = stacked
+
         val coverHolder = object : JPanel() {
             init {
                 isOpaque = false
-                preferredSize = Dimension(coverIcon.iconWidth + 8, coverIcon.iconHeight + 8)
+                preferredSize = Dimension(detailW + 12, detailH + 12)
+                minimumSize = Dimension(detailW + 12, detailH + 12)
             }
 
             override fun paintComponent(g: Graphics) {
                 val g2 = g.create() as Graphics2D
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                val cw = coverIcon.iconWidth
-                val ch = coverIcon.iconHeight
-                g2.color = Color(0, 0, 0, if (Theme.isDark) 115 else 38)
-                g2.fillRoundRect(3, 5, cw + 2, ch + 2, 10, 10)
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                val cx = if (stacked) (width - detailW) / 2 else 4
+                val cy = 4
+                val arcInt = Theme.CARD_RADIUS * 2
+                val arc = arcInt.toFloat()
+                // Subtle cover shadow (0/8/16)
+                g2.color = Color(0, 0, 0, if (Theme.isDark) 85 else 34)
+                g2.fillRoundRect(cx, cy + 6, detailW, detailH, arcInt + 2, arcInt + 2)
+                g2.color = Color(0, 0, 0, if (Theme.isDark) 115 else 52)
+                g2.fillRoundRect(cx, cy + 3, detailW, detailH, arcInt, arcInt)
+
                 val oldClip = g2.clip
-                g2.clip = java.awt.geom.RoundRectangle2D.Float(4f, 3f, cw.toFloat(), ch.toFloat(), 8f, 8f)
-                coverIcon.paintIcon(this, g2, 4, 3)
+                g2.clip = java.awt.geom.RoundRectangle2D.Float(cx.toFloat(), cy.toFloat(), detailW.toFloat(), detailH.toFloat(), arc, arc)
+                g2.drawImage(coverIcon.image, cx, cy, detailW, detailH, null)
                 g2.clip = oldClip
+
                 g2.color = Theme.BORDER_SUBTLE
-                g2.drawRoundRect(4, 3, cw - 1, ch - 1, 8, 8)
+                g2.drawRoundRect(cx, cy, detailW - 1, detailH - 1, arcInt, arcInt)
                 g2.dispose()
             }
         }
-        header.add(coverHolder, BorderLayout.WEST)
         val sourceName = if (manga.isLocal) "Arquivo local" else (ctx.sourceFor(manga.source)?.name ?: "Fonte online")
         val statusBadge = LibraryCategory.labelOf(manga.status)
         val unreadCount = chapters.count { !it.read }
+        val readCount = (chapters.size - unreadCount).coerceAtLeast(0)
         val downloadedCount = chapters.count { ctx.service.isChapterDownloaded(manga, it) }
 
-        val sourceLinkHtml = if (!manga.isLocal && ctx.sourceFor(manga.source) != null) {
-            "<a href='source:${escapeHtml(sourceName)}' style='color:${Theme.ACCENT.toHex()};text-decoration:underline;'>${escapeHtml(sourceName)}</a>"
-        } else {
-            escapeHtml(sourceName)
+        val authorLine = manga.author?.takeIf { it.isNotBlank() }?.let { auth ->
+            val artistPart = manga.artist?.takeIf { a -> a != auth && a.isNotBlank() }?.let { "  •  Arte: $it" } ?: ""
+            "$auth$artistPart"
         }
 
-        val metaItems = buildList {
-            add("<b>$statusBadge</b>")
-            add(sourceLinkHtml)
-            add("${chapters.size} cap.")
-            if (unreadCount > 0) add("$unreadCount não lido(s)")
-            if (downloadedCount > 0) add("<span style='color:${Theme.SUCCESS.toHex()};font-weight:bold'>$downloadedCount salvo(s) offline</span>")
-            manga.genre?.take(4)?.forEach { add(escapeHtml(it)) }
-        }.joinToString(" &nbsp;│&nbsp; ")
+        val titleView = mihon.desktop.ui.components.CjkLabel(
+            labelText = manga.title,
+            fontStyle = Font.BOLD,
+            fontSize = 23f,
+            colorSupplier = { Theme.TEXT_PRIMARY },
+            maxLines = 2,
+        ).apply {
+            alignmentX = 0f
+        }
 
-        val titleColor = Theme.TEXT_PRIMARY.toHex()
-        val authorColor = Theme.TEXT_PRIMARY.toHex()
-        val metaColor = Theme.TEXT_MUTED.toHex()
-        val descColor = Theme.TEXT_SECONDARY.toHex()
-
-        val descHtml = manga.description?.takeIf { it.isNotBlank() }?.let {
-            "<p style='margin-top:12px;color:$descColor;line-height:1.5;font-size:12px'>${escapeHtml(it.take(500))}${if (it.length > 500) "…" else ""}</p>"
-        }.orEmpty()
-        val headerInfo = javax.swing.JEditorPane("text/html", "").apply {
-            isEditable = false
+        val metaColor = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+        val metaRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 2)).apply {
             isOpaque = false
-            putClientProperty(javax.swing.JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
-            text = "<html><div style='width:720px'>" +
-                "<h1 style='margin:0 0 6px 0;color:$titleColor;font-family:SansSerif,Serif;font-size:22px'>${escapeHtml(manga.title)}</h1>" +
-                (manga.author?.let { "<p style='margin:2px 0 8px 0;color:$metaColor;font-size:12px'>Por <b style='color:$authorColor'>${escapeHtml(it)}</b>" + (manga.artist?.takeIf { a -> a != it }?.let { a -> " &nbsp;•&nbsp; Arte de <b style='color:$authorColor'>${escapeHtml(a)}</b>" } ?: "") + "</p>" } ?: "") +
-                "<p style='margin:6px 0;color:$metaColor;font-size:11.5px'>$metaItems</p>" +
-                descHtml +
-                "</div></html>"
-            addHyperlinkListener { e ->
-                if (e.eventType == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
-                    val desc = e.description
-                    if (desc.startsWith("source:")) {
-                        val srcName = desc.removePrefix("source:")
-                        ctx.navigator.openSourceCatalog(srcName)
-                    }
-                }
+            alignmentX = 0f
+            fun addSep() {
+                add(JLabel("  •  ").apply {
+                    font = Theme.FONT_UI.deriveFont(12.5f)
+                    foreground = metaColor
+                })
+            }
+            if (!authorLine.isNullOrBlank()) {
+                add(mihon.desktop.ui.components.CjkLabel(authorLine, Font.PLAIN, 12.5f, { metaColor }, maxLines = 1).apply {
+                    val fm = getFontMetrics(Theme.FONT_UI.deriveFont(12.5f))
+                    preferredSize = Dimension((fm.stringWidth(authorLine) + 6).coerceAtMost(300), 20)
+                })
+                addSep()
+            }
+            add(JLabel(statusBadge).apply {
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+                foreground = Theme.TEXT_PRIMARY
+            })
+            addSep()
+            if (!manga.isLocal && ctx.sourceFor(manga.source) != null) {
+                add(JLabel(sourceName).apply {
+                    font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+                    foreground = if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    toolTipText = "Abrir catálogo de $sourceName"
+                    addMouseListener(object : MouseAdapter() {
+                        override fun mouseClicked(e: MouseEvent) {
+                            ctx.navigator.openSourceCatalog(sourceName)
+                        }
+                    })
+                })
+            } else {
+                add(JLabel(sourceName).apply {
+                    font = Theme.FONT_UI.deriveFont(12.5f)
+                    foreground = metaColor
+                })
+            }
+            addSep()
+            add(JLabel("${chapters.size} cap.").apply {
+                font = Theme.FONT_UI.deriveFont(12.5f)
+                foreground = metaColor
+            })
+            if (unreadCount > 0) {
+                addSep()
+                add(JLabel("$unreadCount por ler").apply {
+                    font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+                    foreground = Theme.SIGNAL
+                })
+            }
+            if (downloadedCount > 0) {
+                addSep()
+                add(JLabel("$downloadedCount offline").apply {
+                    font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+                    foreground = Theme.SUCCESS
+                })
             }
         }
+
+        val headerInfo = JPanel().apply {
+            isOpaque = false
+            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+            add(titleView)
+            add(javax.swing.Box.createVerticalStrut(4))
+            add(metaRow)
+            if (chapters.isNotEmpty()) {
+                val frac = (readCount.toFloat() / chapters.size.toFloat()).coerceIn(0f, 1f)
+                val progressRow = object : javax.swing.JComponent() {
+                    init {
+                        isOpaque = false
+                        preferredSize = Dimension(320, 14)
+                        maximumSize = Dimension(420, 14)
+                        alignmentX = 0f
+                    }
+                    override fun paintComponent(g: Graphics) {
+                        val g2 = g.create() as Graphics2D
+                        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                        val barW = (width - 96).coerceAtLeast(80)
+                        val barY = 5
+                        g2.color = Theme.BORDER_SUBTLE
+                        g2.fillRoundRect(0, barY, barW, 5, 5, 5)
+                        if (frac > 0f) {
+                            g2.color = if (frac >= 0.999f) Theme.SUCCESS else Theme.SIGNAL
+                            g2.fillRoundRect(0, barY, (barW * frac).toInt().coerceAtLeast(5), 5, 5, 5)
+                        }
+                        g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
+                        g2.color = metaColor
+                        g2.drawString("$readCount/${chapters.size} lidos", barW + 8, 11)
+                        g2.dispose()
+                    }
+                }
+                add(javax.swing.Box.createVerticalStrut(4))
+                add(progressRow)
+            }
+            val descText = manga.description?.trim()?.takeIf { it.isNotEmpty() }
+            if (descText != null) {
+                add(javax.swing.Box.createVerticalStrut(6))
+                add(mihon.desktop.ui.components.ExpandableCjkText(descText, collapsedMaxLines = 3).apply {
+                    alignmentX = 0f
+                })
+            }
+        }
+
+        val genresPanel = JPanel(FlowLayout(FlowLayout.LEFT, 6, 4)).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(4, 0, 2, 0)
+            val genres = manga.genre.orEmpty().map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(6)
+            genres.forEach { gName ->
+                add(
+                    object : JLabel(gName) {
+                        init {
+                            font = Theme.FONT_UI.deriveFont(Font.BOLD, 11.5f)
+                            foreground = if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
+                            border = BorderFactory.createEmptyBorder(3, 8, 3, 8)
+                            preferredSize = Dimension(preferredSize.width, 24)
+                        }
+
+                        override fun paintComponent(g: Graphics) {
+                            val g2 = g.create() as Graphics2D
+                            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                            g2.color = Theme.ACCENT_SOFT
+                            val bArc = Theme.BADGE_RADIUS * 2
+                            g2.fillRoundRect(0, 0, width, height, bArc, bArc)
+                            g2.dispose()
+                            super.paintComponent(g)
+                        }
+                    },
+                )
+            }
+        }
+
         val trackRec = TrackerService.getRecord(manga.id)
         if (trackRec != null) {
             btnTrack.text = "Rastreado: Cap. ${trackRec.lastChapterRead}"
@@ -534,31 +706,56 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             btnTrack.variant = ModernButton.Variant.SURFACE
         }
 
-        val heroActions = JPanel(FlowLayout(FlowLayout.LEFT, 10, 0)).apply {
+        btnContinue.minWidthOverride = 190
+        btnContinue.minHeightOverride = Theme.CONTROL_HEIGHT_PRIMARY
+
+        val heroActions = JPanel(FlowLayout(FlowLayout.LEFT, 8, 6)).apply {
             isOpaque = false
-            border = BorderFactory.createEmptyBorder(8, -10, 0, 0)
+            border = BorderFactory.createEmptyBorder(4, -6, 0, 0)
             add(btnContinue)
             add(btnFavorite)
             add(btnTrack)
         }
+
+        val infoStack = JPanel().apply {
+            isOpaque = false
+            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+            headerInfo.alignmentX = 0f
+            genresPanel.alignmentX = 0f
+            add(headerInfo)
+            if (genresPanel.componentCount > 0) add(genresPanel)
+        }
+
         val centerCol = JPanel(BorderLayout(0, 6)).apply {
             isOpaque = false
-            add(headerInfo, BorderLayout.CENTER)
+            add(infoStack, BorderLayout.CENTER)
             add(heroActions, BorderLayout.SOUTH)
         }
-        header.add(centerCol, BorderLayout.CENTER)
+        if (stacked) {
+            header.add(coverHolder, BorderLayout.NORTH)
+            header.add(centerCol, BorderLayout.CENTER)
+        } else {
+            header.add(coverHolder, BorderLayout.WEST)
+            header.add(centerCol, BorderLayout.CENTER)
+        }
         header.revalidate()
         header.repaint()
     }
 
     private fun applyChapterListFilter() {
         val current = manga ?: return
+        val query = chapterSearchField.text?.trim().orEmpty()
         val filtered = chapters.filter { ch ->
-            when (filterMode) {
+            val modeOk = when (filterMode) {
                 1 -> !ch.read
                 2 -> ctx.service.isChapterDownloaded(current, ch)
                 else -> true
             }
+            val queryOk = query.isEmpty() ||
+                ch.name.contains(query, ignoreCase = true) ||
+                (ch.scanlator?.contains(query, ignoreCase = true) == true) ||
+                ch.chapterNumber.toString().contains(query, ignoreCase = true)
+            modeOk && queryOk
         }.let { if (reverseOrder) it.reversed() else it }
 
         listModel.clear()
@@ -570,12 +767,14 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private fun reloadChapters() {
         val current = manga ?: return
+        chapterErrorBanner.isVisible = false
         background({
             val list = ctx.service.chaptersOf(current.id)
             val resume = ctx.service.nextChapterToRead(current.id)
             list to resume
         }) { result ->
             result.onSuccess { (list, resume) ->
+                chapterErrorBanner.isVisible = false
                 chapters = list
                 resumeChapter = resume
                 applyChapterListFilter()
@@ -586,6 +785,9 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     "Ler do início"
                 }
                 renderHeader(current)
+            }.onFailure { err ->
+                chapterErrorLabel.text = "Não foi possível carregar os capítulos: ${err.message ?: "verifique sua conexão"}."
+                chapterErrorBanner.isVisible = true
             }
         }
     }
@@ -606,11 +808,18 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         openingChapterId = chapter.id
         try {
             if (ctx.service.isChapterDownloaded(current, chapter)) {
-                openReaderFile(current, chapter, ctx.service.chapterCbzFile(current, chapter))
+                try {
+                    openReaderFile(current, chapter, ctx.service.chapterCbzFile(current, chapter))
+                } finally {
+                    openingChapterId = null
+                    chapterList.repaint()
+                }
                 return
             }
             val source = ctx.sourceFor(current.source)
             if (source == null) {
+                openingChapterId = null
+                chapterList.repaint()
                 JOptionPane.showMessageDialog(this, "Fonte não encontrada para ler o capítulo.", "Erro", JOptionPane.ERROR_MESSAGE)
                 return
             }
@@ -637,7 +846,7 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 val imageUrls = source.getChapterImages(chapter.url)
                 require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
                 val referer = if (source.name.contains("MangaDex", ignoreCase = true)) "https://mangadex.org/" else "${source.baseUrl}/"
-                val userAgent = if (source.name.contains("MangaDex", ignoreCase = true)) "MihonLinux/0.3 (Linux Desktop)" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                val userAgent = if (source.name.contains("MangaDex", ignoreCase = true)) "MihonLinux/0.4 (Linux Desktop)" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                 OnlineStreamArchiveReader(
                     sourceName = "${current.title} - ${chapter.name}",
                     imageUrls = imageUrls,
@@ -710,8 +919,18 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         val progressCallback: (Int, Int, Long) -> Unit = { page, count, deltaMillis ->
             background({ ctx.service.saveProgress(chapter, page, count, deltaMillis, incognitoMode = ctx.incognitoMode) }) { reloadChapters() }
         }
-        val toggleBookmarkCb: (Long, Int) -> Boolean = { chId, page ->
-            kotlinx.coroutines.runBlocking { ctx.service.toggleBookmark(chId, page) }
+        val toggleBookmarkAsyncCb: (Long, Int, (Boolean) -> Unit) -> Unit = { chId, page, onDone ->
+            background({ ctx.service.toggleBookmark(chId, page) }) { res ->
+                res.onSuccess { added -> onDone(added) }
+            }
+        }
+        val loadBookmarksCb: (Long, (List<tachiyomi.domain.bookmark.model.Bookmark>) -> Unit) -> Unit = { chId, onLoaded ->
+            background({ ctx.service.getBookmarksByChapterId(chId) }) { res ->
+                res.onSuccess { list -> onLoaded(list) }
+            }
+        }
+        val chapterNavList: List<Pair<String, () -> Unit>> = chapters.map { ch ->
+            ch.name to { openChapter(current, ch) }
         }
         val addNoteCb: (Long, Int, String) -> Unit = { chId, page, note ->
             background({ ctx.service.addNote(chId, page, note) }) {}
@@ -741,10 +960,13 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 newOnProgress = progressCallback,
                 newChapterId = chapter.id,
                 newMangaTitle = current.title,
-                newOnToggleBookmark = toggleBookmarkCb,
                 newOnAddNote = addNoteCb,
                 newOnAddHighlight = addHighlightCb,
                 newOnShowBookmarks = showBookmarksCb,
+                newOnToggleBookmarkAsync = toggleBookmarkAsyncCb,
+                newOnLoadBookmarks = loadBookmarksCb,
+                newChapterNavEntries = chapterNavList,
+                newCurrentChapterIndex = idx,
             )
         } else {
             ReaderWindow(
@@ -756,10 +978,13 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 onProgress = progressCallback,
                 chapterId = chapter.id,
                 mangaTitle = current.title,
-                onToggleBookmark = toggleBookmarkCb,
                 onAddNote = addNoteCb,
                 onAddHighlight = addHighlightCb,
                 onShowBookmarks = showBookmarksCb,
+                onToggleBookmarkAsync = toggleBookmarkAsyncCb,
+                onLoadBookmarks = loadBookmarksCb,
+                chapterNavEntries = chapterNavList,
+                currentChapterIndex = idx,
             )
         }
     }
@@ -929,12 +1154,13 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
      * - No generic rounded SaaS card per row; uses crisp hairline rules and tabular monospace index numbers.
      * - Vermilion bookmark bar on the left when unread or in-progress.
      */
-    private class ChapterRowCard : JPanel() {
+    internal class ChapterRowCard : JPanel() {
         var chapterIndex: Int = 1
         var chapterTitle: String = ""
         var isRead: Boolean = false
         var isDownloaded: Boolean = false
         var isDownloading: Boolean = false
+        var isOpening: Boolean = false
         var lastPage: Int = 0
         var selectedState: Boolean = false
         var hoverProgress: Float = 0f
@@ -951,80 +1177,90 @@ class DetailsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val x = 8
             val w = width - 16
             val h = height
+            val arc = Theme.CONTROL_RADIUS * 2
 
             if (selectedState) {
-                g2.color = Theme.BG_CARD_HOVER
-                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
+                g2.color = Theme.ACCENT_SOFT
+                g2.fillRoundRect(x, 2, w, h - 4, arc, arc)
+                g2.color = Theme.PRIMARY
+                g2.stroke = java.awt.BasicStroke(1f)
+                g2.drawRoundRect(x, 2, w - 1, h - 5, arc, arc)
             } else if (hoverProgress > 0.01f) {
                 val hc = Theme.BG_CARD_HOVER
-                g2.color = Color(hc.red, hc.green, hc.blue, (210 * hoverProgress).toInt().coerceIn(0, 255))
-                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
+                g2.color = Color(hc.red, hc.green, hc.blue, (220 * easeOutCubic(hoverProgress)).toInt().coerceIn(0, 255))
+                g2.fillRoundRect(x, 2, w, h - 4, arc, arc)
             }
 
             // Hairline editorial bottom rule
             g2.color = Theme.BORDER_SUBTLE
             g2.drawLine(x + 8, h - 1, x + w - 8, h - 1)
 
-            // Left vertical Hanko accent bar for unread or partially read chapters
+            // Left Signal accent bar for unread or partially read chapters
             if (!isRead) {
-                g2.color = if (lastPage > 0) Theme.ACCENT else Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 175)
+                g2.color = Theme.SIGNAL
                 g2.fillRoundRect(x + 4, 12, 3, h - 24, 2, 2)
             }
 
             // Right side status stamp (drawn first to reserve space and prevent title overlap)
             var rightX = x + w - 14
             val pillText = when {
-                isDownloaded -> "Salvo no disco"
+                isOpening -> "Abrindo…"
+                isDownloaded -> "Baixado"
                 isDownloading -> "Baixando…"
-                else -> "Ler capítulo"
+                isRead -> "Lido"
+                else -> "Ler"
             }
             val pillBg = when {
-                isDownloaded -> Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 38)
-                isDownloading -> Color(Theme.WARNING.red, Theme.WARNING.green, Theme.WARNING.blue, 38)
+                isOpening -> Theme.ACCENT_SOFT
+                isDownloaded -> Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 34)
+                isDownloading -> Color(Theme.WARNING.red, Theme.WARNING.green, Theme.WARNING.blue, 34)
+                isRead -> Theme.BG_SURFACE
                 else -> Theme.ACCENT_SOFT
             }
             val pillFg = when {
-                isDownloaded -> Theme.SUCCESS
-                isDownloading -> Theme.WARNING
-                else -> Theme.ACCENT
+                isOpening -> if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
+                isDownloaded -> if (Theme.isDark) Theme.SUCCESS else Color(0x16, 0x65, 0x34)
+                isDownloading -> if (Theme.isDark) Theme.WARNING else Color(0x9A, 0x67, 0x00)
+                isRead -> if (Theme.isDark) Theme.SUCCESS else Color(0x16, 0x65, 0x34)
+                else -> if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
             }
             val pillIcon = when {
-                isDownloaded -> ModernIcons.check(12) { pillFg }
-                isDownloading -> ModernIcons.sync(12) { pillFg }
+                isOpening || isDownloading -> ModernIcons.sync(12) { pillFg }
+                isDownloaded || isRead -> ModernIcons.check(12) { pillFg }
                 else -> ModernIcons.play(11) { pillFg }
             }
-            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 11f)
             val pFm = g2.fontMetrics
             val iconGap = pillIcon.iconWidth + 6
-            val pw = iconGap + pFm.stringWidth(pillText) + 18
+            val pw = iconGap + pFm.stringWidth(pillText) + 16
             rightX -= pw
             g2.color = pillBg
-            g2.fillRoundRect(rightX, 13, pw, h - 26, 8, 8)
-            pillIcon.paintIcon(this, g2, rightX + 9, (h - pillIcon.iconHeight) / 2)
+            g2.fillRoundRect(rightX, 14, pw, h - 28, Theme.BADGE_RADIUS * 2, Theme.BADGE_RADIUS * 2)
+            pillIcon.paintIcon(this, g2, rightX + 8, (h - pillIcon.iconHeight) / 2)
             g2.color = pillFg
-            g2.drawString(pillText, rightX + 9 + iconGap, ((h - pFm.height) / 2) + pFm.ascent)
+            g2.drawString(pillText, rightX + 8 + iconGap, ((h - pFm.height) / 2) + pFm.ascent)
 
             if (isRead || lastPage > 0) {
-                val progText = if (isRead) "Lido" else "Parou na pág. ${lastPage + 1}"
+                val progText = if (isRead) "Concluído" else "Pág. ${lastPage + 1}"
                 g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
                 val prFm = g2.fontMetrics
-                rightX -= prFm.stringWidth(progText) + 18
-                g2.color = if (!isRead && lastPage > 0) Theme.TEXT_SECONDARY else Theme.TEXT_MUTED
+                rightX -= prFm.stringWidth(progText) + 16
+                g2.color = if (!isRead && lastPage > 0) Theme.SIGNAL else if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                 g2.drawString(progText, rightX, ((h - prFm.height) / 2) + prFm.ascent)
             }
 
             // Tabular Monospace Index Number
             g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12f)
-            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.ACCENT_HOVER
+            g2.color = if (isRead) (if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY) else (if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY)
             val numStr = "%03d".format(chapterIndex)
             g2.drawString(numStr, x + 18, (h / 2) + 5)
 
-            // Chapter Title (safely ellipsized before right status pills)
-            g2.font = font.deriveFont(if (isRead) Font.PLAIN else Font.BOLD, 13.5f)
-            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.TEXT_PRIMARY
+            // Chapter Title (preserved clearly as secondary text when read, CJK-safe)
+            g2.font = Theme.FONT_UI.deriveFont(if (isRead) Font.PLAIN else Font.BOLD, 13.5f)
+            g2.color = if (isRead) Theme.TEXT_SECONDARY else Theme.TEXT_PRIMARY
             val titleX = x + 58
             val maxTitleW = (rightX - titleX - 16).coerceAtLeast(60)
-            g2.drawString(clipUiText(g2, chapterTitle, maxTitleW), titleX, (h / 2) + 5)
+            Theme.drawStringWithFallback(g2, clipUiText(g2, chapterTitle, maxTitleW), titleX, (h / 2) + 5)
 
             g2.dispose()
         }

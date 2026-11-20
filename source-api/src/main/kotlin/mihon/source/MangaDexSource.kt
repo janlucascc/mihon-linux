@@ -242,7 +242,7 @@ class MangaDexSource(
 
                 val req = Request.Builder()
                     .url(url.toHttpUrl())
-                    .header("User-Agent", "MihonLinux/0.2 (Fedora Desktop)")
+                    .header("User-Agent", "MihonLinux/0.4 (Linux Desktop)")
                     .build()
 
                 var retryDelayMs = -1L
@@ -341,10 +341,15 @@ class MangaDexSource(
     }
 
     companion object {
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .build()
+        private val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectionPool(okhttp3.ConnectionPool(4, 30, TimeUnit.SECONDS))
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+        }
+
+        fun defaultClient(): OkHttpClient = sharedClient
     }
 }
 

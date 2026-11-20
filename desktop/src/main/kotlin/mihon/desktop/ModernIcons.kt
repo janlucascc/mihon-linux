@@ -430,6 +430,28 @@ object ModernIcons {
         }
 
     /**
+     * Copy / duplicate pages icon.
+     */
+    fun copy(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawRoundRect(9, 4, 11, 13, 3, 3)
+                val back = Path2D.Float().apply {
+                    moveTo(9f, 8f)
+                    lineTo(6.5f, 8f)
+                    quadTo(4.5f, 8f, 4.5f, 10f)
+                    lineTo(4.5f, 18.5f)
+                    quadTo(4.5f, 20.5f, 6.5f, 20.5f)
+                    lineTo(14f, 20.5f)
+                    quadTo(16f, 20.5f, 16f, 18.5f)
+                    lineTo(16f, 17f)
+                }
+                g2.draw(back)
+            }
+        }
+
+    /**
      * Search magnifying glass.
      */
     fun search(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
@@ -710,21 +732,102 @@ object ModernIcons {
         }
 
     /**
-     * Browse / Explore destination icon (compass).
+     * Browse / Sources destination icon (target reticle / compass matching Fotos 4 & 5).
      */
     fun browse(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
         object : BaseVectorIcon(size, color) {
             override fun paintVector(g2: Graphics2D, color: Color) {
-                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
-                g2.draw(Ellipse2D.Float(3.5f, 3.5f, 17f, 17f))
-                val needle = Path2D.Float().apply {
-                    moveTo(15.5f, 8.5f)
-                    lineTo(12f, 11f)
-                    lineTo(8.5f, 15.5f)
-                    lineTo(11f, 12f)
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.draw(Ellipse2D.Float(5.5f, 5.5f, 13f, 13f))
+                // 4 cardinal ticks
+                g2.drawLine(12, 2, 12, 6)
+                g2.drawLine(12, 18, 12, 22)
+                g2.drawLine(2, 12, 6, 12)
+                g2.drawLine(18, 12, 22, 12)
+                // Center dot
+                g2.fill(Ellipse2D.Float(10.3f, 10.3f, 3.4f, 3.4f))
+            }
+        }
+
+    /**
+     * Painter's palette icon for Appearance / Aparência (matching Foto 5).
+     */
+    fun palette(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val p = Path2D.Float().apply {
+                    moveTo(12.0f, 3.0f)
+                    curveTo(6.8f, 3.0f, 3.0f, 6.8f, 3.0f, 12.0f)
+                    curveTo(3.0f, 17.0f, 7.0f, 21.0f, 12.0f, 21.0f)
+                    curveTo(13.8f, 21.0f, 15.0f, 19.8f, 15.0f, 18.2f)
+                    curveTo(15.0f, 17.0f, 14.3f, 16.2f, 14.3f, 15.2f)
+                    curveTo(14.3f, 14.2f, 15.2f, 13.5f, 16.5f, 13.5f)
+                    lineTo(18.0f, 13.5f)
+                    curveTo(19.8f, 13.5f, 21.0f, 12.0f, 21.0f, 10.2f)
+                    curveTo(21.0f, 6.0f, 17.0f, 3.0f, 12.0f, 3.0f)
                     closePath()
                 }
-                g2.fill(needle)
+                g2.draw(p)
+                g2.fill(Ellipse2D.Float(6.8f, 9.5f, 2.2f, 2.2f))
+                g2.fill(Ellipse2D.Float(10.0f, 6.5f, 2.2f, 2.2f))
+                g2.fill(Ellipse2D.Float(14.2f, 7.2f, 2.2f, 2.2f))
+            }
+        }
+
+    /**
+     * Stacked pages icon for Reader / Leitor (matching Foto 5).
+     */
+    fun readerPages(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.draw(RoundRectangle2D.Float(7.0f, 3.5f, 12.5f, 14.5f, 3f, 3f))
+                val back = Path2D.Float().apply {
+                    moveTo(4.5f, 7.0f)
+                    lineTo(4.5f, 18.5f)
+                    quadTo(4.5f, 20.5f, 6.5f, 20.5f)
+                    lineTo(16.0f, 20.5f)
+                }
+                g2.draw(back)
+            }
+        }
+
+    /**
+     * Filled tag / label icon for Library / More (matching Fotos 4 & 5).
+     */
+    fun libraryTag(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                val tag = Path2D.Float().apply {
+                    moveTo(4.0f, 6.5f)
+                    quadTo(4.0f, 5.0f, 5.5f, 5.0f)
+                    lineTo(15.5f, 5.0f)
+                    lineTo(20.5f, 12.0f)
+                    lineTo(15.5f, 19.0f)
+                    lineTo(5.5f, 19.0f)
+                    quadTo(4.0f, 19.0f, 4.0f, 17.5f)
+                    closePath()
+                }
+                g2.fill(tag)
+            }
+        }
+
+    /**
+     * Two opposite horizontal arrows (⇄) for Tracking / Rastreamento (matching Foto 5).
+     */
+    fun trackingArrows(size: Int = 20, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                // Top arrow pointing right
+                g2.drawLine(4, 8, 19, 8)
+                g2.drawLine(15, 4, 19, 8)
+                g2.drawLine(15, 12, 19, 8)
+                // Bottom arrow pointing left
+                g2.drawLine(20, 16, 5, 16)
+                g2.drawLine(9, 12, 5, 16)
+                g2.drawLine(9, 20, 5, 16)
             }
         }
 
@@ -965,7 +1068,22 @@ object ModernIcons {
             }
         }
 
-    /** Eye-off icon for hiding reader HUD. */
+    /** Eye icon (open) for password / token visibility toggles. */
+    fun eye(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val eye = Path2D.Float().apply {
+                    moveTo(2.5f, 12f)
+                    quadTo(12f, 4.5f, 21.5f, 12f)
+                    quadTo(12f, 19.5f, 2.5f, 12f)
+                }
+                g2.draw(eye)
+                g2.draw(Ellipse2D.Float(9.2f, 9.2f, 5.6f, 5.6f))
+            }
+        }
+
+    /** Eye-off icon for hiding reader HUD or secrets. */
     fun eyeOff(size: Int = 16, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
         object : BaseVectorIcon(size, color) {
             override fun paintVector(g2: Graphics2D, color: Color) {
@@ -978,6 +1096,78 @@ object ModernIcons {
                 g2.draw(eye)
                 g2.draw(Ellipse2D.Float(9.5f, 9.5f, 5f, 5f))
                 g2.drawLine(4, 4, 20, 20)
+            }
+        }
+
+    /** Solid filled bookmark ribbon icon for active page indicators. */
+    fun bookmarkFilled(size: Int = 18, color: () -> Color = { Theme.PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                val p = Path2D.Float().apply {
+                    moveTo(6f, 3.5f)
+                    lineTo(18f, 3.5f)
+                    lineTo(18f, 20.5f)
+                    lineTo(12f, 16f)
+                    lineTo(6f, 20.5f)
+                    closePath()
+                }
+                g2.fill(p)
+            }
+        }
+
+    /** Triangle exclamation warning icon. */
+    fun alertTriangle(size: Int = 16, color: () -> Color = { Theme.WARNING }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val tri = Path2D.Float().apply {
+                    moveTo(12f, 3.5f)
+                    lineTo(21f, 19.5f)
+                    lineTo(3f, 19.5f)
+                    closePath()
+                }
+                g2.draw(tri)
+                g2.drawLine(12, 9, 12, 14)
+                g2.fillOval(11, 16, 2, 2)
+            }
+        }
+
+    /** Hyperlink chain icon for URL input fields. */
+    fun link(size: Int = 16, color: () -> Color = { Theme.TEXT_MUTED }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.draw(RoundRectangle2D.Float(3f, 8.5f, 9f, 7f, 7f, 7f))
+                g2.draw(RoundRectangle2D.Float(12f, 8.5f, 9f, 7f, 7f, 7f))
+                g2.drawLine(9, 12, 15, 12)
+            }
+        }
+
+    /** Compact downward chevron for dropdowns and accordions. */
+    fun chevronDown(size: Int = 14, color: () -> Color = { Theme.TEXT_SECONDARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val p = Path2D.Float().apply {
+                    moveTo(6f, 9f)
+                    lineTo(12f, 15f)
+                    lineTo(18f, 9f)
+                }
+                g2.draw(p)
+            }
+        }
+
+    /** Compact upward chevron for accordions and reverse sort. */
+    fun chevronUp(size: Int = 14, color: () -> Color = { Theme.TEXT_SECONDARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                val p = Path2D.Float().apply {
+                    moveTo(6f, 15f)
+                    lineTo(12f, 9f)
+                    lineTo(18f, 15f)
+                }
+                g2.draw(p)
             }
         }
 
@@ -1015,6 +1205,30 @@ object ModernIcons {
                 g2.fillRoundRect(14, 5, 4, 14, 2, 2)
             }
         }
+
+    /** Crisp 2x2 grid icon for display mode toggles. */
+    fun grid(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawRoundRect(3, 3, 7, 7, 2, 2)
+                g2.drawRoundRect(14, 3, 7, 7, 2, 2)
+                g2.drawRoundRect(3, 14, 7, 7, 2, 2)
+                g2.drawRoundRect(14, 14, 7, 7, 2, 2)
+            }
+        }
+
+    /** Batch / list selection icon matching GTK edit-select-all-symbolic. */
+    fun batchSelect(size: Int = 18, color: () -> Color = { Theme.TEXT_PRIMARY }): Icon =
+        object : BaseVectorIcon(size, color) {
+            override fun paintVector(g2: Graphics2D, color: Color) {
+                g2.stroke = BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.drawRoundRect(4, 4, 16, 16, 3, 3)
+                g2.drawLine(8, 9, 16, 9)
+                g2.drawLine(8, 12, 16, 12)
+                g2.drawLine(8, 15, 13, 15)
+            }
+        }
 }
 
 /** Smoothly blends two ARGB colors by [ratio] in `[0f, 1f]`. */
@@ -1030,8 +1244,9 @@ internal fun blendUiColor(c1: Color, c2: Color, ratio: Float): Color {
 }
 
 /**
- * Modern custom-painted button inspired by Shadcn UI, Linear, and Komga/Kavita desktop interfaces.
- * Features smooth 60fps interpolated hover/press transitions, 1px specular borders, and vector icon spacing.
+ * Modern custom-painted editorial button for Mihon Index.
+ * Features calm neutral/Cobalt flat states, 120ms/180ms hover/press transitions, 8px corners,
+ * visible keyboard focus ring, and readable disabled states.
  */
 class ModernButton(
     text: String = "",
@@ -1046,18 +1261,62 @@ class ModernButton(
             repaint()
         }
 
+    var minHeightOverride: Int = 0
+        set(value) {
+            field = value
+            revalidate()
+            repaint()
+        }
+
+    var minWidthOverride: Int = 0
+        set(value) {
+            field = value
+            revalidate()
+            repaint()
+        }
+
     enum class Variant {
-        PRIMARY,   // Vibrant Indigo/Violet CTA with top specular highlight and white text
-        FAVORITE,  // Active Ruby/Rose tonal surface with subtle border and rose text
-        SURFACE,   // Sleek dark/light card surface with 1px subtle border
-        GHOST,     // Transparent at rest, soft surface fill on hover
-        HUD,       // Always-dark translucent glass pill for dark cinema reader HUD
-        HUD_ACCENT,// Active glowing accent pill for dark cinema reader HUD
+        PRIMARY,    // Solid Cobalt (#4F46E5 -> #4338CA -> #3730A3) CTA with white text
+        FAVORITE,   // Active Danger/Ruby tonal surface with 1px semantic border
+        DANGER,     // Solid destructive crimson/red CTA for dangerous actions
+        SURFACE,    // Calm neutral card surface with 1px hairline border
+        GHOST,      // Transparent at rest, soft card hover fill on rollover
+        HUD,        // Always-dark (#17171C) button for dark cinema reader HUD
+        HUD_ACCENT, // Active Cobalt accent button for dark cinema reader HUD
     }
 
+    var isLoading: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (value) startLoadingSpinner() else stopLoadingSpinner()
+            repaint()
+        }
+
+    private var spinnerAngle = 0f
+    private var spinnerTimer: javax.swing.Timer? = null
     private var hoverProgress = 0f
     private var pressProgress = 0f
     private var animTimer: javax.swing.Timer? = null
+
+    private fun startLoadingSpinner() {
+        spinnerTimer?.stop()
+        if (!mihon.desktop.ui.animation.MotionPreferences.isEnabled) return
+        spinnerTimer = javax.swing.Timer(16) {
+            if (!isDisplayable || !isLoading) {
+                spinnerTimer?.stop()
+                spinnerTimer = null
+                return@Timer
+            }
+            spinnerAngle = (spinnerAngle + 14f) % 360f
+            repaint()
+        }.also { it.start() }
+    }
+
+    private fun stopLoadingSpinner() {
+        spinnerTimer?.stop()
+        spinnerTimer = null
+    }
 
     init {
         isOpaque = false
@@ -1065,25 +1324,45 @@ class ModernButton(
         isBorderPainted = false
         isFocusPainted = false
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-        font = font.deriveFont(java.awt.Font.BOLD, if (compact) 11.5f else 12.5f)
+        font = Theme.FONT_DISPLAY.deriveFont(java.awt.Font.BOLD, if (compact) 12.5f else 13f)
         iconTextGap = if (compact) 6 else 8
         updatePadding()
 
         addChangeListener {
             ensureAnimationRunning()
         }
+        addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusGained(e: java.awt.event.FocusEvent?) { repaint() }
+            override fun focusLost(e: java.awt.event.FocusEvent?) { repaint() }
+        })
     }
 
     override fun removeNotify() {
         animTimer?.stop()
         animTimer = null
+        spinnerTimer?.stop()
+        spinnerTimer = null
         super.removeNotify()
+    }
+
+    override fun getPreferredSize(): java.awt.Dimension {
+        val d = super.getPreferredSize()
+        if (isPreferredSizeSet) return d
+        val targetH = when {
+            minHeightOverride > 0 -> minHeightOverride
+            compact -> Theme.CONTROL_HEIGHT_SMALL
+            else -> Theme.CONTROL_HEIGHT_COMPACT
+        }
+        val targetW = if (minWidthOverride > 0) maxOf(d.width, minWidthOverride) else d.width
+        return java.awt.Dimension(targetW, maxOf(d.height, targetH))
     }
 
     private fun ensureAnimationRunning() {
         val targetH = if (model.isRollover && isEnabled) 1f else 0f
         val targetP = if (model.isPressed && isEnabled) 1f else 0f
-        if (kotlin.math.abs(hoverProgress - targetH) < 0.02f && kotlin.math.abs(pressProgress - targetP) < 0.02f) {
+        if (!mihon.desktop.ui.animation.MotionPreferences.isEnabled ||
+            (kotlin.math.abs(hoverProgress - targetH) < 0.02f && kotlin.math.abs(pressProgress - targetP) < 0.02f)
+        ) {
             hoverProgress = targetH
             pressProgress = targetP
             repaint()
@@ -1107,9 +1386,9 @@ class ModernButton(
     private fun updatePadding() {
         val hasText = !text.isNullOrBlank()
         border = when {
-            compact && hasText -> javax.swing.BorderFactory.createEmptyBorder(5, 10, 5, 10)
+            compact && hasText -> javax.swing.BorderFactory.createEmptyBorder(5, 11, 5, 11)
             compact -> javax.swing.BorderFactory.createEmptyBorder(5, 7, 5, 7)
-            hasText -> javax.swing.BorderFactory.createEmptyBorder(7, 14, 7, 14)
+            hasText -> javax.swing.BorderFactory.createEmptyBorder(8, 15, 8, 15)
             else -> javax.swing.BorderFactory.createEmptyBorder(7, 9, 7, 9)
         }
     }
@@ -1120,7 +1399,7 @@ class ModernButton(
     }
 
     override fun paintBorder(g: Graphics) {
-        // Suppressed: border is drawn with sub-pixel anti-aliasing inside paintComponent
+        // Suppressed: border and focus ring are drawn with sub-pixel anti-aliasing inside paintComponent
     }
 
     override fun paintComponent(g: Graphics) {
@@ -1131,107 +1410,175 @@ class ModernButton(
 
         val w = width.toFloat()
         val h = height.toFloat()
-        val arc = 10f
-        val hp = hoverProgress
-        val pp = pressProgress
+        val arc = (Theme.CONTROL_RADIUS * 2).toFloat()
+        val hp = if (isEnabled) easeOutCubic(hoverProgress) else 0f
+        val pp = if (isEnabled) pressProgress else 0f
+
+        if (pp > 0.01f && mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            val scale = 1f - 0.022f * pp
+            g2.translate(w / 2.0, h / 2.0)
+            g2.scale(scale.toDouble(), scale.toDouble())
+            g2.translate(-w / 2.0, -h / 2.0)
+        }
 
         val shape = RoundRectangle2D.Float(1f, 1f, w - 2f, h - 2f, arc, arc)
 
         when (variant) {
             Variant.PRIMARY -> {
-                val baseTop = blendUiColor(Theme.PRIMARY, Color(0x6D, 0x6D, 0xE2), hp)
-                val topColor = blendUiColor(baseTop, Theme.PRIMARY_PRESS, pp)
-                val baseBot = blendUiColor(Theme.PRIMARY_HOVER, Color(0x55, 0x55, 0xD2), hp)
-                val botColor = blendUiColor(baseBot, Color(0x31, 0x31, 0x96), pp)
-                g2.paint = java.awt.GradientPaint(0f, 1f, topColor, 0f, h - 1f, botColor)
+                val fill = if (!isEnabled) {
+                    blendUiColor(Theme.BG_SURFACE, Theme.PRIMARY, 0.36f)
+                } else {
+                    blendUiColor(blendUiColor(Theme.PRIMARY, Theme.PRIMARY_HOVER, hp), Theme.PRIMARY_PRESS, pp)
+                }
+                g2.color = fill
                 g2.fill(shape)
-
-                val specAlpha = (45 + 24 * hp - 20 * pp).toInt().coerceIn(0, 120)
-                g2.color = Color(255, 255, 255, specAlpha)
-                g2.stroke = BasicStroke(1f)
-                g2.draw(RoundRectangle2D.Float(1.5f, 1.5f, w - 3f, h - 3f, arc - 1f, arc - 1f))
-
-                foreground = Color.WHITE
+                foreground = if (!isEnabled) {
+                    if (Theme.isDark) Color(0xC2, 0xC6, 0xD6) else Color(0xF7, 0xF7, 0xFA)
+                } else {
+                    Color.WHITE
+                }
             }
 
             Variant.FAVORITE -> {
-                val bgAlpha = (28 + 16 * hp + 12 * pp).toInt().coerceIn(0, 90)
-                g2.color = Color(0xF4, 0x3F, 0x5E, bgAlpha)
+                val base = if (Theme.isDark) Color(0xFF, 0x6B, 0x7A) else Color(0xE0, 0x1B, 0x24)
+                val bgAlpha = if (!isEnabled) 18 else (28 + 16 * hp + 14 * pp).toInt().coerceIn(0, 90)
+                g2.color = Color(base.red, base.green, base.blue, bgAlpha)
                 g2.fill(shape)
 
-                val borderAlpha = (85 + 50 * hp).toInt().coerceIn(0, 180)
-                g2.color = Color(0xF4, 0x3F, 0x5E, borderAlpha)
+                val borderAlpha = if (!isEnabled) 45 else (95 + 50 * hp).toInt().coerceIn(0, 185)
+                g2.color = Color(base.red, base.green, base.blue, borderAlpha)
                 g2.stroke = BasicStroke(1f)
                 g2.draw(shape)
 
-                foreground = if (Theme.isDark) Color(0xFB, 0x71, 0x85) else Color(0xE1, 0x1D, 0x48)
+                foreground = if (!isEnabled) Theme.TEXT_MUTED else if (Theme.isDark) Color(0xFF, 0x8B, 0x8B) else Color(0xB9, 0x1C, 0x1C)
+            }
+
+            Variant.DANGER -> {
+                val base = Color(0xDC, 0x26, 0x26)
+                val hover = Color(0xB9, 0x1C, 0x1C)
+                val press = Color(0x99, 0x1B, 0x1B)
+                val fill = if (!isEnabled) {
+                    blendUiColor(Theme.BG_SURFACE, base, 0.36f)
+                } else {
+                    blendUiColor(blendUiColor(base, hover, hp), press, pp)
+                }
+                g2.color = fill
+                g2.fill(shape)
+                foreground = Color.WHITE
             }
 
             Variant.SURFACE -> {
-                val rest = if (Theme.isDark) Color(0x1E, 0x20, 0x28) else Color(0xF4, 0xF6, 0xF9)
-                val hov = if (Theme.isDark) Color(0x2A, 0x2E, 0x3A) else Color(0xEA, 0xF0, 0xF6)
-                val prs = if (Theme.isDark) Color(0x16, 0x18, 0x1E) else Color(0xDF, 0xE6, 0xEE)
-                val bg = blendUiColor(blendUiColor(rest, hov, hp), prs, pp)
+                val rest = Theme.BG_CARD
+                val hov = Theme.BG_CARD_HOVER
+                val prs = Theme.BG_SURFACE
+                val bg = if (!isEnabled) Theme.BG_SURFACE else blendUiColor(blendUiColor(rest, hov, hp), prs, pp)
                 g2.color = bg
                 g2.fill(shape)
 
-                val bAlpha = if (Theme.isDark) (22 + 24 * hp).toInt() else (20 + 20 * hp).toInt()
-                g2.color = if (Theme.isDark) Color(255, 255, 255, bAlpha) else Color(0, 0, 0, bAlpha)
+                g2.color = if (!isEnabled) {
+                    Theme.BORDER_SUBTLE
+                } else {
+                    blendUiColor(Theme.BORDER_SUBTLE, Theme.BORDER_STRONG, hp)
+                }
                 g2.stroke = BasicStroke(1f)
                 g2.draw(shape)
 
-                foreground = Theme.TEXT_PRIMARY
+                foreground = if (!isEnabled) Theme.TEXT_MUTED else Theme.TEXT_PRIMARY
             }
 
             Variant.GHOST -> {
-                val alpha = ((18f * hp) + (12f * pp)).toInt().coerceIn(0, 60)
-                if (alpha > 0) {
-                    g2.color = if (Theme.isDark) Color(255, 255, 255, alpha) else Color(0, 0, 0, alpha)
+                if (isEnabled && (hp > 0.01f || pp > 0.01f)) {
+                    val alpha = ((24f * hp) + (18f * pp)).toInt().coerceIn(0, 72)
+                    g2.color = if (Theme.isDark) Color(255, 255, 255, alpha) else Color(22, 23, 34, alpha)
                     g2.fill(shape)
                 }
-                foreground = blendUiColor(Theme.TEXT_SECONDARY, Theme.TEXT_PRIMARY, hp)
+                foreground = if (!isEnabled) Theme.TEXT_MUTED else blendUiColor(Theme.TEXT_SECONDARY, Theme.TEXT_PRIMARY, hp)
             }
 
             Variant.HUD -> {
                 val bg = blendUiColor(
-                    blendUiColor(Color(0x22, 0x23, 0x2B, 224), Color(0x32, 0x34, 0x42, 238), hp),
-                    Color(0x17, 0x17, 0x1C, 245),
+                    blendUiColor(Color(0x1E, 0x1F, 0x26, 226), Color(0x2D, 0x2F, 0x3B, 240), hp),
+                    Color(0x14, 0x15, 0x1A, 248),
                     pp,
                 )
                 g2.color = bg
                 g2.fill(shape)
-                g2.color = Color(255, 255, 255, (24 + 26 * hp).toInt().coerceIn(0, 80))
+                g2.color = Color(255, 255, 255, (30 + 28 * hp).toInt().coerceIn(0, 88))
                 g2.stroke = BasicStroke(1f)
                 g2.draw(shape)
-                foreground = blendUiColor(Color(232, 234, 242), Color.WHITE, hp)
+                foreground = if (!isEnabled) Color(165, 168, 182) else blendUiColor(Color(232, 234, 242), Color.WHITE, hp)
             }
 
             Variant.HUD_ACCENT -> {
-                val base = blendUiColor(Theme.PRIMARY, Color(0x6D, 0x6D, 0xE2), hp)
-                g2.color = Color(base.red, base.green, base.blue, (92 + 40 * hp + 20 * pp).toInt().coerceIn(0, 210))
+                val fill = blendUiColor(blendUiColor(Theme.PRIMARY, Theme.PRIMARY_HOVER, hp), Theme.PRIMARY_PRESS, pp)
+                g2.color = Color(fill.red, fill.green, fill.blue, (215 + 35 * hp).toInt().coerceIn(0, 255))
                 g2.fill(shape)
-                g2.color = Color(Theme.ACCENT.red, Theme.ACCENT.green, Theme.ACCENT.blue, (175 + 55 * hp).toInt().coerceIn(0, 235))
+                g2.color = Color(255, 255, 255, 55)
                 g2.stroke = BasicStroke(1f)
                 g2.draw(shape)
                 foreground = Color.WHITE
             }
         }
 
+        if (isEnabled && isFocusOwner) {
+            g2.color = if (variant == Variant.PRIMARY || variant == Variant.DANGER || variant == Variant.HUD_ACCENT) {
+                Color(255, 255, 255, 200)
+            } else {
+                Theme.PRIMARY
+            }
+            g2.stroke = BasicStroke(2f)
+            g2.draw(RoundRectangle2D.Float(1.5f, 1.5f, w - 3f, h - 3f, arc, arc))
+        }
+
+        if (isLoading) {
+            val s = 12f
+            val sx = if (text.isNullOrBlank()) (w - s) / 2f else 9f
+            val sy = (h - s) / 2f
+            g2.color = Color(foreground.red, foreground.green, foreground.blue, 220)
+            g2.stroke = BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            g2.drawArc(sx.toInt(), sy.toInt(), s.toInt(), s.toInt(), spinnerAngle.toInt(), 250)
+        }
+
         g2.dispose()
-        super.paintComponent(g)
+        val gc = g.create() as Graphics2D
+        if (pp > 0.01f && mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            val scale = 1f - 0.022f * pp
+            gc.translate(w / 2.0, h / 2.0)
+            gc.scale(scale.toDouble(), scale.toDouble())
+            gc.translate(-w / 2.0, -h / 2.0)
+        }
+        super.paintComponent(gc)
+        gc.dispose()
     }
 }
 
 /**
- * Compact circular/squircle icon button with smooth 60fps hover halo for toolbars & reader HUDs.
+ * Compact square/squircle icon button with smooth hover halo and 8px radius for toolbars & reader HUDs.
  */
-class ModernIconButton(
+open class ModernIconButton(
     icon: Icon,
     tip: String = "",
-    sizePx: Int = 36,
-    private val cornerRadius: Float = 999f,
+    sizePx: Int = Theme.CONTROL_HEIGHT_COMPACT,
+    private val cornerRadius: Float = (Theme.CONTROL_RADIUS * 2).toFloat(),
     private val darkOverlay: Boolean = false,
+    private val surfaceStyled: Boolean = false,
 ) : javax.swing.JButton(icon) {
+
+    var activeHighlight: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                repaint()
+            }
+        }
+
+    var badgeCount: Int = 0
+        set(value) {
+            if (field != value) {
+                field = value
+                repaint()
+            }
+        }
 
     private var hoverProgress = 0f
     private var pressProgress = 0f
@@ -1242,12 +1589,18 @@ class ModernIconButton(
         isContentAreaFilled = false
         isBorderPainted = false
         isFocusPainted = false
-        isFocusable = false
+        isFocusable = !darkOverlay
         toolTipText = tip.ifBlank { null }
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         preferredSize = java.awt.Dimension(sizePx, sizePx)
         minimumSize = java.awt.Dimension(sizePx, sizePx)
         addChangeListener { ensureAnim() }
+        if (!darkOverlay) {
+            addFocusListener(object : java.awt.event.FocusAdapter() {
+                override fun focusGained(e: java.awt.event.FocusEvent?) { repaint() }
+                override fun focusLost(e: java.awt.event.FocusEvent?) { repaint() }
+            })
+        }
     }
 
     override fun removeNotify() {
@@ -1259,7 +1612,9 @@ class ModernIconButton(
     private fun ensureAnim() {
         val th = if (model.isRollover && isEnabled) 1f else 0f
         val tp = if (model.isPressed && isEnabled) 1f else 0f
-        if (kotlin.math.abs(hoverProgress - th) < 0.02f && kotlin.math.abs(pressProgress - tp) < 0.02f) {
+        if (!mihon.desktop.ui.animation.MotionPreferences.isEnabled ||
+            (kotlin.math.abs(hoverProgress - th) < 0.02f && kotlin.math.abs(pressProgress - tp) < 0.02f)
+        ) {
             hoverProgress = th
             pressProgress = tp
             repaint()
@@ -1286,12 +1641,62 @@ class ModernIconButton(
         val w = width.toFloat()
         val h = height.toFloat()
         val arc = if (cornerRadius > 900f) minOf(w, h) else cornerRadius
-        val bgAlpha = ((24f * hoverProgress) + (18f * pressProgress)).toInt().coerceIn(0, 70)
-        if (bgAlpha > 0) {
-            g2.color = if (darkOverlay || Theme.isDark) Color(255, 255, 255, bgAlpha) else Color(0, 0, 0, bgAlpha)
-            g2.fill(RoundRectangle2D.Float(2f, 2f, w - 4f, h - 4f, arc, arc))
+        if (pressProgress > 0.01f && mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            val scale = 1f - 0.03f * pressProgress
+            g2.translate(w / 2.0, h / 2.0)
+            g2.scale(scale.toDouble(), scale.toDouble())
+            g2.translate(-w / 2.0, -h / 2.0)
+        }
+        if (surfaceStyled) {
+            val fill = if (activeHighlight) {
+                Theme.ACCENT_SOFT
+            } else {
+                blendUiColor(Theme.BG_CARD, Theme.BG_CARD_HOVER, easeOutCubic(hoverProgress))
+            }
+            g2.color = fill
+            g2.fill(RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, arc, arc))
+            g2.color = if (activeHighlight) Theme.PRIMARY else Theme.BORDER_SUBTLE
+            g2.stroke = BasicStroke(1f)
+            g2.draw(RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, arc, arc))
+        } else {
+            val bgAlpha = ((24f * hoverProgress) + (18f * pressProgress)).toInt().coerceIn(0, 70)
+            if (bgAlpha > 0) {
+                g2.color = if (darkOverlay || Theme.isDark) Color(255, 255, 255, bgAlpha) else Color(0, 0, 0, bgAlpha)
+                g2.fill(RoundRectangle2D.Float(2f, 2f, w - 4f, h - 4f, arc, arc))
+            }
+        }
+        if (isFocusable && isFocusOwner) {
+            g2.color = Theme.PRIMARY
+            g2.stroke = BasicStroke(1.5f)
+            g2.draw(RoundRectangle2D.Float(1.5f, 1.5f, w - 3f, h - 3f, arc, arc))
         }
         g2.dispose()
-        super.paintComponent(g)
+        val gc = g.create() as Graphics2D
+        if (pressProgress > 0.01f && mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            val scale = 1f - 0.03f * pressProgress
+            gc.translate(w / 2.0, h / 2.0)
+            gc.scale(scale.toDouble(), scale.toDouble())
+            gc.translate(-w / 2.0, -h / 2.0)
+        }
+        super.paintComponent(gc)
+        gc.dispose()
+
+        if (badgeCount > 0) {
+            val bg2 = g.create() as Graphics2D
+            bg2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            bg2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+            val badgeText = if (badgeCount > 99) "99+" else badgeCount.toString()
+            bg2.font = Theme.FONT_UI.deriveFont(java.awt.Font.BOLD, 9.5f)
+            val fm = bg2.fontMetrics
+            val bw = maxOf(15, fm.stringWidth(badgeText) + 7)
+            val bh = 15
+            val bx = (width - bw - 1).coerceAtLeast(0)
+            val by = 1
+            bg2.color = Theme.PRIMARY
+            bg2.fill(RoundRectangle2D.Float(bx.toFloat(), by.toFloat(), bw.toFloat(), bh.toFloat(), bh.toFloat(), bh.toFloat()))
+            bg2.color = Color.WHITE
+            bg2.drawString(badgeText, bx + (bw - fm.stringWidth(badgeText)) / 2, by + ((bh - fm.height) / 2) + fm.ascent)
+            bg2.dispose()
+        }
     }
 }

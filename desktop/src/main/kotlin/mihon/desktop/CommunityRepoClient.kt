@@ -215,9 +215,14 @@ class CommunityRepoDialog(
 
     private val model = DefaultListModel<CommunityRepoClient.CatalogEntry>()
     private val list = JList(model)
-    private val repoUrlField = JTextField().apply {
-        putClientProperty("JTextField.placeholderText", "Adicionar URL de repositório JSON (ex: https://.../index.json)…")
-    }
+    private val repoUrlField = mihon.desktop.ui.components.MihonTextField(
+        columns = 26,
+        placeholder = "Adicionar URL de repositório JSON (ex: https://.../index.json)…",
+        leadingIconProvider = { focused ->
+            ModernIcons.link(15) { if (focused) Theme.PRIMARY else Theme.TEXT_MUTED }
+        },
+        showClearButton = true,
+    )
 
     init {
         setSize(680, 520)
@@ -260,14 +265,10 @@ class CommunityRepoDialog(
             addActionListener {
                 val url = repoUrlField.text.trim()
                 if (!url.startsWith("http")) {
-                    JOptionPane.showMessageDialog(
-                        this@CommunityRepoDialog,
-                        "Informe uma URL HTTP/HTTPS válida apontando para um arquivo .json de extensões.",
-                        "URL Inválida",
-                        JOptionPane.WARNING_MESSAGE,
-                    )
+                    repoUrlField.validationError = "Informe uma URL HTTP/HTTPS válida (.json)"
                     return@addActionListener
                 }
+                repoUrlField.validationError = null
                 CommunityRepoClient.customRepoUrls = CommunityRepoClient.customRepoUrls + url
                 repoUrlField.text = ""
                 reloadCatalog()
@@ -277,7 +278,7 @@ class CommunityRepoDialog(
         val repoRow = JPanel(BorderLayout(8, 0)).apply {
             isOpaque = false
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 34)
+            maximumSize = Dimension(Int.MAX_VALUE, Theme.CONTROL_HEIGHT_COMPACT)
             add(repoUrlField, BorderLayout.CENTER)
             add(btnAddRepo, BorderLayout.EAST)
         }

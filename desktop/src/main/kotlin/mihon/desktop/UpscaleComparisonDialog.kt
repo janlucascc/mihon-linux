@@ -56,10 +56,10 @@ class UpscaleComparisonDialog(
         font = font.deriveFont(12f)
     }
 
-    private val mangaSelector = JComboBox<SampleOption>().apply {
+    private val mangaSelector = mihon.desktop.ui.components.MihonDropdown<SampleOption>(compact = true).apply {
         font = font.deriveFont(12.5f)
-        preferredSize = Dimension(320, 32)
-        maximumSize = Dimension(400, 32)
+        preferredSize = Dimension(320, 34)
+        maximumSize = Dimension(400, 34)
     }
 
     private val lblMetaManga = JLabel("—").apply { font = font.deriveFont(Font.BOLD, 12.5f); foreground = Theme.TEXT_PRIMARY }
@@ -218,8 +218,7 @@ class UpscaleComparisonDialog(
             val mangaDirs = dlDir.listFiles { f -> f.isDirectory }.orEmpty().sortedBy { it.name }
 
             val nsfwKeywords = listOf(
-                "sexual", "sex", "prazer", "vadia", "sem censura", "harem",
-                "makina-san", "hentai", "erótico", "erotico", "porn", "ecchi", "18+", "+18",
+                "hentai", "nsfw", "erótico", "erotico", "porn", "ecchi", "18+", "+18", "adult",
             )
 
             for (dir in mangaDirs) {
@@ -412,10 +411,32 @@ class UpscaleComparisonDialog(
                 add(right, BorderLayout.EAST)
             }
 
+            val leftViewer = createImageViewer(leftCrop, "Original (Scanlator com ruído JPEG e serrilhado)")
+            val rightViewer = createImageViewer(rightCrop, "Traço Nitido (Traço limpo e preto profundo sem esticar)")
+            val leftScroll = leftViewer.components.filterIsInstance<JScrollPane>().firstOrNull()
+            val rightScroll = rightViewer.components.filterIsInstance<JScrollPane>().firstOrNull()
+            if (leftScroll != null && rightScroll != null) {
+                var syncing = false
+                fun syncBars(src: JScrollPane, dst: JScrollPane) {
+                    if (syncing) return
+                    syncing = true
+                    try {
+                        dst.verticalScrollBar.value = src.verticalScrollBar.value
+                        dst.horizontalScrollBar.value = src.horizontalScrollBar.value
+                    } finally {
+                        syncing = false
+                    }
+                }
+                leftScroll.verticalScrollBar.addAdjustmentListener { syncBars(leftScroll, rightScroll) }
+                leftScroll.horizontalScrollBar.addAdjustmentListener { syncBars(leftScroll, rightScroll) }
+                rightScroll.verticalScrollBar.addAdjustmentListener { syncBars(rightScroll, leftScroll) }
+                rightScroll.horizontalScrollBar.addAdjustmentListener { syncBars(rightScroll, leftScroll) }
+            }
+
             val split = JSplitPane(
                 JSplitPane.HORIZONTAL_SPLIT,
-                createImageViewer(leftCrop, "Original (Scanlator com ruído JPEG e serrilhado)"),
-                createImageViewer(rightCrop, "Traço Nitido (Traço limpo e preto profundo sem esticar)"),
+                leftViewer,
+                rightViewer,
             ).apply {
                 resizeWeight = 0.5
                 dividerSize = 8

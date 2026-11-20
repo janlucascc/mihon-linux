@@ -51,7 +51,11 @@ import javax.swing.KeyStroke
  * - Comfortable Grid and Compact Overlay Grid modes
  * - `DownloadsBadge` + `UnreadBadge` + `LanguageBadge` on every manga cover
  */
-class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
+class LibraryScreen(
+    private val ctx: AppContext,
+    private val onOpenCategories: () -> Unit = {},
+    private val onOpenDownloads: () -> Unit = {},
+) : JPanel(BorderLayout()) {
 
     private enum class Sort(val label: String) {
         TITLE("Título (A-Z)"),
@@ -90,77 +94,97 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private val cardPrototype = MangaPosterCard()
     private val listRowPrototype = MangaListRowCard()
     private val tabsBar = LibraryTabsBar()
+    private val tabsScroll = object : JScrollPane(tabsBar) {
+        init {
+            border = null
+            isOpaque = false
+            viewport.isOpaque = false
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBar.preferredSize = Dimension(0, 0)
+            addMouseWheelListener { e ->
+                val bar = horizontalScrollBar
+                bar.value = (bar.value + e.unitsToScroll * 20).coerceIn(0, (bar.maximum - bar.visibleAmount).coerceAtLeast(0))
+            }
+        }
+    }
     private val centerCards = java.awt.CardLayout()
     private val centerContainer = JPanel(centerCards)
     private val emptyIconLbl = JLabel(
-        ModernIcons.library(56) {
-            Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 185)
+        ModernIcons.library(52) {
+            if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
         },
     )
     private val emptyTitleLbl = JLabel("Sua biblioteca está vazia")
     private val emptySubLbl = JLabel("Explore fontes online ou importe arquivos locais (.cbz/.zip) para começar.")
-    private val emptyActionBtn = ModernButton("Explorar Fontes", ModernIcons.browse(15) { Color.WHITE }, ModernButton.Variant.PRIMARY)
+    private val emptyActionBtn = ModernButton("Explorar Fontes", ModernIcons.browse(16) { Color.WHITE }, ModernButton.Variant.PRIMARY)
     private var themeListener: ((Boolean) -> Unit)? = null
+    private val categoryChangeListener: () -> Unit = {
+        tabsBar.revalidate()
+        tabsBar.repaint()
+        applyFilter()
+    }
 
     private var currentSort: Sort = runCatching {
         Sort.valueOf(libPrefs.get("library_sort", Sort.TITLE.name))
     }.getOrDefault(Sort.TITLE)
     private var sortAscending: Boolean = libPrefs.getBoolean("library_sort_asc", true)
 
-    private val countPillLabel = object : JLabel("0") {
-        init {
-            font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
-            foreground = Theme.ACCENT
-            isOpaque = false
-            border = BorderFactory.createEmptyBorder(3, 10, 3, 10)
-        }
-
-        override fun paintComponent(g: Graphics) {
-            val g2 = g.create() as Graphics2D
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            val h = height.toFloat().coerceAtLeast(18f)
-            g2.color = Theme.ACCENT_SOFT
-            g2.fill(java.awt.geom.RoundRectangle2D.Float(0f, 0f, width.toFloat(), height.toFloat(), h, h))
-            g2.dispose()
-            super.paintComponent(g)
-        }
+    private val countLabel = JLabel("0 títulos").apply {
+        font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
+        foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+        alignmentX = 0f
     }
 
     private fun hasActiveFilters(): Boolean =
         onlyDownloadedFilter || unreadOnlyFilter || completedOnlyFilter ||
             selectedGenreFilter != null || selectedSourceFilter != null
 
-    private var btnFilterRef: JButton? = null
-
-    private val filterField = object : JTextField(20) {
-        init {
-            putClientProperty("JTextField.placeholderText", "Pesquisar na biblioteca… (Ctrl+F)")
-            putClientProperty("JComponent.roundRect", true)
-            font = Theme.FONT_UI.deriveFont(13f)
-            foreground = Theme.TEXT_PRIMARY
-            background = Theme.BG_CARD
-            caretColor = Theme.ACCENT
-            isOpaque = false
-            border = BorderFactory.createEmptyBorder(6, 14, 6, 14)
-            isVisible = false
-        }
-
-        override fun paintComponent(g: Graphics) {
-            val g2 = g.create() as Graphics2D
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            val arc = height.toFloat().coerceAtLeast(24f)
-            g2.color = Theme.BG_CARD
-            g2.fill(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, width - 1f, height - 1f, arc, arc))
-            g2.color = if (isFocusOwner) Theme.PRIMARY else Theme.BORDER_SUBTLE
-            g2.stroke = java.awt.BasicStroke(if (isFocusOwner) 1.5f else 1f)
-            g2.draw(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, width - 1f, height - 1f, arc, arc))
-            g2.dispose()
-            super.paintComponent(g)
-        }
+    private fun activeFilterCount(): Int {
+        var c = 0
+        if (onlyDownloadedFilter) c++
+        if (unreadOnlyFilter) c++
+        if (completedOnlyFilter) c++
+        if (selectedGenreFilter != null) c++
+        if (selectedSourceFilter != null) c++
+        return c
     }
 
-    private fun m3HeaderIconButton(icon: javax.swing.Icon, tip: String, onClick: (JButton) -> Unit): JButton {
-        return ModernIconButton(icon, tip, sizePx = 38).apply {
+    private var btnFilterRef: ModernIconButton? = null
+
+    private val filterField = mihon.desktop.ui.components.MihonSearchField(
+        columns = 20,
+        placeholder = "Pesquisar na biblioteca…",
+        compact = false,
+        shortcutBadge = "Ctrl+F",
+        debounceMs = 120,
+        onEscapeEmpty = { grid.requestFocusInWindow() },
+    ).apply {
+        toolTipText = "Pesquisar na biblioteca (Ctrl+F)"
+        minimumSize = Dimension(180, Theme.CONTROL_HEIGHT_COMPACT)
+        preferredSize = Dimension(260, Theme.CONTROL_HEIGHT_COMPACT)
+        onDebouncedChange = { applyFilter() }
+        onSubmit = { applyFilter() }
+    }
+
+    private fun indexHeaderActionButton(
+        icon: javax.swing.Icon,
+        tip: String,
+        activeSupplier: () -> Boolean = { false },
+        onClick: (ModernIconButton) -> Unit,
+    ): ModernIconButton {
+        return object : ModernIconButton(
+            icon = icon,
+            tip = tip,
+            sizePx = Theme.CONTROL_HEIGHT_COMPACT,
+            cornerRadius = (Theme.CONTROL_RADIUS * 2).toFloat(),
+            surfaceStyled = true,
+        ) {
+            override fun paintComponent(g: Graphics) {
+                activeHighlight = activeSupplier()
+                super.paintComponent(g)
+            }
+        }.apply {
             foreground = Theme.TEXT_PRIMARY
             addActionListener { onClick(this) }
         }
@@ -168,15 +192,12 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     init {
         ctx.addOfflineFilterListener { applyFilter() }
-        LibraryCategory.addChangeListener {
-            tabsBar.repaint()
-            applyFilter()
-        }
+        LibraryCategory.addChangeListener(categoryChangeListener)
         background = Theme.BG_APP
         grid.background = Theme.BG_APP
-        grid.border = BorderFactory.createEmptyBorder(16, 18, 16, 18)
-        grid.cellRenderer = ListCellRenderer { _, manga, index, selected, _ ->
-            renderCard(manga, index, selected)
+        grid.border = BorderFactory.createEmptyBorder(14, Theme.PAGE_GUTTER, Theme.PAGE_GUTTER, Theme.PAGE_GUTTER)
+        grid.cellRenderer = ListCellRenderer { _, manga, index, selected, cellHasFocus ->
+            renderCard(manga, index, selected, cellHasFocus)
         }
         applyDisplayMode(displayMode)
         grid.addMouseMotionListener(object : MouseMotionAdapter() {
@@ -218,38 +239,21 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             }
         })
 
-        filterField.document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = applyFilter()
-            override fun removeUpdate(e: DocumentEvent) = applyFilter()
-            override fun changedUpdate(e: DocumentEvent) = applyFilter()
-        })
+        fun createIndexPopup(): JPopupMenu = mihon.desktop.ui.components.MihonPopupMenu.create()
 
-        // Material 3 TopAppBar matching Mihon Android's barra superior.jpeg:
-        // Left: Clean large title "Biblioteca"
-        // Right: Search toggle, Filter & Sort popup, Overflow menu
-        val btnSearch = m3HeaderIconButton(ModernIcons.search(20) { Theme.TEXT_PRIMARY }, "Pesquisar") {
-            filterField.isVisible = !filterField.isVisible
-            if (filterField.isVisible) {
-                filterField.requestFocusInWindow()
-            } else {
-                filterField.text = ""
-                applyFilter()
-            }
-            revalidate()
-            repaint()
+        fun styleMenuItem(item: JMenuItem, active: Boolean = false, danger: Boolean = false) {
+            mihon.desktop.ui.components.MihonPopupMenu.styleItem(item, active = active, danger = danger)
+            val pref = item.preferredSize
+            item.preferredSize = Dimension(maxOf(pref.width, 260).coerceAtMost(360), Theme.CONTROL_HEIGHT_COMPACT)
         }
 
-        val btnFilter = m3HeaderIconButton(
-            ModernIcons.filter(20) { if (hasActiveFilters()) Theme.ACCENT else Theme.TEXT_PRIMARY },
-            "Filtros, exibição e ordenação",
+        // 1. [Filtro] button
+        val btnFilter = indexHeaderActionButton(
+            ModernIcons.filter(18) { if (hasActiveFilters()) Theme.PRIMARY else Theme.TEXT_PRIMARY },
+            "Filtrar",
+            activeSupplier = { hasActiveFilters() },
         ) { anchor ->
-            val popup = JPopupMenu().apply {
-                background = Theme.BG_SURFACE
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
-                    BorderFactory.createEmptyBorder(6, 6, 6, 6),
-                )
-            }
+            val popup = createIndexPopup()
 
             val filterHeader = JMenuItem("FILTRAR POR:").apply {
                 icon = ModernIcons.filter(14) { Theme.TEXT_MUTED }
@@ -257,24 +261,21 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
                 foreground = Theme.TEXT_MUTED
                 background = Theme.BG_SURFACE
+                border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
             }
             popup.add(filterHeader)
 
             val offlineItem = JCheckBoxMenuItem("Somente disponíveis offline", onlyDownloadedFilter).apply {
-                icon = ModernIcons.offline(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                icon = ModernIcons.offline(16) { if (isSelected) Theme.PRIMARY else Theme.TEXT_MUTED }
+                styleMenuItem(this, active = isSelected)
                 addActionListener {
                     onlyDownloadedFilter = isSelected
                     applyFilter()
                 }
             }
             val unreadItem = JCheckBoxMenuItem("Apenas com capítulos não lidos", unreadOnlyFilter).apply {
-                icon = ModernIcons.checkCircle(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                icon = ModernIcons.checkCircle(16) { if (isSelected) Theme.PRIMARY else Theme.TEXT_MUTED }
+                styleMenuItem(this, active = isSelected)
                 addActionListener {
                     unreadOnlyFilter = isSelected
                     if (isSelected) completedOnlyFilter = false
@@ -282,10 +283,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 }
             }
             val completedItem = JCheckBoxMenuItem("Apenas leitura em dia (0 não lidos)", completedOnlyFilter).apply {
-                icon = ModernIcons.check(16) { if (isSelected) Theme.ACCENT else Theme.TEXT_MUTED }
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                icon = ModernIcons.check(16) { if (isSelected) Theme.PRIMARY else Theme.TEXT_MUTED }
+                styleMenuItem(this, active = isSelected)
                 addActionListener {
                     completedOnlyFilter = isSelected
                     if (isSelected) unreadOnlyFilter = false
@@ -296,16 +295,13 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             popup.add(unreadItem)
             popup.add(completedItem)
 
-            // Dynamic Genre Submenu
             val allGenres = all.flatMap { it.genre.orEmpty() }.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
             if (allGenres.isNotEmpty()) {
                 val genreMenu = javax.swing.JMenu("Gênero: ${selectedGenreFilter ?: "Todos"}").apply {
-                    font = Theme.FONT_UI.deriveFont(13f)
-                    foreground = Theme.TEXT_PRIMARY
-                    background = Theme.BG_SURFACE
+                    styleMenuItem(this, active = selectedGenreFilter != null)
                 }
                 genreMenu.add(JMenuItem("Todos os gêneros").apply {
-                    font = Theme.FONT_UI.deriveFont(13f)
+                    styleMenuItem(this, active = selectedGenreFilter == null)
                     addActionListener {
                         selectedGenreFilter = null
                         applyFilter()
@@ -314,7 +310,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 genreMenu.addSeparator()
                 allGenres.take(25).forEach { gName ->
                     genreMenu.add(JCheckBoxMenuItem(gName, selectedGenreFilter.equals(gName, ignoreCase = true)).apply {
-                        font = Theme.FONT_UI.deriveFont(13f)
+                        styleMenuItem(this, active = isSelected)
                         addActionListener {
                             selectedGenreFilter = if (selectedGenreFilter.equals(gName, ignoreCase = true)) null else gName
                             applyFilter()
@@ -324,63 +320,47 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 popup.add(genreMenu)
             }
 
-            if (onlyDownloadedFilter || unreadOnlyFilter || completedOnlyFilter || selectedGenreFilter != null || selectedSourceFilter != null) {
-                popup.add(JMenuItem("Limpar filtros ativos").apply {
-                    font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
-                    foreground = Theme.DANGER
-                    background = Theme.BG_SURFACE
-                    addActionListener {
-                        onlyDownloadedFilter = false
-                        unreadOnlyFilter = false
-                        completedOnlyFilter = false
-                        selectedGenreFilter = null
-                        selectedSourceFilter = null
-                        applyFilter()
-                    }
-                })
-            }
-
             popup.addSeparator()
-            val displayHeader = JMenuItem("MODO DE EXIBIÇÃO:").apply {
-                icon = ModernIcons.library(14) { Theme.TEXT_MUTED }
-                isEnabled = false
-                font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
-                foreground = Theme.TEXT_MUTED
-                background = Theme.BG_SURFACE
-            }
-            popup.add(displayHeader)
-
-            val displayGroup = ButtonGroup()
-            DisplayMode.entries.forEach { mode ->
-                val rdo = JRadioButtonMenuItem(mode.label, mode == displayMode).apply {
-                    font = Theme.FONT_UI.deriveFont(13f)
-                    foreground = Theme.TEXT_PRIMARY
-                    background = Theme.BG_SURFACE
-                    addActionListener {
-                        applyDisplayMode(mode)
-                    }
+            popup.add(JMenuItem("Limpar filtros", ModernIcons.close(15) { Theme.DANGER }).apply {
+                styleMenuItem(this, danger = true)
+                addActionListener {
+                    filterField.text = ""
+                    onlyDownloadedFilter = false
+                    unreadOnlyFilter = false
+                    completedOnlyFilter = false
+                    selectedGenreFilter = null
+                    selectedSourceFilter = null
+                    activeCategoryStatus = LibraryCategory.ALL
+                    tabsBar.repaint()
+                    applyFilter()
+                    popup.isVisible = false
                 }
-                displayGroup.add(rdo)
-                popup.add(rdo)
-            }
+            })
 
-            popup.addSeparator()
+            popup.show(anchor, 0, anchor.height + 4)
+        }
+        btnFilterRef = btnFilter
 
+        // 2. [Ordenar] button
+        val btnSort = indexHeaderActionButton(
+            ModernIcons.sort(18) { Theme.TEXT_PRIMARY },
+            "Ordenar",
+        ) { anchor ->
+            val popup = createIndexPopup()
             val sortMenuLabel = JMenuItem("ORDENAR POR:").apply {
                 icon = ModernIcons.sort(14) { Theme.TEXT_MUTED }
                 isEnabled = false
                 font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
                 foreground = Theme.TEXT_MUTED
                 background = Theme.BG_SURFACE
+                border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
             }
             popup.add(sortMenuLabel)
 
             val sortGroup = ButtonGroup()
             Sort.entries.forEach { sort ->
                 val rdo = JRadioButtonMenuItem(sort.label, sort == currentSort).apply {
-                    font = Theme.FONT_UI.deriveFont(13f)
-                    foreground = Theme.TEXT_PRIMARY
-                    background = Theme.BG_SURFACE
+                    styleMenuItem(this, active = sort == currentSort)
                     addActionListener {
                         currentSort = sort
                         libPrefs.put("library_sort", sort.name)
@@ -391,11 +371,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 popup.add(rdo)
             }
 
+            popup.addSeparator()
             popup.add(JCheckBoxMenuItem("Ordem crescente (A→Z / Menor→Maior)", sortAscending).apply {
-                icon = if (sortAscending) ModernIcons.arrowUp(14) { Theme.ACCENT } else ModernIcons.arrowDown(14) { Theme.ACCENT }
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                icon = if (sortAscending) ModernIcons.arrowUp(14) { Theme.PRIMARY } else ModernIcons.arrowDown(14) { Theme.PRIMARY }
+                styleMenuItem(this, active = sortAscending)
                 addActionListener {
                     sortAscending = isSelected
                     libPrefs.putBoolean("library_sort_asc", sortAscending)
@@ -405,65 +384,139 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
             popup.show(anchor, 0, anchor.height + 4)
         }
-        btnFilterRef = btnFilter
 
-        val btnOverflow = m3HeaderIconButton(ModernIcons.moreVert(20) { Theme.TEXT_PRIMARY }, "Mais opções") { anchor ->
-            val popup = JPopupMenu().apply {
+        // 3. [Grade] button
+        val btnDisplay = indexHeaderActionButton(
+            ModernIcons.grid(18) { Theme.TEXT_PRIMARY },
+            "Exibição",
+        ) { anchor ->
+            val popup = createIndexPopup()
+            val hdr = JMenuItem("MODO DE EXIBIÇÃO:").apply {
+                isEnabled = false
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 10.5f)
+                foreground = Theme.TEXT_MUTED
                 background = Theme.BG_SURFACE
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
-                    BorderFactory.createEmptyBorder(6, 6, 6, 6),
-                )
+                border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
             }
+            popup.add(hdr)
+            val grp = ButtonGroup()
+            DisplayMode.entries.forEach { mode ->
+                val item = JRadioButtonMenuItem(mode.label, mode == displayMode).apply {
+                    styleMenuItem(this, active = mode == displayMode)
+                    addActionListener { applyDisplayMode(mode) }
+                }
+                grp.add(item)
+                popup.add(item)
+            }
+            popup.show(anchor, 0, anchor.height + 4)
+        }
+
+        // 4. [Lote / Ações] button
+        val btnBatch = indexHeaderActionButton(
+            ModernIcons.batchSelect(18) { Theme.TEXT_PRIMARY },
+            "Ações em lote e importação",
+        ) { anchor ->
+            val popup = createIndexPopup()
             popup.add(JMenuItem("Atualizar biblioteca", ModernIcons.sync(16) { Theme.TEXT_PRIMARY }).apply {
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                styleMenuItem(this)
                 addActionListener { checkUpdatesForAll() }
             })
             popup.addSeparator()
             popup.add(JMenuItem("Adicionar arquivo (.cbz / .zip)...", ModernIcons.downloads(16) { Theme.TEXT_PRIMARY }).apply {
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                styleMenuItem(this)
                 addActionListener { importLocal(directories = false) }
             })
             popup.add(JMenuItem("Adicionar pasta de mangás...", ModernIcons.library(16) { Theme.TEXT_PRIMARY }).apply {
-                font = Theme.FONT_UI.deriveFont(13f)
-                foreground = Theme.TEXT_PRIMARY
-                background = Theme.BG_SURFACE
+                styleMenuItem(this)
                 addActionListener { importLocal(directories = true) }
             })
             popup.show(anchor, 0, anchor.height + 4)
         }
 
+        // 5. [Categorias] button
+        val btnCategories = ModernButton("Categorias", variant = ModernButton.Variant.SURFACE).apply {
+            toolTipText = "Gerenciar categorias"
+            preferredSize = Dimension(108, Theme.CONTROL_HEIGHT_COMPACT)
+            addActionListener { onOpenCategories() }
+        }
+
+        // 6. [Downloads] button
+        val btnDownloads = indexHeaderActionButton(
+            ModernIcons.downloads(18) { Theme.TEXT_PRIMARY },
+            "Fila de downloads",
+        ) {
+            onOpenDownloads()
+        }
+
         val titleLabel = JLabel("Biblioteca").apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 25f)
             foreground = Theme.TEXT_PRIMARY
-            border = BorderFactory.createEmptyBorder(0, 0, 0, 8)
+            alignmentX = 0f
+        }
+        val titleCol = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(titleLabel)
+            add(Box.createVerticalStrut(2))
+            add(countLabel)
+        }
+        val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+            isOpaque = false
+            add(btnFilter)
+            add(btnSort)
+            add(btnDisplay)
+            add(btnBatch)
+            add(btnCategories)
+            add(btnDownloads)
         }
 
-        val topAppBar = JPanel(BorderLayout(8, 0)).apply {
+        val searchCenterWrap = JPanel(java.awt.GridBagLayout()).apply {
+            isOpaque = false
+            val gbc = java.awt.GridBagConstraints().apply {
+                gridx = 0
+                gridy = 0
+                weightx = 1.0
+                fill = java.awt.GridBagConstraints.HORIZONTAL
+                anchor = java.awt.GridBagConstraints.CENTER
+            }
+            add(filterField, gbc)
+        }
+
+        val actionsCenterWrap = JPanel(java.awt.GridBagLayout()).apply {
+            isOpaque = false
+            val gbc = java.awt.GridBagConstraints().apply {
+                gridx = 0
+                gridy = 0
+                anchor = java.awt.GridBagConstraints.CENTER
+            }
+            add(actionsPanel, gbc)
+        }
+
+        val topAppBar = JPanel(BorderLayout(12, 8)).apply {
             background = Theme.BG_APP
-            border = BorderFactory.createEmptyBorder(12, 16, 10, 16)
-            val titleWrap = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-                isOpaque = false
-                add(titleLabel)
-                add(countPillLabel)
-            }
-            add(titleWrap, BorderLayout.WEST)
-
-            val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-                isOpaque = false
-                add(filterField)
-                add(btnSearch)
-                add(btnFilter)
-                add(btnOverflow)
-            }
-            add(actions, BorderLayout.CENTER)
+            border = BorderFactory.createEmptyBorder(14, Theme.PAGE_GUTTER, 6, Theme.PAGE_GUTTER)
+            add(titleCol, BorderLayout.WEST)
+            add(searchCenterWrap, BorderLayout.CENTER)
+            add(actionsCenterWrap, BorderLayout.EAST)
         }
 
-        // Ctrl+F opens library search; Esc clears & closes search field
+        var narrowHeader = false
+        topAppBar.addComponentListener(object : java.awt.event.ComponentAdapter() {
+            override fun componentResized(e: java.awt.event.ComponentEvent) {
+                val shouldNarrow = topAppBar.width in 1..679
+                if (shouldNarrow != narrowHeader) {
+                    narrowHeader = shouldNarrow
+                    topAppBar.removeAll()
+                    topAppBar.add(titleCol, BorderLayout.WEST)
+                    topAppBar.add(actionsCenterWrap, BorderLayout.EAST)
+                    topAppBar.add(searchCenterWrap, if (shouldNarrow) BorderLayout.SOUTH else BorderLayout.CENTER)
+                    topAppBar.revalidate()
+                    topAppBar.repaint()
+                }
+            }
+        })
+
+        // Ctrl+F focuses library search; Esc clears search text and returns focus to grid
         getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
             KeyStroke.getKeyStroke(KeyEvent.VK_F, java.awt.event.InputEvent.CTRL_DOWN_MASK),
             "focusLibrarySearch",
@@ -472,11 +525,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             "focusLibrarySearch",
             object : AbstractAction() {
                 override fun actionPerformed(e: ActionEvent) {
-                    filterField.isVisible = true
                     filterField.requestFocusInWindow()
                     filterField.selectAll()
-                    revalidate()
-                    repaint()
                 }
             },
         )
@@ -492,19 +542,35 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         filterField.text = ""
                         applyFilter()
                     } else {
-                        filterField.isVisible = false
                         grid.requestFocusInWindow()
-                        revalidate()
-                        repaint()
                     }
                 }
             },
         )
 
+        val infoLabel = JLabel("Configure filtros, ordenação e exibição. As preferências são salvas por categoria.").apply {
+            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+            foreground = Theme.TEXT_SECONDARY
+            border = BorderFactory.createEmptyBorder(0, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER)
+        }
+
+        val tabsOuter = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createEmptyBorder(0, Theme.PAGE_GUTTER, 10, Theme.PAGE_GUTTER)
+            add(tabsScroll, BorderLayout.CENTER)
+        }
+
+        val subHeader = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(infoLabel, BorderLayout.NORTH)
+            add(tabsOuter, BorderLayout.SOUTH)
+        }
+
         val topHeader = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
+            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
             add(topAppBar, BorderLayout.NORTH)
-            add(tabsBar, BorderLayout.SOUTH)
+            add(subHeader, BorderLayout.SOUTH)
         }
 
         val scroll = JScrollPane(grid).apply {
@@ -521,7 +587,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
         emptySubLbl.apply {
             font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
-            foreground = Theme.TEXT_MUTED
+            foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             alignmentX = 0.5f
         }
         emptyActionBtn.apply {
@@ -569,20 +635,30 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             centerContainer.background = Theme.BG_APP
             emptyWrap.background = Theme.BG_APP
             emptyTitleLbl.foreground = Theme.TEXT_PRIMARY
-            emptySubLbl.foreground = Theme.TEXT_MUTED
+            emptySubLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             topAppBar.background = Theme.BG_APP
             topHeader.background = Theme.BG_APP
+            topHeader.border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+            infoLabel.foreground = Theme.TEXT_SECONDARY
             tabsBar.background = Theme.BG_SURFACE
+            tabsBar.repaint()
             titleLabel.foreground = Theme.TEXT_PRIMARY
-            countPillLabel.foreground = Theme.ACCENT
-            countPillLabel.repaint()
+            countLabel.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             filterField.foreground = Theme.TEXT_PRIMARY
-            filterField.background = Theme.BG_CARD
-            filterField.caretColor = Theme.ACCENT
+            filterField.background = Theme.BG_SURFACE
+            filterField.caretColor = Theme.PRIMARY
             filterField.repaint()
-            btnSearch.foreground = Theme.TEXT_PRIMARY
             btnFilter.foreground = Theme.TEXT_PRIMARY
-            btnOverflow.foreground = Theme.TEXT_PRIMARY
+            btnSort.foreground = Theme.TEXT_PRIMARY
+            btnDisplay.foreground = Theme.TEXT_PRIMARY
+            btnBatch.foreground = Theme.TEXT_PRIMARY
+            btnDownloads.foreground = Theme.TEXT_PRIMARY
+            btnFilter.repaint()
+            btnSort.repaint()
+            btnDisplay.repaint()
+            btnBatch.repaint()
+            btnCategories.repaint()
+            btnDownloads.repaint()
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             grid.repaint()
@@ -595,6 +671,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     fun dispose() {
         hoverAnimator.stop()
+        LibraryCategory.removeChangeListener(categoryChangeListener)
         themeListener?.let { ctx.removeThemeListener(it) }
     }
 
@@ -661,7 +738,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             ),
         )
 
-        GooeyContextMenu(gooeyItems).showAt(grid, x, y)
+        GooeyContextMenu.showSmart(gooeyItems, grid, x, y)
     }
 
     fun refresh() {
@@ -712,7 +789,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 grid.layoutOrientation = JList.VERTICAL
                 grid.visibleRowCount = 0
                 grid.fixedCellWidth = -1
-                grid.fixedCellHeight = 64
+                grid.fixedCellHeight = 72
             }
         }
         grid.revalidate()
@@ -748,8 +825,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             .sortedWith(comparator)
         model.clear()
         shown.forEach { model.addElement(it) }
-        countPillLabel.text = if (shown.size == all.size) "${all.size}" else "${shown.size} / ${all.size}"
-        countPillLabel.repaint()
+        val hasQueryOrFilter = query.isNotEmpty() || cat != LibraryCategory.ALL || hasActiveFilters()
+        countLabel.text = formatLibraryCount(shown.size, all.size, hasQueryOrFilter, unreadOnlyFilter && query.isEmpty() && !onlyDownloadedFilter && !completedOnlyFilter && selectedGenreFilter == null)
+        countLabel.repaint()
+        btnFilterRef?.badgeCount = activeFilterCount()
         btnFilterRef?.repaint()
         if (shown.isEmpty()) {
             if (all.isEmpty()) {
@@ -758,16 +837,16 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 emptyActionBtn.text = "Explorar Fontes"
                 emptyActionBtn.isVisible = ctx.extensions.isNotEmpty()
             } else {
-                emptyTitleLbl.text = "Nenhum mangá encontrado"
-                emptySubLbl.text = "Nenhum título corresponde aos filtros ou à categoria selecionada."
-                emptyActionBtn.text = "Limpar Filtros"
+                emptyTitleLbl.text = "Nenhum título encontrado"
+                emptySubLbl.text = "O filtro ou a busca atual não retornou resultados nesta categoria."
+                emptyActionBtn.text = "Limpar filtros"
                 emptyActionBtn.isVisible = true
             }
             centerCards.show(centerContainer, "empty")
         } else {
             centerCards.show(centerContainer, "grid")
         }
-        if (query.isNotEmpty() || cat != LibraryCategory.ALL || onlyDownloadedFilter || unreadOnlyFilter || completedOnlyFilter || selectedGenreFilter != null) {
+        if (hasQueryOrFilter) {
             ctx.setStatus("${shown.size} de ${all.size} mangá(s)")
         }
     }
@@ -814,7 +893,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
-    private fun renderCard(manga: Manga, index: Int, selected: Boolean): Component {
+    private fun renderCard(manga: Manga, index: Int, selected: Boolean, focused: Boolean): Component {
         val unread = unreadByManga[manga.id] ?: 0
         val downloaded = downloadedByManga[manga.id] ?: 0
         val srcLabel = if (manga.isLocal) "LOCAL" else (ctx.sourceFor(manga.source)?.language?.uppercase() ?: "WEB")
@@ -844,27 +923,35 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 downloadsCount = downloaded
                 unreadCount = unread
                 selectedState = selected
+                focusedState = focused && !selected
                 hoveredState = index == hoveredIndex
                 hoverProgress = hp
             }
         }
+        val fadeAlpha = ctx.covers.fadeAlphaForManga(manga.id)
+        if (fadeAlpha < 0.99f) {
+            SwingUtilities.invokeLater { grid.repaint() }
+        }
         return cardPrototype.apply {
             coverIcon = ctx.covers.get(manga.id, manga.title)
+            coverFadeAlpha = fadeAlpha
+            isSkeleton = false
             titleText = manga.title
             subtitleText = manga.author ?: LibraryCategory.labelOf(manga.status)
             downloadsBadgeCount = downloaded
             unreadBadgeCount = unread
-            topLeftBadge = srcLabel
+            topLeftBadge = null
             topRightBadge = null
             compactOverlayMode = (displayMode == DisplayMode.COMPACT_GRID)
             selectedState = selected
+            focusedState = focused && !selected
             hoveredState = index == hoveredIndex
             hoverProgress = hp
         }
     }
 
     /**
-     * Compact horizontal list row renderer for large libraries.
+     * Compact horizontal list row renderer for large libraries (10px card radius, Signal orange unread badge).
      */
     private class MangaListRowCard : JPanel() {
         var coverIcon: javax.swing.ImageIcon? = null
@@ -874,12 +961,13 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         var downloadsCount: Int = 0
         var unreadCount: Int = 0
         var selectedState: Boolean = false
+        var focusedState: Boolean = false
         var hoveredState: Boolean = false
         var hoverProgress: Float = 0f
 
         init {
             isOpaque = false
-            preferredSize = Dimension(400, 64)
+            preferredSize = Dimension(400, 72)
         }
 
         private fun clipStr(g2: Graphics2D, text: String, maxW: Int): String {
@@ -897,25 +985,34 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
             g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
 
-            val hp = if (hoverProgress > 0f) hoverProgress.coerceIn(0f, 1f) else if (hoveredState) 1f else 0f
+            val hp = easeOutCubic(if (hoverProgress > 0f) hoverProgress.coerceIn(0f, 1f) else if (hoveredState) 1f else 0f)
             val w = width
             val h = height
+            val cardArc = Theme.CARD_RADIUS * 2
             if (selectedState) {
                 g2.color = Theme.BG_CARD_HOVER
-                g2.fillRoundRect(4, 2, w - 8, h - 4, 10, 10)
+                g2.fillRoundRect(4, 2, w - 8, h - 4, cardArc, cardArc)
+                g2.color = Theme.PRIMARY
+                g2.stroke = java.awt.BasicStroke(1.5f)
+                g2.drawRoundRect(4, 2, w - 9, h - 5, cardArc, cardArc)
             } else if (hp > 0.02f) {
-                val hc = Theme.BG_CARD
+                val hc = Theme.BG_CARD_HOVER
                 g2.color = Color(hc.red, hc.green, hc.blue, (255 * hp).toInt().coerceIn(0, 255))
-                g2.fillRoundRect(4, 2, w - 8, h - 4, 10, 10)
+                g2.fillRoundRect(4, 2, w - 8, h - 4, cardArc, cardArc)
+            }
+            if (focusedState && !selectedState) {
+                g2.color = Theme.PRIMARY
+                g2.stroke = java.awt.BasicStroke(1.5f)
+                g2.drawRoundRect(4, 2, w - 9, h - 5, cardArc, cardArc)
             }
 
             // Bottom subtle divider
             g2.color = Theme.BORDER_SUBTLE
             g2.drawLine(14, h - 1, w - 14, h - 1)
 
-            // Mini cover (36x50)
-            val thumbW = 36
-            val thumbH = 50
+            // Mini cover (38x54)
+            val thumbW = 38
+            val thumbH = 54
             val thumbX = 14
             val thumbY = (h - thumbH) / 2
             val icon = coverIcon
@@ -924,24 +1021,25 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 g2.drawImage(icon.image, thumbX, thumbY, thumbW, thumbH, null)
                 g2.clip = null
             } else {
-                g2.color = Theme.BG_SURFACE
+                g2.color = Theme.BG_CARD
                 g2.fillRoundRect(thumbX, thumbY, thumbW, thumbH, 6, 6)
             }
-            g2.color = Color(255, 255, 255, 26)
+            g2.color = Theme.BORDER_SUBTLE
             g2.drawRoundRect(thumbX, thumbY, thumbW - 1, thumbH - 1, 6, 6)
 
-            // Right badges (Unread Pill + Downloaded + Source)
+            // Right badges (Unread Signal Pill + Downloaded + Source)
             var rightX = w - 18
             if (unreadCount > 0) {
                 val uStr = "$unreadCount"
                 g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
                 val fm = g2.fontMetrics
-                val pw = (fm.stringWidth(uStr) + 12).coerceAtLeast(22)
+                val pw = (fm.stringWidth(uStr) + 14).coerceAtLeast(22)
                 val ph = 20
                 rightX -= pw
                 val py = (h - ph) / 2
-                g2.color = Theme.PRIMARY
-                g2.fillRoundRect(rightX, py, pw, ph, ph, ph)
+                val arc = Theme.BADGE_RADIUS * 2
+                g2.color = Theme.SIGNAL
+                g2.fillRoundRect(rightX, py, pw, ph, arc, arc)
                 g2.color = Color.WHITE
                 g2.drawString(uStr, rightX + (pw - fm.stringWidth(uStr)) / 2, py + ((ph - fm.height) / 2) + fm.ascent)
                 rightX -= 8
@@ -953,19 +1051,19 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     downloadsCount,
                     rightX,
                     (h - 20) / 2,
-                    Theme.TERTIARY,
-                    Color.WHITE,
+                    Theme.SUCCESS,
+                    badgeForegroundFor(Theme.SUCCESS),
                     alignRight = true,
                 )
                 rightX -= pw + 10
             }
 
             if (sourceText.isNotBlank()) {
-                g2.font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
+                g2.font = Theme.FONT_UI.deriveFont(Font.PLAIN, 11.5f)
                 val fm = g2.fontMetrics
                 val sw = fm.stringWidth(sourceText)
                 rightX -= sw
-                g2.color = Theme.TEXT_MUTED
+                g2.color = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                 g2.drawString(sourceText, rightX, (h - fm.height) / 2 + fm.ascent)
                 rightX -= 12
             }
@@ -973,21 +1071,20 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             // Title & Subtitle safely ellipsized before badges
             val textX = thumbX + thumbW + 14
             val maxTextW = (rightX - textX).coerceAtLeast(40)
-            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14f)
-            g2.color = Theme.TEXT_PRIMARY
-            g2.drawString(clipStr(g2, titleText, maxTextW), textX, 27)
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 13.5f)
+            g2.color = if (selectedState) Theme.ACCENT else Theme.TEXT_PRIMARY
+            Theme.drawStringWithFallback(g2, clipStr(g2, titleText, maxTextW), textX, 30)
 
             g2.font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
-            g2.color = Theme.TEXT_MUTED
-            g2.drawString(clipStr(g2, subtitleText, maxTextW), textX, 46)
+            g2.color = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+            Theme.drawStringWithFallback(g2, clipStr(g2, subtitleText, maxTextW), textX, 50)
 
             g2.dispose()
         }
     }
 
     /**
-     * Port of Mihon's `LibraryTabs.kt` (`PrimaryScrollableTabRow` + `TabText(text, badgeCount)`).
-     * Supports smooth animated indicator sliding, click-and-drag reordering, and right-click GooeyContextMenu.
+     * Segmented editorial category selector (38px height, BG_SURFACE track, solid PRIMARY active segment).
      */
     private inner class LibraryTabsBar : JPanel() {
         private var hoveredTab = -1
@@ -1008,8 +1105,8 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
 
         private fun animateIndicatorTo(targetRect: java.awt.Rectangle) {
-            val targetX = (targetRect.x + 10).toFloat()
-            val targetW = (targetRect.width - 20).coerceAtLeast(16).toFloat()
+            val targetX = targetRect.x.toFloat()
+            val targetW = targetRect.width.coerceAtLeast(24).toFloat()
             if (animIndicatorX < 0f || animIndicatorW <= 0f) {
                 animIndicatorX = targetX
                 animIndicatorW = targetW
@@ -1019,12 +1116,11 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val startX = animIndicatorX
             val startW = animIndicatorW
             val startTime = System.currentTimeMillis()
-            val durationMs = 170L
+            val durationMs = Theme.MOTION_FAST_MS.toLong()
             indicatorTimer?.stop()
-            indicatorTimer = javax.swing.Timer(14) { e ->
+            indicatorTimer = javax.swing.Timer(12) { e ->
                 val rawT = ((System.currentTimeMillis() - startTime).toFloat() / durationMs).coerceIn(0f, 1f)
-                val inv = 1f - rawT
-                val eased = 1f - (inv * inv * inv)
+                val eased = easeOutCubic(rawT)
                 animIndicatorX = startX + (targetX - startX) * eased
                 animIndicatorW = startW + (targetW - startW) * eased
                 repaint()
@@ -1037,8 +1133,10 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
 
         init {
+            isOpaque = false
             background = Theme.BG_SURFACE
-            preferredSize = Dimension(0, 44)
+            preferredSize = Dimension(320, Theme.CONTROL_HEIGHT_COMPACT)
+            minimumSize = Dimension(120, Theme.CONTROL_HEIGHT_COMPACT)
             addMouseMotionListener(object : MouseMotionAdapter() {
                 override fun mouseMoved(e: MouseEvent) {
                     val idx = tabBounds.indexOfFirst { it.second.contains(e.point) }
@@ -1106,6 +1204,7 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         if (activeCategoryStatus != hit.first) {
                             activeCategoryStatus = hit.first
                             animateIndicatorTo(hit.second)
+                            scrollRectToVisible(hit.second)
                             applyFilter()
                         }
                     }
@@ -1157,14 +1256,19 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                         label = "Renomear '$catTitle'",
                         iconType = GooeyContextMenu.IconType.EDIT,
                     ) {
-                        val newName = JOptionPane.showInputDialog(
-                            this@LibraryScreen,
-                            "Novo nome para a categoria '$catTitle':",
-                            catTitle,
-                        )?.trim()
-                        if (!newName.isNullOrBlank() && newName != catTitle) {
-                            LibraryCategory.updateCategory(catId, newName)
-                        }
+                        val ownerWin = SwingUtilities.getWindowAncestor(this@LibraryScreen)
+                        mihon.desktop.ui.components.MihonPromptDialog(
+                            owner = ownerWin,
+                            dialogTitle = "Renomear Categoria",
+                            promptLabel = "Novo nome para a categoria '$catTitle':",
+                            initialValue = catTitle,
+                            placeholder = "Nome da categoria…",
+                            confirmText = "Salvar",
+                        ) { newName ->
+                            if (newName != catTitle) {
+                                LibraryCategory.updateCategory(catId, newName)
+                            }
+                        }.isVisible = true
                     }
                 )
                 items.add(
@@ -1204,8 +1308,19 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             }
 
             if (items.isNotEmpty()) {
-                GooeyContextMenu(items).showAt(this, x, y)
+                GooeyContextMenu.showSmart(items, this, x, y)
             }
+        }
+
+        override fun getPreferredSize(): Dimension {
+            val fm = getFontMetrics(Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f))
+            var x = 4
+            LibraryCategory.entries.forEach { (_, label) ->
+                val tabW = 14 + fm.stringWidth(label) + 14
+                x += tabW + 4
+            }
+            val parentW = parent?.width ?: 200
+            return Dimension(maxOf(x, parentW), Theme.CONTROL_HEIGHT_COMPACT)
         }
 
         override fun paintComponent(g: Graphics) {
@@ -1214,82 +1329,97 @@ class LibraryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
 
-            tabBounds.clear()
-            var x = 22
-            val h = height
+            val h = Theme.CONTROL_HEIGHT_COMPACT
+            val trackW = width.coerceAtLeast(1)
+            val trackArc = (Theme.CONTROL_RADIUS * 2).toFloat()
 
-            // Subtle bottom divider line
+            g2.color = if (Theme.isDark) Color(0x2A, 0x2A, 0x2E) else Theme.BG_SURFACE
+            g2.fill(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, trackW - 1f, h - 1f, trackArc, trackArc))
             g2.color = Theme.BORDER_SUBTLE
-            g2.drawLine(0, h - 1, width, h - 1)
+            g2.draw(java.awt.geom.RoundRectangle2D.Float(0.5f, 0.5f, trackW - 1f, h - 1f, trackArc, trackArc))
 
-            LibraryCategory.entries.forEachIndexed { idx, (status, label) ->
-                val count = if (status == LibraryCategory.ALL) all.size else all.count { it.status == status }
+            tabBounds.clear()
+            var x = 4
+            val innerY = 3
+            val innerH = Theme.CONTROL_HEIGHT_SMALL
+
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+            val boldFm = g2.fontMetrics
+            g2.font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+            val regFm = g2.fontMetrics
+
+            LibraryCategory.entries.forEach { (status, label) ->
                 val active = status == activeCategoryStatus
-                val hovered = idx == hoveredTab
+                val labelW = boldFm.stringWidth(label)
+                val tabW = 14 + labelW + 14
 
-                g2.font = font.deriveFont(if (active) Font.BOLD else Font.PLAIN, 13.5f)
-                val fm = g2.fontMetrics
-                val labelW = fm.stringWidth(label)
-
-                g2.font = font.deriveFont(Font.BOLD, 11f)
-                val bFm = g2.fontMetrics
-                val countStr = "$count"
-                val pillW = bFm.stringWidth(countStr) + 14
-                val tabW = labelW + 8 + pillW + 28
-
-                val rect = java.awt.Rectangle(x, 0, tabW, h)
+                val rect = java.awt.Rectangle(x, innerY, tabW, innerH)
                 tabBounds.add(status to rect)
 
-                if (hovered && !active) {
-                    g2.color = if (Theme.isDark) {
-                        Color(255, 255, 255, 16)
-                    } else {
-                        Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 20)
-                    }
-                    g2.fillRoundRect(x + 2, 4, tabW - 4, h - 8, h - 8, h - 8)
-                }
-
-                // Tab label
-                g2.font = font.deriveFont(if (active) Font.BOLD else Font.PLAIN, 13.5f)
-                g2.color = if (active) Theme.ACCENT_HOVER else Theme.TEXT_SECONDARY
-                val textY = (h - fm.height) / 2 + fm.ascent
-                g2.drawString(label, x + 14, textY)
-
-                // Tab count pill badge (Mihon TabText badgeCount)
-                val pillX = x + 14 + labelW + 8
-                val pillH = 19
-                val pillY = (h - pillH) / 2
-                g2.color = when {
-                    active -> Theme.ACCENT_SOFT
-                    Theme.isDark -> Color(255, 255, 255, 18)
-                    else -> Color(22, 23, 34, 16)
-                }
-                g2.fillRoundRect(pillX, pillY, pillW, pillH, pillH, pillH)
-                g2.font = font.deriveFont(Font.BOLD, 11f)
-                g2.color = if (active) Theme.ACCENT_HOVER else Theme.TEXT_MUTED
-                g2.drawString(countStr, pillX + 7, pillY + (pillH - bFm.height) / 2 + bFm.ascent)
-
-                // Record target bar when active (drawn smoothly below using animIndicatorX/W)
                 if (active && indicatorTimer?.isRunning != true) {
-                    animIndicatorX = (x + 10).toFloat()
-                    animIndicatorW = (tabW - 20).coerceAtLeast(16).toFloat()
+                    animIndicatorX = x.toFloat()
+                    animIndicatorW = tabW.toFloat()
                 }
-
-                // Drag indicator line
-                if (isDragging && dropTargetIndex == idx) {
-                    g2.color = Theme.ACCENT
-                    g2.fillRoundRect(x - 2, 6, 4, h - 12, 2, 2)
-                }
-
                 x += tabW + 4
             }
 
+            // Hover pill underneath active segment
+            LibraryCategory.entries.forEachIndexed { idx, (status, _) ->
+                val active = status == activeCategoryStatus
+                if (!active && idx == hoveredTab && idx < tabBounds.size) {
+                    val r = tabBounds[idx].second
+                    g2.color = Theme.BG_CARD_HOVER
+                    g2.fillRoundRect(r.x, r.y, r.width, r.height, 12, 12)
+                }
+            }
+
+            // Solid cobalt active segment
             if (animIndicatorX >= 0f && animIndicatorW > 0f) {
-                g2.color = Theme.ACCENT
-                g2.fillRoundRect(animIndicatorX.toInt(), h - 3, animIndicatorW.toInt(), 3, 3, 3)
+                g2.color = Theme.PRIMARY
+                g2.fillRoundRect(animIndicatorX.toInt(), innerY, animIndicatorW.toInt(), innerH, 12, 12)
+            }
+
+            LibraryCategory.entries.forEachIndexed { idx, (status, label) ->
+                val rect = tabBounds.getOrNull(idx)?.second ?: return@forEachIndexed
+                val active = status == activeCategoryStatus
+                val hovered = idx == hoveredTab
+
+                g2.font = Theme.FONT_UI.deriveFont(if (active) Font.BOLD else Font.PLAIN, 12.5f)
+                val fm = if (active) boldFm else regFm
+                val labelW = fm.stringWidth(label)
+                g2.color = when {
+                    active -> Color.WHITE
+                    hovered -> Theme.TEXT_PRIMARY
+                    else -> Theme.TEXT_SECONDARY
+                }
+                val textX = rect.x + (rect.width - labelW) / 2
+                val textY = innerY + (innerH - fm.height) / 2 + fm.ascent
+                g2.drawString(label, textX, textY)
+
+                if (isDragging && dropTargetIndex == idx) {
+                    g2.color = Theme.PRIMARY
+                    g2.fillRoundRect(rect.x - 2, innerY, 3, innerH, 3, 3)
+                }
             }
 
             g2.dispose()
         }
     }
 }
+
+internal fun formatLibraryCount(
+    shown: Int,
+    total: Int,
+    hasQueryOrFilter: Boolean,
+    unreadOnly: Boolean,
+): String = when {
+    !hasQueryOrFilter -> "$total ${if (total == 1) "título" else "títulos"}"
+    unreadOnly -> "$shown ${if (shown == 1) "título com não lidos" else "títulos com não lidos"}"
+    else -> "$shown ${if (shown == 1) "resultado" else "resultados"}"
+}
+
+internal fun computeLibraryColumnCount(
+    viewportWidth: Int,
+    cellWidth: Int = CARD_W,
+    horizontalPadding: Int = Theme.PAGE_GUTTER * 2,
+): Int = ((viewportWidth - horizontalPadding).coerceAtLeast(cellWidth) / cellWidth).coerceAtLeast(1)

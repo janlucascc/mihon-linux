@@ -7,13 +7,15 @@ plugins {
 application {
     mainClass.set("mihon.desktop.MainKt")
     applicationDefaultJvmArgs = listOf(
-        "-Xms128m",
-        "-Xmx768m",
+        "-Xms48m",
+        "-Xmx512m",
         "-XX:+UseG1GC",
         "-XX:+UseStringDeduplication",
-        "-XX:G1PeriodicGCInterval=3000",
-        "-XX:+ExplicitGCInvokesConcurrent",
-        "-XX:MaxGCPauseMillis=20",
+        "-XX:MinHeapFreeRatio=15",
+        "-XX:MaxHeapFreeRatio=30",
+        "-XX:G1PeriodicGCInterval=5000",
+        "-XX:-G1PeriodicGCInvokesConcurrent",
+        "-XX:MaxGCPauseMillis=30",
         "-Dsun.java2d.opengl=true",
         "-Dawt.useSystemAAFontSettings=on",
         "-Dswing.aatext=true",

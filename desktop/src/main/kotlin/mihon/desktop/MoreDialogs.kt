@@ -1,19 +1,25 @@
 package mihon.desktop
 
 import mihon.data.database.DatabaseManager
+import mihon.desktop.ui.components.MihonPromptDialog
+import mihon.desktop.ui.components.MihonSearchField
+import mihon.desktop.ui.components.MihonTextArea
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dialog
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.GridLayout
+import java.awt.RenderingHints
 import java.awt.Window
+import java.awt.geom.RoundRectangle2D
 import java.io.File
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
-import javax.swing.JButton
 import javax.swing.JDialog
 import javax.swing.JFrame
 import javax.swing.JLabel
@@ -24,13 +30,39 @@ import javax.swing.JScrollPane
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
+private fun roundedCardRow(
+    layout: java.awt.LayoutManager,
+    padV: Int = 10,
+    padH: Int = 14,
+): JPanel = object : JPanel(layout) {
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        val arc = (Theme.CARD_RADIUS * 2).toFloat()
+        g2.color = Theme.BG_CARD
+        g2.fill(RoundRectangle2D.Float(0.5f, 0.5f, width - 1f, height - 1f, arc, arc))
+        g2.color = Theme.BORDER_SUBTLE
+        g2.draw(RoundRectangle2D.Float(0.5f, 0.5f, width - 1f, height - 1f, arc, arc))
+        g2.dispose()
+    }
+}.apply {
+    isOpaque = false
+    border = BorderFactory.createEmptyBorder(padV, padH, padV, padH)
+}
+
 /**
- * Material 3 Dialog: Fila de downloads
+ * Material 3 Dialog: Fila de downloads (reativo em tempo real)
  */
 class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog(owner, "Fila de downloads", true) {
     private val queuePanel = JPanel().apply {
         background = Theme.BG_SURFACE
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
+    }
+
+    private val queueListener: () -> Unit = {
+        SwingUtilities.invokeLater {
+            if (isDisplayable) renderQueue()
+        }
     }
 
     private fun renderQueue() {
@@ -60,13 +92,8 @@ class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog
             queuePanel.add(emptyPanel)
         } else {
             items.forEach { item ->
-                val row = JPanel(BorderLayout(12, 0)).apply {
-                    background = Theme.BG_CARD
-                    border = BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                        BorderFactory.createEmptyBorder(10, 14, 10, 14),
-                    )
-                    maximumSize = Dimension(Int.MAX_VALUE, 56)
+                val row = roundedCardRow(BorderLayout(12, 0)).apply {
+                    maximumSize = Dimension(Int.MAX_VALUE, 58)
 
                     val info = JPanel().apply {
                         isOpaque = false
@@ -90,6 +117,11 @@ class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog
         queuePanel.repaint()
     }
 
+    override fun dispose() {
+        ctx.service.removeDownloadListener(queueListener)
+        super.dispose()
+    }
+
     init {
         setSize(560, 420)
         setLocationRelativeTo(owner)
@@ -106,8 +138,7 @@ class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog
                 foreground = Theme.TEXT_PRIMARY
             }, BorderLayout.WEST)
 
-            val btnClear = JButton("Limpar concluídos").apply {
-                isFocusable = false
+            val btnClear = ModernButton("Limpar concluídos", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                 addActionListener {
                     ctx.service.clearCompletedDownloads()
                     renderQueue()
@@ -118,15 +149,21 @@ class DownloadsQueueDialog(owner: JFrame, private val ctx: AppContext) : JDialog
         content.add(topBar, BorderLayout.NORTH)
 
         renderQueue()
+        ctx.service.addDownloadListener(queueListener)
+        addWindowListener(object : java.awt.event.WindowAdapter() {
+            override fun windowClosed(e: java.awt.event.WindowEvent?) {
+                ctx.service.removeDownloadListener(queueListener)
+            }
+        })
         content.add(JScrollPane(queuePanel).apply {
-            border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
+            border = null
             verticalScrollBar.unitIncrement = 16
         }, BorderLayout.CENTER)
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             isOpaque = false
-            val closeBtn = JButton("Fechar").apply {
-                isFocusable = false
+            border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
+            val closeBtn = ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
                 addActionListener { dispose() }
             }
             add(closeBtn)
@@ -145,18 +182,14 @@ class CategoriesDialog(
     private val onCategoryFilter: (Long) -> Unit,
 ) : JDialog(owner, "Personalizar Categorias", true) {
 
-    private fun createIconButton(icon: javax.swing.Icon, tip: String, onClick: () -> Unit): JButton {
-        return JButton(icon).apply {
-            isFocusable = false
-            toolTipText = tip
-            isContentAreaFilled = false
-            isBorderPainted = false
-            isOpaque = false
-            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-            preferredSize = Dimension(28, 28)
-            minimumSize = Dimension(28, 28)
-            maximumSize = Dimension(28, 28)
-            border = BorderFactory.createEmptyBorder(2, 2, 2, 2)
+    private fun createIconButton(icon: javax.swing.Icon, tip: String, onClick: () -> Unit): ModernIconButton {
+        return ModernIconButton(
+            icon = icon,
+            tip = tip,
+            sizePx = 30,
+            cornerRadius = (Theme.CONTROL_RADIUS * 2).toFloat(),
+            surfaceStyled = true,
+        ).apply {
             addActionListener { onClick() }
         }
     }
@@ -241,15 +274,27 @@ class CategoriesDialog(
                                         })
                                     }
                                     add(createIconButton(ModernIcons.edit(15) { Theme.TEXT_SECONDARY }, "Renomear categoria") {
-                                        val newName = JOptionPane.showInputDialog(
-                                            this@CategoriesDialog,
-                                            "Novo nome para a categoria '$title':",
-                                            title,
-                                        )?.trim()
-                                        if (!newName.isNullOrBlank() && newName != title) {
-                                            LibraryCategory.updateCategory(catId, newName)
-                                            refreshList()
-                                        }
+                                        MihonPromptDialog(
+                                            owner = this@CategoriesDialog,
+                                            dialogTitle = "Renomear Categoria",
+                                            promptLabel = "Novo nome para a categoria '$title':",
+                                            initialValue = title,
+                                            placeholder = "Nome da categoria…",
+                                            confirmText = "Salvar",
+                                            validator = { raw ->
+                                                when {
+                                                    raw.isBlank() -> "Informe um nome válido."
+                                                    raw != title && LibraryCategory.entries.any { it.second.equals(raw, ignoreCase = true) } ->
+                                                        "Já existe uma categoria com esse nome."
+                                                    else -> null
+                                                }
+                                            },
+                                        ) { newName ->
+                                            if (newName != title) {
+                                                LibraryCategory.updateCategory(catId, newName)
+                                                refreshList()
+                                            }
+                                        }.isVisible = true
                                     })
                                 }
 
@@ -289,20 +334,26 @@ class CategoriesDialog(
                 foreground = Theme.TEXT_PRIMARY
             }, BorderLayout.WEST)
 
-            val btnAdd = JButton("+ Nova Categoria").apply {
-                isFocusable = false
-                font = font.deriveFont(Font.BOLD, 12f)
+            val btnAdd = ModernButton("+ Nova Categoria", variant = ModernButton.Variant.PRIMARY, compact = true).apply {
                 addActionListener {
-                    val name = JOptionPane.showInputDialog(
-                        this@CategoriesDialog,
-                        "Digite o nome da nova categoria:",
-                        "Criar Categoria",
-                        JOptionPane.PLAIN_MESSAGE,
-                    )?.trim()
-                    if (!name.isNullOrBlank()) {
+                    MihonPromptDialog(
+                        owner = this@CategoriesDialog,
+                        dialogTitle = "Nova Categoria",
+                        promptLabel = "Digite o nome da nova categoria da biblioteca:",
+                        placeholder = "Ex: Favoritos, Em Pausa…",
+                        confirmText = "Criar",
+                        validator = { raw ->
+                            when {
+                                raw.isBlank() -> "Informe um nome para a categoria."
+                                LibraryCategory.entries.any { it.second.equals(raw, ignoreCase = true) } ->
+                                    "Essa categoria já existe."
+                                else -> null
+                            }
+                        },
+                    ) { name ->
                         LibraryCategory.addCategory(name)
                         refreshList()
-                    }
+                    }.isVisible = true
                 }
             }
             add(btnAdd, BorderLayout.EAST)
@@ -316,8 +367,7 @@ class CategoriesDialog(
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             isOpaque = false
-            add(JButton("Fechar").apply {
-                isFocusable = false
+            add(ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
                 addActionListener { dispose() }
             })
         }
@@ -378,10 +428,11 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                 override fun paintComponent(g: java.awt.Graphics) {
                     val g2 = g.create() as java.awt.Graphics2D
                     g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    val arc = Theme.CARD_RADIUS * 2
                     g2.color = Theme.BG_CARD
-                    g2.fillRoundRect(0, 0, width - 1, height - 1, 12, 12)
+                    g2.fillRoundRect(0, 0, width - 1, height - 1, arc, arc)
                     g2.color = Theme.BORDER_SUBTLE
-                    g2.drawRoundRect(0, 0, width - 1, height - 1, 12, 12)
+                    g2.drawRoundRect(0, 0, width - 1, height - 1, arc, arc)
                     g2.dispose()
                 }
             }.apply {
@@ -650,19 +701,27 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
                         alignmentX = 0f
                         if (stats.topGenres.isNotEmpty()) {
                             stats.topGenres.forEach { (genre, count) ->
-                                val pill = JLabel("$genre ($count)").apply {
-                                    font = font.deriveFont(11f)
-                                    foreground = Theme.TEXT_PRIMARY
-                                    border = BorderFactory.createCompoundBorder(
-                                        BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                                        BorderFactory.createEmptyBorder(2, 6, 2, 6),
-                                    )
+                                val pill = object : JLabel("$genre ($count)") {
+                                    init {
+                                        font = Theme.FONT_UI.deriveFont(Font.BOLD, 11f)
+                                        foreground = if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
+                                        border = BorderFactory.createEmptyBorder(3, 8, 3, 8)
+                                    }
+
+                                    override fun paintComponent(g: java.awt.Graphics) {
+                                        val g2 = g.create() as java.awt.Graphics2D
+                                        g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                                        g2.color = Theme.ACCENT_SOFT
+                                        g2.fillRoundRect(0, 0, width, height, 6, 6)
+                                        g2.dispose()
+                                        super.paintComponent(g)
+                                    }
                                 }
                                 add(pill)
                             }
                         } else {
                             add(JLabel("Gêneros aparecerão conforme você adiciona mangás.").apply {
-                                foreground = Theme.TEXT_MUTED
+                                foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                                 font = font.deriveFont(11f)
                             })
                         }
@@ -705,8 +764,8 @@ class StatisticsDialog(owner: JFrame, private val ctx: AppContext) : JDialog(own
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             isOpaque = false
-            add(JButton("Fechar").apply {
-                isFocusable = false
+            border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
+            add(ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
                 addActionListener { dispose() }
             })
         }
@@ -757,13 +816,8 @@ class StorageManagerDialog(
         }
         updateCacheLabel()
 
-        val cardCovers = JPanel(BorderLayout(12, 0)).apply {
-            background = Theme.BG_CARD
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(14, 16, 14, 16),
-            )
-            maximumSize = Dimension(Int.MAX_VALUE, 70)
+        val cardCovers = roundedCardRow(BorderLayout(12, 0), padV = 14, padH = 16).apply {
+            maximumSize = Dimension(Int.MAX_VALUE, 74)
 
             val left = JPanel().apply {
                 isOpaque = false
@@ -774,12 +828,12 @@ class StorageManagerDialog(
                 })
                 add(cacheSizeLabel)
             }
-            val clearBtn = JButton("Limpar cache").apply {
-                isFocusable = false
+            val clearBtn = ModernButton("Limpar cache", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                 addActionListener {
                     val freed = ctx.covers.clearDiskCache() / (1024 * 1024)
                     updateCacheLabel()
                     onCoversCleared()
+                    ctx.setStatus("Cache de capas limpo (~$freed MB liberados)")
                     JOptionPane.showMessageDialog(this@StorageManagerDialog, "Cache de capas limpo com sucesso!\nLiberados: ~$freed MB", "Cache", JOptionPane.INFORMATION_MESSAGE)
                 }
             }
@@ -791,13 +845,8 @@ class StorageManagerDialog(
 
         // Card 2: Banco de dados SQLite
         val dbSizeKb = (ctx.dbFile.length() / 1024).coerceAtLeast(1)
-        val cardDb = JPanel(BorderLayout(12, 0)).apply {
-            background = Theme.BG_CARD
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(14, 16, 14, 16),
-            )
-            maximumSize = Dimension(Int.MAX_VALUE, 70)
+        val cardDb = roundedCardRow(BorderLayout(12, 0), padV = 14, padH = 16).apply {
+            maximumSize = Dimension(Int.MAX_VALUE, 74)
 
             val left = JPanel().apply {
                 isOpaque = false
@@ -811,10 +860,11 @@ class StorageManagerDialog(
                     foreground = Theme.TEXT_MUTED
                 })
             }
-            val vacuumBtn = JButton("Otimizar (VACUUM)").apply {
-                isFocusable = false
+            val vacuumBtn = ModernButton("Otimizar (VACUUM)", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                 addActionListener {
+                    isLoading = true
                     background({ dbManager.vacuum() }) {
+                        isLoading = false
                         ctx.setStatus("Banco de dados otimizado com VACUUM")
                         JOptionPane.showMessageDialog(this@StorageManagerDialog, "Banco de dados otimizado com sucesso!", "Otimização", JOptionPane.INFORMATION_MESSAGE)
                     }
@@ -827,13 +877,8 @@ class StorageManagerDialog(
         body.add(Box.createVerticalStrut(12))
 
         // Card 3: Backups
-        val cardBackup = JPanel(BorderLayout(12, 0)).apply {
-            background = Theme.BG_CARD
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(14, 16, 14, 16),
-            )
-            maximumSize = Dimension(Int.MAX_VALUE, 70)
+        val cardBackup = roundedCardRow(BorderLayout(12, 0), padV = 14, padH = 16).apply {
+            maximumSize = Dimension(Int.MAX_VALUE, 74)
 
             val left = JPanel().apply {
                 isOpaque = false
@@ -849,15 +894,13 @@ class StorageManagerDialog(
             }
             val buttons = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
                 isOpaque = false
-                add(JButton("Exportar…").apply {
-                    isFocusable = false
+                add(ModernButton("Exportar…", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                     addActionListener {
                         dispose()
                         onExportBackup()
                     }
                 })
-                add(JButton("Restaurar…").apply {
-                    isFocusable = false
+                add(ModernButton("Restaurar…", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                     addActionListener {
                         dispose()
                         onImportBackup()
@@ -873,8 +916,8 @@ class StorageManagerDialog(
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             isOpaque = false
-            add(JButton("Fechar").apply {
-                isFocusable = false
+            border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
+            add(ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
                 addActionListener { dispose() }
             })
         }
@@ -895,6 +938,7 @@ class NoteDialog(
 
     init {
         setSize(500, 380)
+        minimumSize = Dimension(420, 300)
         setLocationRelativeTo(owner)
         val content = JPanel(BorderLayout()).apply {
             background = Theme.BG_SURFACE
@@ -911,48 +955,35 @@ class NoteDialog(
         }
         content.add(topBar, BorderLayout.NORTH)
 
-        val textArea = javax.swing.JTextArea(currentNote ?: "").apply {
-            font = Theme.FONT_UI
-            foreground = Theme.TEXT_PRIMARY
-            background = Theme.BG_CARD
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(10, 10, 10, 10),
-            )
-            lineWrap = true
-            wrapStyleWord = true
-            rows = 12
-            columns = 50
-            caretColor = Theme.ACCENT
+        val editor = MihonTextArea(initialText = currentNote ?: "", maxChars = 2000)
+        content.add(editor, BorderLayout.CENTER)
+
+        fun trySave() {
+            val note = editor.textArea.text.trim()
+            when {
+                note.isEmpty() -> editor.showError("A nota não pode ficar vazia.")
+                note.length > 2000 -> editor.showError("Máximo de 2000 caracteres excedido.")
+                else -> {
+                    onSave(note)
+                    dispose()
+                }
+            }
         }
-        val scroll = JScrollPane(textArea).apply {
-            border = null
-            verticalScrollBar.unitIncrement = 16
-        }
-        content.add(scroll, BorderLayout.CENTER)
+        editor.onSubmitShortcut = { trySave() }
 
         val bottomBar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
             isOpaque = false
             border = BorderFactory.createEmptyBorder(14, 0, 0, 0)
             add(ModernButton("Cancelar", variant = ModernButton.Variant.SURFACE).apply {
-                isFocusable = false
                 addActionListener { dispose() }
             })
-            add(ModernButton("Salvar", variant = ModernButton.Variant.PRIMARY).apply {
-                isFocusable = false
-                addActionListener {
-                    val note = textArea.text.trim()
-                    if (note.isNotEmpty()) {
-                        onSave(note)
-                        dispose()
-                    } else {
-                        JOptionPane.showMessageDialog(this@NoteDialog, "A nota não pode estar vazia.", "Erro", JOptionPane.ERROR_MESSAGE)
-                    }
-                }
+            add(ModernButton("Salvar (Ctrl+Enter)", variant = ModernButton.Variant.PRIMARY).apply {
+                addActionListener { trySave() }
             })
         }
         content.add(bottomBar, BorderLayout.SOUTH)
         add(content)
+        javax.swing.SwingUtilities.invokeLater { editor.textArea.requestFocusInWindow() }
     }
 }
 
@@ -1032,11 +1063,12 @@ class HighlightColorDialog(
                 override fun paintComponent(g: java.awt.Graphics) {
                     val g2 = g.create() as java.awt.Graphics2D
                     g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    val arc = Theme.CARD_RADIUS * 2
                     g2.color = swatchColor
-                    g2.fillRoundRect(1, 1, width - 2, height - 2, 12, 12)
+                    g2.fillRoundRect(1, 1, width - 2, height - 2, arc, arc)
                     g2.color = if (hovered) Theme.PRIMARY else Theme.BORDER_SUBTLE
                     g2.stroke = java.awt.BasicStroke(if (hovered) 2.5f else 1.2f)
-                    g2.drawRoundRect(1, 1, width - 3, height - 3, 12, 12)
+                    g2.drawRoundRect(1, 1, width - 3, height - 3, arc, arc)
                     g2.dispose()
                     super.paintComponent(g)
                 }
@@ -1282,6 +1314,24 @@ class AllBookmarksDialog(
     private val ctx: AppContext,
 ) : JDialog(owner, "Todos os Bookmarks", Dialog.ModalityType.APPLICATION_MODAL) {
 
+    private data class BookmarkGroup(
+        val mangaTitle: String,
+        val chapterName: String,
+        val bookmarks: List<tachiyomi.domain.bookmark.model.Bookmark>,
+    )
+
+    private var allGroups: List<BookmarkGroup> = emptyList()
+
+    private val searchField = MihonSearchField(
+        columns = 20,
+        placeholder = "Filtrar por mangá, capítulo ou nota…",
+        compact = true,
+        shortcutBadge = null,
+        debounceMs = 100,
+    ).apply {
+        onDebouncedChange = { renderFilteredBookmarks() }
+    }
+
     private val bookmarksPanel = JPanel().apply {
         background = Theme.BG_SURFACE
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -1289,25 +1339,26 @@ class AllBookmarksDialog(
     }
 
     init {
-        setSize(600, 600)
+        setSize(620, 620)
         setLocationRelativeTo(owner)
         val content = JPanel(BorderLayout()).apply {
             background = Theme.BG_SURFACE
             border = BorderFactory.createEmptyBorder(20, 24, 20, 24)
         }
 
-        val topBar = JPanel(BorderLayout()).apply {
+        val topBar = JPanel(BorderLayout(12, 0)).apply {
             isOpaque = false
             border = BorderFactory.createEmptyBorder(0, 0, 12, 0)
             add(JLabel("Todos os Bookmarks & Anotações").apply {
                 font = font.deriveFont(Font.BOLD, 18f)
                 foreground = Theme.TEXT_PRIMARY
             }, BorderLayout.WEST)
+            add(searchField, BorderLayout.EAST)
         }
         content.add(topBar, BorderLayout.NORTH)
 
         content.add(JScrollPane(bookmarksPanel).apply {
-            border = BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1)
+            border = null
             verticalScrollBar.unitIncrement = 16
         }, BorderLayout.CENTER)
 
@@ -1315,7 +1366,6 @@ class AllBookmarksDialog(
             isOpaque = false
             border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
             add(ModernButton("Fechar", variant = ModernButton.Variant.SURFACE).apply {
-                isFocusable = false
                 addActionListener { dispose() }
             })
         }
@@ -1326,60 +1376,84 @@ class AllBookmarksDialog(
     }
 
     private fun refreshBookmarks() {
-        background({ ctx.service.getAllBookmarks() }) { res ->
-            res.onSuccess { bookmarks ->
-                SwingUtilities.invokeLater {
-                    bookmarksPanel.removeAll()
-                    if (bookmarks.isEmpty()) {
-                        val emptyPanel = JPanel().apply {
-                            isOpaque = false
-                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                            border = BorderFactory.createEmptyBorder(40, 20, 40, 20)
-                            add(JLabel(ModernIcons.bookmark(42) { Theme.TEXT_MUTED }).apply {
-                                alignmentX = 0.5f
-                            })
-                            add(Box.createVerticalStrut(12))
-                            add(JLabel("Nenhum bookmark ou anotação", SwingConstants.CENTER).apply {
-                                font = font.deriveFont(Font.BOLD, 14f)
-                                foreground = Theme.TEXT_PRIMARY
-                                alignmentX = 0.5f
-                            })
-                            add(Box.createVerticalStrut(6))
-                            add(JLabel("Pressione B para bookmark, N para nota no leitor", SwingConstants.CENTER).apply {
-                                font = font.deriveFont(12f)
-                                foreground = Theme.TEXT_MUTED
-                                alignmentX = 0.5f
-                            })
-                        }
-                        bookmarksPanel.add(emptyPanel)
-                    } else {
-                        // Group by chapter
-                        val byChapter = bookmarks.groupBy { it.chapterId }
-                        byChapter.forEach { (chapterId, bms) ->
-                            background({ ctx.service.chapters.getChapterById(chapterId) }) { chRes ->
-                                chRes.onSuccess { chapter ->
-                                    if (chapter != null) {
-                                        background({ ctx.service.mangas.getMangaById(chapter.mangaId) }) { mRes ->
-                                            mRes.onSuccess { manga ->
-                                                SwingUtilities.invokeLater {
-                                                    addChapterSection(
-                                                        manga?.title ?: "Mangá #${chapter.mangaId}",
-                                                        chapter.name,
-                                                        bms,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+        background({
+            val bookmarks = ctx.service.getAllBookmarks()
+            if (bookmarks.isEmpty()) return@background emptyList<BookmarkGroup>()
+            val byChapter = bookmarks.groupBy { it.chapterId }
+            val mangaCache = HashMap<Long, String>()
+            val groups = mutableListOf<BookmarkGroup>()
+            for ((chId, bms) in byChapter) {
+                val chapter = ctx.service.chapters.getChapterById(chId) ?: continue
+                val mangaTitle = mangaCache.getOrPut(chapter.mangaId) {
+                    ctx.service.mangas.getMangaById(chapter.mangaId)?.title ?: "Mangá #${chapter.mangaId}"
+                }
+                groups.add(
+                    BookmarkGroup(
+                        mangaTitle = mangaTitle,
+                        chapterName = chapter.name,
+                        bookmarks = bms.sortedBy { it.page },
+                    ),
+                )
+            }
+            groups.sortedWith(compareBy({ it.mangaTitle.lowercase() }, { it.chapterName.lowercase() }))
+        }) { res ->
+            res.onSuccess { groups ->
+                allGroups = groups
+                renderFilteredBookmarks()
+            }
+        }
+    }
+
+    private fun renderFilteredBookmarks() {
+        val query = searchField.text.trim().lowercase()
+        val shownGroups = if (query.isEmpty()) {
+            allGroups
+        } else {
+            allGroups.mapNotNull { group ->
+                val matchesHeader = group.mangaTitle.lowercase().contains(query) ||
+                    group.chapterName.lowercase().contains(query)
+                if (matchesHeader) {
+                    group
+                } else {
+                    val matchingBms = group.bookmarks.filter { bm ->
+                        (bm.note?.lowercase()?.contains(query) == true) ||
+                            "página ${bm.page + 1}".contains(query)
                     }
-                    bookmarksPanel.revalidate()
-                    bookmarksPanel.repaint()
+                    if (matchingBms.isNotEmpty()) group.copy(bookmarks = matchingBms) else null
                 }
             }
         }
+
+        bookmarksPanel.removeAll()
+        if (shownGroups.isEmpty()) {
+            val emptyPanel = JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                border = BorderFactory.createEmptyBorder(40, 20, 40, 20)
+                add(JLabel(ModernIcons.bookmark(42) { Theme.TEXT_MUTED }).apply {
+                    alignmentX = 0.5f
+                })
+                add(Box.createVerticalStrut(12))
+                add(JLabel(if (query.isEmpty()) "Nenhum bookmark ou anotação" else "Nenhum resultado encontrado", SwingConstants.CENTER).apply {
+                    font = font.deriveFont(Font.BOLD, 14f)
+                    foreground = Theme.TEXT_PRIMARY
+                    alignmentX = 0.5f
+                })
+                add(Box.createVerticalStrut(6))
+                add(JLabel("Pressione B para bookmark, N para nota no leitor", SwingConstants.CENTER).apply {
+                    font = font.deriveFont(12f)
+                    foreground = Theme.TEXT_MUTED
+                    alignmentX = 0.5f
+                })
+            }
+            bookmarksPanel.add(emptyPanel)
+        } else {
+            shownGroups.forEach { group ->
+                addChapterSection(group.mangaTitle, group.chapterName, group.bookmarks)
+            }
+        }
+        bookmarksPanel.revalidate()
+        bookmarksPanel.repaint()
     }
 
     private fun addChapterSection(mangaTitle: String, chapterName: String, bookmarks: List<tachiyomi.domain.bookmark.model.Bookmark>) {
@@ -1389,7 +1463,7 @@ class AllBookmarksDialog(
             SwingConstants.LEFT,
         ).apply {
             iconTextGap = 7
-            font = font.deriveFont(Font.BOLD, 13f)
+            font = Theme.FONT_CJK.deriveFont(Font.BOLD, 13f)
             foreground = Theme.ACCENT
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
@@ -1401,7 +1475,7 @@ class AllBookmarksDialog(
         bookmarks.forEach { bm ->
             val row = createBookmarkRow(bm, mangaTitle, chapterName)
             bookmarksPanel.add(row)
-            bookmarksPanel.add(Box.createVerticalStrut(4))
+            bookmarksPanel.add(Box.createVerticalStrut(6))
         }
         bookmarksPanel.add(Box.createVerticalStrut(8))
     }
@@ -1425,13 +1499,8 @@ class AllBookmarksDialog(
             else -> "Bookmark"
         }
 
-        val row = JPanel(BorderLayout(12, 0)).apply {
-            background = Theme.BG_CARD
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
-                BorderFactory.createEmptyBorder(10, 14, 10, 14),
-            )
-            maximumSize = Dimension(Int.MAX_VALUE, 80)
+        val row = roundedCardRow(BorderLayout(12, 0)).apply {
+            maximumSize = Dimension(Int.MAX_VALUE, 84)
         }
 
         val left = JPanel().apply {
@@ -1446,7 +1515,7 @@ class AllBookmarksDialog(
                 add(Box.createVerticalStrut(4))
                 val preview = if (note.length > 80) note.substring(0, 80) + "…" else note
                 add(JLabel(preview).apply {
-                    font = font.deriveFont(Font.PLAIN, 11f)
+                    font = font.deriveFont(Font.PLAIN, 11.5f)
                     foreground = Theme.TEXT_MUTED
                 })
             }
@@ -1470,7 +1539,6 @@ class AllBookmarksDialog(
         }
 
         val deleteBtn = ModernButton("Excluir", ModernIcons.trash(13) { Theme.DANGER }, ModernButton.Variant.SURFACE, compact = true).apply {
-            isFocusable = false
             addActionListener {
                 val confirm = JOptionPane.showConfirmDialog(
                     this@AllBookmarksDialog,

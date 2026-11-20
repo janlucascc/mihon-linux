@@ -1,10 +1,60 @@
 package mihon.desktop
 
+import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.util.prefs.Preferences
 
 /**
- * Customizable keyboard shortcut bindings for ReaderWindow.
+ * Represents a keyboard shortcut binding with optional modifier mask (Ctrl / Shift / Alt / Meta).
+ */
+data class KeyCombo(
+    val keyCode: Int,
+    val modifiers: Int = 0,
+) {
+    fun normalizedModifiers(): Int =
+        modifiers and (InputEvent.CTRL_DOWN_MASK or InputEvent.SHIFT_DOWN_MASK or InputEvent.ALT_DOWN_MASK or InputEvent.META_DOWN_MASK)
+
+    fun matches(event: KeyEvent): Boolean {
+        val eventMods = event.modifiersEx and
+            (InputEvent.CTRL_DOWN_MASK or InputEvent.SHIFT_DOWN_MASK or InputEvent.ALT_DOWN_MASK or InputEvent.META_DOWN_MASK)
+        return event.keyCode == keyCode && eventMods == normalizedModifiers()
+    }
+
+    fun toDisplayText(): String {
+        val mods = normalizedModifiers()
+        val parts = mutableListOf<String>()
+        if ((mods and InputEvent.CTRL_DOWN_MASK) != 0) parts.add("Ctrl")
+        if ((mods and InputEvent.ALT_DOWN_MASK) != 0) parts.add("Alt")
+        if ((mods and InputEvent.SHIFT_DOWN_MASK) != 0) parts.add("Shift")
+        if ((mods and InputEvent.META_DOWN_MASK) != 0) parts.add("Meta")
+        parts.add(KeyEvent.getKeyText(keyCode))
+        return parts.joinToString("+")
+    }
+
+    fun serialize(): String {
+        val mods = normalizedModifiers()
+        return if (mods == 0) keyCode.toString() else "$mods:$keyCode"
+    }
+
+    companion object {
+        fun parse(token: String): KeyCombo? {
+            val trimmed = token.trim()
+            if (trimmed.isEmpty()) return null
+            return if (':' in trimmed) {
+                val parts = trimmed.split(':', limit = 2)
+                val mods = parts[0].toIntOrNull() ?: 0
+                val code = parts[1].toIntOrNull()?.takeIf { it > 0 } ?: return null
+                KeyCombo(code, mods)
+            } else {
+                val code = trimmed.toIntOrNull()?.takeIf { it > 0 } ?: return null
+                KeyCombo(code, 0)
+            }
+        }
+    }
+}
+
+/**
+ * Customizable keyboard shortcut bindings for ReaderWindow, supporting modifiers and conflict detection.
  */
 enum class ReaderAction(
     val title: String,
@@ -28,40 +78,50 @@ enum class ReaderAction(
 
     fun matches(keyCode: Int): Boolean = Companion.matches(this, keyCode)
 
-    fun matches(event: KeyEvent): Boolean {
-        if (event.isControlDown || event.isAltDown || event.isMetaDown || event.isShiftDown) {
-            return false
-        }
-        return Companion.matches(this, event.keyCode)
-    }
+    fun matches(event: KeyEvent): Boolean = getKeyCombos(this).any { it.matches(event) }
 
     companion object {
         private val prefs = Preferences.userRoot().node("mihon-linux-shortcuts")
-        private val cache = java.util.concurrent.ConcurrentHashMap<ReaderAction, Pair<String?, List<Int>>>()
+        private val cache = java.util.concurrent.ConcurrentHashMap<ReaderAction, Pair<String?, List<KeyCombo>>>()
 
-        fun getKeyCodes(action: ReaderAction): List<Int> {
+        fun getKeyCombos(action: ReaderAction): List<KeyCombo> {
             val raw = runCatching { prefs.get(action.name, null) }.getOrNull()
             val cached = cache[action]
             if (cached != null && cached.first == raw) {
                 return cached.second
             }
             val resolved = if (raw.isNullOrBlank()) {
-                action.defaultKeyCodes
+                action.defaultKeyCodes.map { KeyCombo(it, 0) }
             } else {
                 raw.split(",")
-                    .mapNotNull { it.trim().toIntOrNull() }
-                    .filter { it > 0 }
-                    .ifEmpty { action.defaultKeyCodes }
+                    .mapNotNull { KeyCombo.parse(it) }
+                    .ifEmpty { action.defaultKeyCodes.map { KeyCombo(it, 0) } }
             }
             cache[action] = raw to resolved
             return resolved
         }
 
-        fun setKeyCodes(action: ReaderAction, codes: List<Int>) {
-            val validCodes = codes.filter { it > 0 }.ifEmpty { action.defaultKeyCodes }
-            val serialized = validCodes.joinToString(",")
-            cache[action] = serialized to validCodes
+        fun setKeyCombos(action: ReaderAction, combos: List<KeyCombo>) {
+            val valid = combos.filter { it.keyCode > 0 }.ifEmpty { action.defaultKeyCodes.map { KeyCombo(it, 0) } }
+            val serialized = valid.joinToString(",") { it.serialize() }
+            cache[action] = serialized to valid
             prefs.put(action.name, serialized)
+        }
+
+        fun findConflict(targetAction: ReaderAction, keyCode: Int, modifiers: Int = 0): ReaderAction? {
+            val candidate = KeyCombo(keyCode, modifiers)
+            val normMods = candidate.normalizedModifiers()
+            return entries.firstOrNull { other ->
+                other != targetAction && getKeyCombos(other).any {
+                    it.keyCode == keyCode && it.normalizedModifiers() == normMods
+                }
+            }
+        }
+
+        fun getKeyCodes(action: ReaderAction): List<Int> = getKeyCombos(action).map { it.keyCode }
+
+        fun setKeyCodes(action: ReaderAction, codes: List<Int>) {
+            setKeyCombos(action, codes.filter { it > 0 }.map { KeyCombo(it, 0) })
         }
 
         fun resetAction(action: ReaderAction) {
@@ -75,13 +135,12 @@ enum class ReaderAction(
         }
 
         fun getDisplayString(action: ReaderAction): String {
-            val codes = getKeyCodes(action)
-            return codes.joinToString(" / ") { KeyEvent.getKeyText(it) }
+            return getKeyCombos(action).joinToString(" / ") { it.toDisplayText() }
         }
 
         fun matches(action: ReaderAction, keyCode: Int): Boolean {
             if (keyCode <= 0) return false
-            return keyCode in getKeyCodes(action)
+            return getKeyCombos(action).any { it.keyCode == keyCode && it.normalizedModifiers() == 0 }
         }
 
         fun matches(action: ReaderAction, event: KeyEvent): Boolean = action.matches(event)

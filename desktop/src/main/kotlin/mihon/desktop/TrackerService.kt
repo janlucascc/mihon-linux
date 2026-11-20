@@ -354,8 +354,9 @@ class TrackerDialog(
 
     private val currentRecord = TrackerService.getRecord(manga.id)
 
-    private val providerCombo = JComboBox(
+    private val providerCombo = mihon.desktop.ui.components.MihonDropdown(
         TrackerService.Provider.entries.map { it.displayName }.toTypedArray(),
+        compact = true,
     ).apply {
         val initialProvider = currentRecord?.let {
             runCatching { TrackerService.Provider.valueOf(it.provider) }.getOrNull()
@@ -363,7 +364,14 @@ class TrackerDialog(
         selectedIndex = initialProvider.ordinal
     }
 
-    private val searchField = JTextField(currentRecord?.remoteTitle?.ifBlank { manga.title } ?: manga.title)
+    private val searchField = mihon.desktop.ui.components.MihonSearchField(
+        columns = 24,
+        placeholder = "Pesquisar título no catálogo remoto…",
+        compact = true,
+        shortcutBadge = null,
+    ).apply {
+        text = currentRecord?.remoteTitle?.ifBlank { manga.title } ?: manga.title
+    }
     private val resultsModel = DefaultListModel<TrackerService.RemoteSearchResult>()
     private val resultsList = JList(resultsModel).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -371,8 +379,9 @@ class TrackerDialog(
         foreground = Theme.TEXT_PRIMARY
     }
 
-    private val statusCombo = JComboBox(
+    private val statusCombo = mihon.desktop.ui.components.MihonDropdown(
         TrackerService.TrackStatus.entries.map { it.label }.toTypedArray(),
+        compact = true,
     ).apply {
         val initialStatus = currentRecord?.let {
             runCatching { TrackerService.TrackStatus.valueOf(it.status) }.getOrNull()
@@ -380,13 +389,10 @@ class TrackerDialog(
         selectedIndex = initialStatus.ordinal
     }
 
-    private val chapterSpinner = JSpinner(
-        SpinnerNumberModel(
-            (currentRecord?.lastChapterRead ?: highestReadChapter).coerceAtLeast(0),
-            0,
-            99999,
-            1,
-        ),
+    private val chapterStepper = mihon.desktop.ui.components.MihonStepper(
+        initialValue = (currentRecord?.lastChapterRead ?: highestReadChapter).coerceAtLeast(0),
+        minValue = 0,
+        maxValue = 99999,
     )
 
     private val scoreSpinner = JSpinner(
@@ -396,7 +402,9 @@ class TrackerDialog(
             10.0,
             0.5,
         ),
-    )
+    ).apply {
+        preferredSize = Dimension(120, 34)
+    }
 
     private var selectedRemoteId: Long = currentRecord?.remoteId ?: 0L
     private var selectedRemoteTitle: String = currentRecord?.remoteTitle?.ifBlank { manga.title } ?: manga.title
@@ -474,14 +482,14 @@ class TrackerDialog(
         root.add(scrollResults)
         root.add(Box.createVerticalStrut(14))
 
-        val formPanel = JPanel( java.awt.GridLayout(3, 2, 12, 10)).apply {
+        val formPanel = JPanel(java.awt.GridLayout(3, 2, 12, 10)).apply {
             isOpaque = false
             alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 110)
+            maximumSize = Dimension(Int.MAX_VALUE, 122)
             add(JLabel("Status de Leitura:").apply { foreground = Theme.TEXT_PRIMARY })
             add(statusCombo)
             add(JLabel("Capítulos Lidos:").apply { foreground = Theme.TEXT_PRIMARY })
-            add(chapterSpinner)
+            add(chapterStepper)
             add(JLabel("Nota (0 a 10):").apply { foreground = Theme.TEXT_PRIMARY })
             add(scoreSpinner)
         }
@@ -563,7 +571,7 @@ class TrackerDialog(
     private fun saveAndSync() {
         val provider = TrackerService.Provider.entries[providerCombo.selectedIndex]
         val status = TrackerService.TrackStatus.entries[statusCombo.selectedIndex]
-        val chRead = (chapterSpinner.value as? Number)?.toInt() ?: 0
+        val chRead = chapterStepper.value
         val score = (scoreSpinner.value as? Number)?.toDouble() ?: 0.0
 
         val record = TrackerService.TrackRecord(

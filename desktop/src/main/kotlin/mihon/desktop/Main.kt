@@ -52,7 +52,7 @@ import javax.swing.filechooser.FileNameExtensionFilter
 import javax.swing.plaf.ColorUIResource
 
 private const val PREF_DARK = "darkTheme"
-private const val PREF_PRESET = "themePreset"
+private const val PREF_PRESET = "themePresetIndex"
 private const val PREF_CUSTOM_BG = "customBgApp"
 private const val PREF_CUSTOM_SIDEBAR = "customBgSidebar"
 private const val PREF_CUSTOM_SURFACE = "customBgSurface"
@@ -62,8 +62,8 @@ private val prefs: Preferences = Preferences.userRoot().node("mihon-linux")
 private val readerPrefs: Preferences = Preferences.userRoot().node("mihon-linux-reader")
 
 internal fun configureTheme(presetName: String? = null) {
-    val chosenName = presetName ?: prefs.get(PREF_PRESET, if (prefs.getBoolean(PREF_DARK, true)) "AMOLED" else "LIGHT")
-    val preset = runCatching { Theme.ThemePreset.valueOf(chosenName) }.getOrDefault(Theme.ThemePreset.AMOLED)
+    val chosenName = presetName ?: prefs.get(PREF_PRESET, if (prefs.getBoolean(PREF_DARK, true)) "DARK" else "LIGHT")
+    val preset = runCatching { Theme.ThemePreset.valueOf(chosenName) }.getOrDefault(Theme.ThemePreset.DARK)
 
     if (preset == Theme.ThemePreset.CUSTOM) {
         val bgApp = Color(prefs.getInt(PREF_CUSTOM_BG, 0x141414))
@@ -107,14 +107,14 @@ internal fun configureTheme(presetName: String? = null) {
     UIManager.put("Label.foreground", ColorUIResource(Theme.TEXT_PRIMARY))
     UIManager.put("ToggleButton.selectedBackground", ColorUIResource(Theme.BG_PILL_ACTIVE))
     UIManager.put("ToggleButton.selectedForeground", ColorUIResource(Theme.TEXT_PRIMARY))
-    UIManager.put("Component.focusColor", ColorUIResource(Theme.ACCENT))
-    UIManager.put("Component.focusedBorderColor", ColorUIResource(Theme.ACCENT))
-    UIManager.put("Button.focusedBorderColor", ColorUIResource(Theme.ACCENT))
+    UIManager.put("Component.focusColor", ColorUIResource(Theme.PRIMARY))
+    UIManager.put("Component.focusedBorderColor", ColorUIResource(Theme.PRIMARY))
+    UIManager.put("Button.focusedBorderColor", ColorUIResource(Theme.PRIMARY))
     UIManager.put("ProgressBar.foreground", ColorUIResource(Theme.PRIMARY))
-    UIManager.put("Component.arc", 999) // M3 Pill shapes
-    UIManager.put("Button.arc", 999)
-    UIManager.put("TextComponent.arc", 16)
-    UIManager.put("ProgressBar.arc", 999)
+    UIManager.put("Component.arc", Theme.CONTROL_RADIUS * 2)
+    UIManager.put("Button.arc", Theme.CONTROL_RADIUS * 2)
+    UIManager.put("TextComponent.arc", Theme.CONTROL_RADIUS * 2)
+    UIManager.put("ProgressBar.arc", Theme.CONTROL_RADIUS * 2)
     UIManager.put("ScrollBar.thumbArc", 999)
     UIManager.put("ScrollBar.width", 10)
 }
@@ -162,7 +162,10 @@ internal fun applyCustomTheme(bgApp: Color, bgSidebar: Color, bgSurface: Color, 
     resetComponentStylesAndRefreshWindows()
 }
 
+internal fun sidebarWidthForState(collapsed: Boolean): Int = if (collapsed) 72 else 220
+
 fun main() {
+    javax.imageio.ImageIO.setUseCache(false)
     AppIcon.installLinuxDesktopIntegration()
     setupUncaughtErrorHandling()
     configureTheme()
@@ -188,11 +191,31 @@ private fun setupUncaughtErrorHandling() {
     }
 }
 
-class MihonApp : JFrame("Mihon"), Navigator {
+class MihonApp : JFrame("Mihon Linux"), Navigator {
     private val home = System.getProperty("user.home")
     private val dbFile = File(home, ".mihon/mihon.db")
     private val db = DatabaseManager(dbFile).apply { initialize() }
-    private val statusBar = JLabel("  Pronto", SwingConstants.LEFT)
+    private val toastHost = mihon.desktop.ui.components.ToastHost(maxVisible = 3)
+    private val navigationHistory = ArrayDeque<String>()
+
+    private fun showToast(message: String, type: mihon.desktop.ui.components.ToastType? = null) {
+        val clean = message.trim()
+        if (clean.isEmpty()) return
+        val resolvedType = type ?: mihon.desktop.ui.components.ToastHost.inferType(clean)
+        toastHost.show(clean, resolvedType)
+    }
+
+    private fun updateStatusBar(text: String) {
+        val clean = text.trim()
+        if (clean.isEmpty()) return
+        val lower = clean.lowercase()
+        val isSilentProgress = lower.startsWith("exibindo ") ||
+            lower.startsWith("biblioteca: ") ||
+            lower.matches(Regex("^\\d+ de \\d+ mangá.*"))
+        if (!isSilentProgress) {
+            showToast(clean)
+        }
+    }
 
     private val ctx = AppContext(
         dbFile = dbFile,
@@ -204,27 +227,36 @@ class MihonApp : JFrame("Mihon"), Navigator {
         ),
         extensions = ExtensionLoader(File(home, ".mihon/extensions")).loadExtensionsBlocking(),
         covers = CoverCache(),
-        setStatus = { text -> SwingUtilities.invokeLater { statusBar.text = "  $text" } },
+        setStatus = { text -> SwingUtilities.invokeLater { updateStatusBar(text) } },
         coroutineScope = appScope,
     )
 
     private val cards = CardLayout()
     private val content = object : JPanel(cards) {
-        private var transitionAlpha = 0f
+        private var transitionProgress = 1f
+        private var transitionDirection = 1
         private var transitionTimer: javax.swing.Timer? = null
 
-        fun playTransition() {
-            transitionAlpha = 0.24f
+        fun playTransition(direction: Int = 1) {
+            val durMs = mihon.desktop.ui.animation.MotionPreferences.effectiveDurationMs(180)
             transitionTimer?.stop()
-            val start = System.currentTimeMillis()
-            transitionTimer = javax.swing.Timer(14) { e ->
-                val rawT = ((System.currentTimeMillis() - start).toFloat() / 130f).coerceIn(0f, 1f)
-                val eased = 1f - (1f - rawT) * (1f - rawT)
-                transitionAlpha = (0.24f * (1f - eased)).coerceIn(0f, 1f)
+            if (durMs <= 0L) {
+                transitionProgress = 1f
+                repaint()
+                return
+            }
+            transitionDirection = direction
+            transitionProgress = 0f
+            val startNanos = System.nanoTime()
+            val durNanos = durMs * 1_000_000.0
+            transitionTimer = javax.swing.Timer(12) { e ->
+                val rawT = ((System.nanoTime() - startNanos) / durNanos).toFloat().coerceIn(0f, 1f)
+                transitionProgress = mihon.desktop.ui.animation.MotionCurves.easeOutQuint(rawT)
                 repaint()
                 if (rawT >= 1f) {
                     (e.source as? javax.swing.Timer)?.stop()
-                    transitionAlpha = 0f
+                    transitionProgress = 1f
+                    repaint()
                 }
             }.also { it.start() }
         }
@@ -236,21 +268,51 @@ class MihonApp : JFrame("Mihon"), Navigator {
         }
 
         override fun paint(g: java.awt.Graphics) {
-            super.paint(g)
-            if (transitionAlpha > 0.01f) {
+            if (transitionProgress < 0.995f) {
                 val g2 = g.create() as java.awt.Graphics2D
                 val bg = Theme.BG_APP
-                g2.color = Color(bg.red, bg.green, bg.blue, (transitionAlpha * 255).toInt().coerceIn(0, 255))
+                g2.color = bg
                 g2.fillRect(0, 0, width, height)
+                val slidePx = ((1f - transitionProgress) * 14f * transitionDirection).toDouble()
+                g2.translate(slidePx, 0.0)
+                super.paint(g2)
+                val veilAlpha = ((1f - transitionProgress) * 0.22f * 255f).toInt().coerceIn(0, 255)
+                if (veilAlpha > 2) {
+                    g2.translate(-slidePx, 0.0)
+                    g2.color = Color(bg.red, bg.green, bg.blue, veilAlpha)
+                    g2.fillRect(0, 0, width, height)
+                }
                 g2.dispose()
+            } else {
+                super.paint(g)
             }
         }
     }
-    private val library = LibraryScreen(ctx)
+    private var topHeaderBar: JPanel? = null
+    private val library = LibraryScreen(
+        ctx = ctx,
+        onOpenCategories = {
+            CategoriesDialog(this, ctx, onCategoryFilter = { showLibrary() }).isVisible = true
+        },
+        onOpenDownloads = { DownloadsQueueDialog(this, ctx).isVisible = true },
+    )
     private val details = DetailsScreen(ctx)
-    private val browseHub = BrowseHubScreen(ctx)
+    private val browseHub = BrowseHubScreen(
+        ctx = ctx,
+        onCatalogVisibilityChanged = { inCatalog ->
+            topHeaderBar?.let { bar ->
+                bar.isVisible = !inCatalog
+                revalidate()
+                repaint()
+            }
+        },
+    )
     private val historyScreen = HistoryScreen(ctx)
     private val updatesScreen = UpdatesScreen(ctx)
+    private val settingsPanel: AntiGravitySettingsScreen by lazy {
+        settingsInitialized = true
+        createSettingsScreen()
+    }
     private val moreScreen = MoreScreen(
         ctx = ctx,
         onOpenDownloadsQueue = { DownloadsQueueDialog(this, ctx).isVisible = true },
@@ -272,22 +334,37 @@ class MihonApp : JFrame("Mihon"), Navigator {
             ).isVisible = true
         },
         onOpenSettings = { navigate(SETTINGS, highlight = MORE) },
+        onOpenSettingsCategory = { categoryId ->
+            settingsPanel.openCategory(categoryId)
+            navigate(SETTINGS, highlight = MORE)
+        },
+        onOpenSources = {
+            browseHub.openExtensionsTab()
+            navigate(BROWSE)
+        },
         onOpenAbout = {
-            JOptionPane.showMessageDialog(
-                this,
-                "Mihon Linux v0.3.0\nPort Desktop de Alta Performance (Kotlin + Swing/FlatLaf)",
-                "Sobre",
-                JOptionPane.INFORMATION_MESSAGE,
-            )
+            settingsPanel.openCategory("about")
+            navigate(SETTINGS, highlight = MORE)
         },
     )
     private val navButtons = linkedMapOf<String, JToggleButton>()
+    private var settingsInitialized = false
+    private var settingsMounted = false
+    private var currentCard: String = ""
+
+    private fun ensureSettingsMounted() {
+        if (!settingsMounted) {
+            settingsMounted = true
+            content.add(settingsPanel, SETTINGS)
+        }
+    }
 
     init {
         iconImages = AppIcon.getWindowIcons()
         ctx.navigator = this
         defaultCloseOperation = EXIT_ON_CLOSE
-        setSize(1240, 840)
+        setSize(1280, 820)
+        minimumSize = Dimension(800, 600)
         setLocationRelativeTo(null)
 
         content.add(library, LIBRARY)
@@ -296,37 +373,31 @@ class MihonApp : JFrame("Mihon"), Navigator {
         content.add(historyScreen, HISTORY)
         content.add(updatesScreen, UPDATES)
         content.add(moreScreen, MORE)
-        content.add(settingsScreen(), SETTINGS)
 
-        val side = sidebar()
-        add(side, BorderLayout.WEST)
+        val headerBar = buildTopHeaderBar()
+        topHeaderBar = headerBar
+        add(headerBar, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
-        statusBar.apply {
-            isOpaque = true
-            background = Theme.BG_SIDEBAR
-            foreground = Theme.TEXT_MUTED
-            font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11.5f)
-            icon = ModernIcons.checkCircle(13) { Theme.TERTIARY }
-            iconTextGap = 8
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(6, 14, 6, 14),
-            )
+
+        layeredPane.add(toastHost, javax.swing.JLayeredPane.POPUP_LAYER)
+        addComponentListener(object : java.awt.event.ComponentAdapter() {
+            override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                toastHost.setBounds(0, 0, layeredPane.width, layeredPane.height)
+            }
+        })
+        SwingUtilities.invokeLater {
+            toastHost.setBounds(0, 0, layeredPane.width, layeredPane.height)
         }
-        add(statusBar, BorderLayout.SOUTH)
+        installGlobalShortcuts()
 
         ctx.addThemeListener {
-            side.background = Theme.BG_SIDEBAR
-            updateSidebarLayout()
-            brandLabel.foreground = Theme.TEXT_PRIMARY
-            versionLabel.foreground = Theme.TEXT_MUTED
-            content.background = Theme.BG_APP
-            statusBar.background = Theme.BG_SIDEBAR
-            statusBar.foreground = Theme.TEXT_MUTED
-            statusBar.border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(6, 14, 6, 14),
+            headerBar.background = Theme.BG_SIDEBAR
+            headerBar.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(5, 16, 5, 16),
             )
+            content.background = Theme.BG_APP
+            navButtons.values.forEach { it.repaint() }
             repaint()
         }
 
@@ -347,6 +418,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
             },
             onIncognito = {
                 ctx.incognitoMode = !ctx.incognitoMode
+                moreScreen.syncIncognito(ctx.incognitoMode)
                 ctx.setStatus(if (ctx.incognitoMode) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
             },
             onExit = {
@@ -371,9 +443,44 @@ class MihonApp : JFrame("Mihon"), Navigator {
     private fun shutdownGracefully() {
         runCatching { ReaderWindow.activeReader?.takeIf { it.isDisplayable }?.dispose() }
         runCatching { LibraryUpdateScheduler.stop() }
+        runCatching { library.dispose() }
+        runCatching { details.dispose() }
+        runCatching { historyScreen.dispose() }
+        runCatching { updatesScreen.dispose() }
+        runCatching { browseHub.dispose() }
+        if (settingsInitialized) {
+            runCatching { settingsPanel.dispose() }
+        }
         runCatching { db.checkpoint() }
         dispose()
         System.exit(0)
+    }
+
+    private fun installGlobalShortcuts() {
+        val rp = rootPane
+        fun bind(key: Int, mask: Int, id: String, action: () -> Unit) {
+            rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(javax.swing.KeyStroke.getKeyStroke(key, mask), id)
+            rp.actionMap.put(id, object : javax.swing.AbstractAction() {
+                override fun actionPerformed(e: java.awt.event.ActionEvent?) = action()
+            })
+        }
+        val ctrl = java.awt.event.InputEvent.CTRL_DOWN_MASK
+        val alt = java.awt.event.InputEvent.ALT_DOWN_MASK
+        bind(java.awt.event.KeyEvent.VK_1, ctrl, "nav_1") { showLibrary() }
+        bind(java.awt.event.KeyEvent.VK_2, ctrl, "nav_2") { updatesScreen.refresh(); navigate(UPDATES) }
+        bind(java.awt.event.KeyEvent.VK_3, ctrl, "nav_3") { showHistory() }
+        bind(java.awt.event.KeyEvent.VK_4, ctrl, "nav_4") { browseHub.reload(); navigate(BROWSE) }
+        bind(java.awt.event.KeyEvent.VK_5, ctrl, "nav_5") { navigate(MORE) }
+        bind(java.awt.event.KeyEvent.VK_LEFT, alt, "nav_back") { navigateBack() }
+    }
+
+    private fun navigateBack() {
+        if (navigationHistory.isEmpty()) {
+            if (currentCard != LIBRARY) showLibrary()
+            return
+        }
+        val prev = navigationHistory.removeLast()
+        navigate(prev, recordHistory = false, direction = -1)
     }
 
     override fun showLibrary() {
@@ -392,160 +499,60 @@ class MihonApp : JFrame("Mihon"), Navigator {
     }
 
     override fun openSourceCatalog(sourceName: String) {
-        browseHub.openSourceByName(sourceName)
         navigate(BROWSE)
+        browseHub.openSourceByName(sourceName)
     }
 
-    private var currentCard: String = ""
-
-    private fun navigate(card: String, highlight: String = card) {
+    private fun navigate(card: String, highlight: String = card, recordHistory: Boolean = true, direction: Int = 1) {
+        if (card == SETTINGS) ensureSettingsMounted()
         val changed = card != currentCard
+        if (changed && recordHistory && currentCard.isNotEmpty() && currentCard != DETAILS) {
+            if (navigationHistory.size >= 16) navigationHistory.removeFirst()
+            navigationHistory.addLast(currentCard)
+        }
+        val tabOrder = listOf(LIBRARY, UPDATES, HISTORY, BROWSE, MORE, SETTINGS)
+        val computedDir = if (direction != 1) {
+            direction
+        } else if (card == DETAILS) {
+            1
+        } else if (currentCard == DETAILS) {
+            -1
+        } else {
+            val fromIdx = tabOrder.indexOf(currentCard)
+            val toIdx = tabOrder.indexOf(card)
+            if (fromIdx >= 0 && toIdx >= 0 && toIdx < fromIdx) -1 else 1
+        }
         currentCard = card
+        if (card != BROWSE) {
+            topHeaderBar?.isVisible = true
+        }
         cards.show(content, card)
         navButtons[highlight]?.isSelected = true
-        if (changed) content.playTransition()
+        if (changed) content.playTransition(computedDir)
     }
 
-    private var sidebarCollapsed = prefs.getBoolean("sidebar_collapsed", false)
-    private var sidebarAnimTimer: javax.swing.Timer? = null
-    private var sidebarProgress: Float = if (sidebarCollapsed) 1f else 0f
-    private lateinit var sidePanel: JPanel
-    private lateinit var btnToggleSidebar: JButton
-    private lateinit var topRow: JPanel
-    private lateinit var brandLabel: JLabel
-    private lateinit var versionLabel: JLabel
-
-    private fun applySidebarProgress(progress: Float) {
-        val p = progress.coerceIn(0f, 1f)
-        sidebarProgress = p
-        val width = (210f + (64f - 210f) * p).toInt()
-        val padH = (12f + (8f - 12f) * p).toInt()
-        sidePanel.preferredSize = Dimension(width, 0)
-        sidePanel.border = BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
-            BorderFactory.createEmptyBorder(16, padH, 16, padH),
-        )
-
-        val showBrand = p < 0.45f
-        if (brandLabel.isVisible != showBrand) {
-            brandLabel.isVisible = showBrand
-            versionLabel.isVisible = showBrand
-            topRow.removeAll()
-            if (!showBrand) {
-                topRow.add(btnToggleSidebar, BorderLayout.CENTER)
-            } else {
-                topRow.add(brandLabel, BorderLayout.WEST)
-                topRow.add(btnToggleSidebar, BorderLayout.EAST)
-            }
-        }
-        val textAlpha = ((1f - p * 1.8f).coerceIn(0f, 1f) * 255).toInt()
-        brandLabel.foreground = Color(Theme.TEXT_PRIMARY.red, Theme.TEXT_PRIMARY.green, Theme.TEXT_PRIMARY.blue, textAlpha)
-        versionLabel.foreground = Color(Theme.TEXT_MUTED.red, Theme.TEXT_MUTED.green, Theme.TEXT_MUTED.blue, textAlpha)
-
-        navButtons.values.forEach { btn ->
-            if (btn is M3NavPillButton) {
-                btn.collapseProgress = p
-                btn.isCollapsed = p > 0.5f
-            }
-        }
-        sidePanel.revalidate()
-        sidePanel.repaint()
-    }
-
-    private fun updateSidebarLayout(animate: Boolean = false) {
-        btnToggleSidebar.icon = ModernIcons.sidebarToggle(18, sidebarCollapsed) { Theme.TEXT_PRIMARY }
-        btnToggleSidebar.toolTipText = if (sidebarCollapsed) "Expandir menu lateral" else "Recolher menu lateral"
-
-        val target = if (sidebarCollapsed) 1f else 0f
-        sidebarAnimTimer?.stop()
-        if (!animate) {
-            applySidebarProgress(target)
-            return
-        }
-
-        val start = sidebarProgress
-        val durationMs = 220L
-        val startTime = System.currentTimeMillis()
-        sidebarAnimTimer = javax.swing.Timer(12) { e ->
-            val elapsed = System.currentTimeMillis() - startTime
-            val rawT = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-            // Ease-out cubic for silky smooth deceleration
-            val inv = 1f - rawT
-            val eased = 1f - (inv * inv * inv)
-            val current = start + (target - start) * eased
-            applySidebarProgress(current)
-            if (rawT >= 1f) {
-                (e.source as? javax.swing.Timer)?.stop()
-                applySidebarProgress(target)
-            }
-        }.also { it.start() }
-    }
-
-    private fun sidebar(): JPanel {
-        sidePanel = JPanel().apply {
+    private fun buildTopHeaderBar(): JPanel {
+        val bar = JPanel(FlowLayout(FlowLayout.CENTER, 6, 0)).apply {
             background = Theme.BG_SIDEBAR
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            preferredSize = Dimension(0, 46)
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(16, if (sidebarCollapsed) 8 else 12, 16, if (sidebarCollapsed) 8 else 12),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(5, 16, 5, 16),
             )
-            preferredSize = Dimension(if (sidebarCollapsed) 64 else 210, 0)
         }
-        brandLabel = JLabel("Mihon", AppIcon.getIcon(26), SwingConstants.LEFT).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 20f)
-            foreground = Theme.TEXT_PRIMARY
-            iconTextGap = 8
-            isVisible = !sidebarCollapsed
-        }
-        btnToggleSidebar = ModernIconButton(
-            icon = ModernIcons.sidebarToggle(18, sidebarCollapsed) { Theme.TEXT_PRIMARY },
-            tip = if (sidebarCollapsed) "Expandir menu lateral" else "Recolher menu lateral",
-            sizePx = 32,
-            cornerRadius = 8f,
-        ).apply {
-            addActionListener {
-                sidebarCollapsed = !sidebarCollapsed
-                prefs.putBoolean("sidebar_collapsed", sidebarCollapsed)
-                updateSidebarLayout(animate = true)
-            }
-        }
-        topRow = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            alignmentX = 0f
-            maximumSize = Dimension(Int.MAX_VALUE, 36)
-            if (sidebarCollapsed) {
-                add(btnToggleSidebar, BorderLayout.CENTER)
-            } else {
-                add(brandLabel, BorderLayout.WEST)
-                add(btnToggleSidebar, BorderLayout.EAST)
-            }
-        }
-        sidePanel.add(topRow)
-        sidePanel.add(Box.createVerticalStrut(2))
-        versionLabel = JLabel("Desktop Linux").apply {
-            font = Theme.FONT_MONO.deriveFont(Font.PLAIN, 11f)
-            foreground = Theme.TEXT_MUTED
-            alignmentX = 0f
-            isVisible = !sidebarCollapsed
-        }
-        sidePanel.add(versionLabel)
-        sidePanel.add(Box.createVerticalStrut(18))
 
         val group = ButtonGroup()
-        // 5 Primary Material 3 destinations matching Mihon Android's NavigationBar:
-        // Biblioteca, Atualizações, Histórico, Navegar, Mais
-        listOf(
-            Triple(LIBRARY, "Biblioteca", ModernIcons.library(19) { Theme.TEXT_PRIMARY }),
-            Triple(UPDATES, "Atualizações", ModernIcons.updates(19) { Theme.TEXT_PRIMARY }),
-            Triple(HISTORY, "Histórico", ModernIcons.history(19) { Theme.TEXT_PRIMARY }),
-            Triple(BROWSE, "Navegar", ModernIcons.browse(19) { Theme.TEXT_PRIMARY }),
-            Triple(MORE, "Mais", ModernIcons.more(19) { Theme.TEXT_PRIMARY }),
-        ).forEach { (card, label, icon) ->
+        val navDefs: List<Triple<String, String, (() -> Color) -> Icon>> = listOf(
+            Triple(LIBRARY, "Biblioteca") { color -> ModernIcons.library(16, color) },
+            Triple(UPDATES, "Atualizações") { color -> ModernIcons.updates(16, color) },
+            Triple(HISTORY, "Histórico") { color -> ModernIcons.history(16, color) },
+            Triple(BROWSE, "Navegar") { color -> ModernIcons.browse(16, color) },
+            Triple(MORE, "Mais") { color -> ModernIcons.more(16, color) },
+        )
+        navDefs.forEach { (card, label, iconFactory) ->
+            val icon = iconFactory { Theme.TEXT_PRIMARY }
             val button = M3NavPillButton(label, icon).apply {
-                alignmentX = 0f
-                maximumSize = Dimension(Int.MAX_VALUE, 42)
-                isCollapsed = sidebarCollapsed
-                collapseProgress = if (sidebarCollapsed) 1f else 0f
+                preferredSize = Dimension(122, 34)
                 addActionListener {
                     when (card) {
                         LIBRARY -> showLibrary()
@@ -558,13 +565,12 @@ class MihonApp : JFrame("Mihon"), Navigator {
             }
             group.add(button)
             navButtons[card] = button
-            sidePanel.add(button)
-            sidePanel.add(Box.createVerticalStrut(5))
+            bar.add(button)
         }
-        return sidePanel
+        return bar
     }
 
-    private fun settingsScreen(): JComponent = AntiGravitySettingsScreen(
+    private fun createSettingsScreen(): AntiGravitySettingsScreen = AntiGravitySettingsScreen(
         ctx = ctx,
         prefs = prefs,
         readerPrefs = readerPrefs,
@@ -576,10 +582,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
         onExportBackup = { exportBackup() },
         onImportBackup = { importBackup() },
         onOpenTestLab = { UpscaleComparisonDialog(this@MihonApp, ctx).isVisible = true },
-        onToggleSidebarDefault = { collapsed ->
-            sidebarCollapsed = collapsed
-            updateSidebarLayout(animate = true)
-        },
+        onToggleSidebarDefault = { _ -> },
         onExitApp = {
             this@MihonApp.dispatchEvent(java.awt.event.WindowEvent(this@MihonApp, java.awt.event.WindowEvent.WINDOW_CLOSING))
         },
@@ -602,9 +605,10 @@ class MihonApp : JFrame("Mihon"), Navigator {
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
+        dlg.minimumSize = Dimension(420, 300)
         val sub = JLabel("Selecione as cores da interface ao seu gosto:").apply {
             font = font.deriveFont(Font.PLAIN, 12f)
-            foreground = Theme.TEXT_MUTED
+            foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             alignmentX = 0f
         }
         root.add(title)
@@ -642,8 +646,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
             }
 
-            val pickBtn = JButton("Escolher").apply {
-                font = font.deriveFont(11.5f)
+            val pickBtn = ModernButton("Escolher", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                 addActionListener {
                     val picked = javax.swing.JColorChooser.showDialog(dlg, "Escolher $label", preview.color)
                     if (picked != null) {
@@ -678,9 +681,10 @@ class MihonApp : JFrame("Mihon"), Navigator {
         val btnRow = JPanel(FlowLayout(FlowLayout.RIGHT, 10, 0)).apply {
             isOpaque = false
             alignmentX = 0f
-            val cancel = JButton("Cancelar").apply { addActionListener { dlg.dispose() } }
-            val save = JButton("Aplicar Tema").apply {
-                font = font.deriveFont(Font.BOLD, 13f)
+            val cancel = ModernButton("Cancelar", variant = ModernButton.Variant.SURFACE).apply {
+                addActionListener { dlg.dispose() }
+            }
+            val save = ModernButton("Aplicar Tema", variant = ModernButton.Variant.PRIMARY).apply {
                 addActionListener {
                     applyCustomTheme(curBgApp, curBgSidebar, curBgSurface, curAccent, curTextPrimary)
                     dlg.dispose()
@@ -757,7 +761,7 @@ class MihonApp : JFrame("Mihon"), Navigator {
                         addActionListener {
                             JOptionPane.showMessageDialog(
                                 this@MihonApp,
-                                "Mihon Linux v0.3.0\nLeitor de Mangá Desktop (CBZ, ZIP, Pastas e Fontes Online)\nKotlin + Exposed/SQLite + FlatLaf Swing",
+                                "Mihon Linux v0.4.0\nLeitor de Mangá Desktop (CBZ, ZIP, Pastas e Fontes Online)\nKotlin + Exposed/SQLite + FlatLaf Swing",
                             )
                         }
                     },
@@ -802,16 +806,19 @@ class M3Switch(
 
     private fun animateTo(target: Float) {
         animTimer?.stop()
+        val durationMs = mihon.desktop.ui.animation.MotionPreferences.effectiveDurationMs(180)
+        if (durationMs <= 0L) {
+            animProgress = target
+            repaint()
+            return
+        }
         val start = animProgress
-        val durationMs = 180L
-        val startTime = System.currentTimeMillis()
+        val startNanos = System.nanoTime()
+        val durationNanos = durationMs * 1_000_000.0
 
         animTimer = javax.swing.Timer(12) { e ->
-            val elapsed = System.currentTimeMillis() - startTime
-            val rawT = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-            // Ease-out cubic for crisp, fluid responsiveness
-            val inv = 1f - rawT
-            val eased = 1f - (inv * inv * inv)
+            val rawT = ((System.nanoTime() - startNanos) / durationNanos).toFloat().coerceIn(0f, 1f)
+            val eased = easeOutCubic(rawT)
             animProgress = (start + (target - start) * eased).coerceIn(0f, 1f)
             repaint()
             if (rawT >= 1f) {
@@ -830,10 +837,11 @@ class M3Switch(
 
     init {
         isOpaque = false
+        isFocusable = true
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-        preferredSize = Dimension(52, 32)
-        minimumSize = Dimension(52, 32)
-        maximumSize = Dimension(52, 32)
+        preferredSize = Dimension(48, 28)
+        minimumSize = Dimension(48, 28)
+        maximumSize = Dimension(48, 28)
 
         addMouseListener(object : MouseAdapter() {
             override fun mouseEntered(e: MouseEvent) {
@@ -845,8 +853,21 @@ class M3Switch(
                 repaint()
             }
             override fun mousePressed(e: MouseEvent) {
+                requestFocusInWindow()
                 isSelected = !isSelected
             }
+        })
+        addKeyListener(object : java.awt.event.KeyAdapter() {
+            override fun keyPressed(e: java.awt.event.KeyEvent) {
+                if (e.keyCode == java.awt.event.KeyEvent.VK_SPACE || e.keyCode == java.awt.event.KeyEvent.VK_ENTER) {
+                    isSelected = !isSelected
+                    e.consume()
+                }
+            }
+        })
+        addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusGained(e: java.awt.event.FocusEvent?) { repaint() }
+            override fun focusLost(e: java.awt.event.FocusEvent?) { repaint() }
         })
     }
 
@@ -864,47 +885,34 @@ class M3Switch(
         val g2 = g.create() as java.awt.Graphics2D
         g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
 
-        val trackW = 50
-        val trackH = 28
-        val trackX = 1
+        val trackW = 46
+        val trackH = 26
+        val trackX = (width - trackW) / 2
         val trackY = (height - trackH) / 2
         val arc = trackH
 
         val p = animProgress // 0f (off) -> 1f (on)
 
-        // Track fill color blending
-        val inactiveBg = if (isHovered) Theme.BG_CARD_HOVER else Theme.BG_SURFACE
-        val activeBg = Theme.PRIMARY
-        val currentTrackBg = blendColor(inactiveBg, activeBg, p)
+        // Libadwaita stadium track (solid #4E4E53 when OFF without bright border ring, #4F46E5 Cobalt when ON)
+        val offTrack = if (Theme.isDark) {
+            if (isHovered) Color(0x58, 0x58, 0x5E) else Color(0x4E, 0x4E, 0x53)
+        } else {
+            if (isHovered) Color(0xC6, 0xC8, 0xD2) else Color(0xD4, 0xD6, 0xDF)
+        }
+        val currentTrackBg = blendColor(offTrack, Theme.PRIMARY, p)
 
         g2.color = currentTrackBg
         g2.fillRoundRect(trackX, trackY, trackW, trackH, arc, arc)
 
-        // Border outline fading out as switch reaches on state
-        val borderAlpha = ((1f - p) * (if (isHovered) (if (Theme.isDark) 180 else 160) else (if (Theme.isDark) 120 else 100))).toInt().coerceIn(0, 255)
-        if (borderAlpha > 0) {
-            g2.stroke = java.awt.BasicStroke(2f)
-            val borderColor = if (Theme.isDark) Color(255, 255, 255, borderAlpha) else Color(0, 0, 0, borderAlpha)
-            g2.color = borderColor
-            g2.drawRoundRect(trackX + 1, trackY + 1, trackW - 2, trackH - 2, arc - 2, arc - 2)
-        }
-
-        // Thumb metrics interpolation:
-        // Off: diameter 14px, starts at trackX + 6
-        // On: diameter 22px, ends at trackX + trackW - 22 - 3 (which is trackX + 25)
-        val startThumbD = 14f
-        val endThumbD = 22f
-        val thumbD = startThumbD + (endThumbD - startThumbD) * p
-
-        val startThumbX = trackX + 6f
-        val endThumbX = (trackX + trackW - endThumbD - 3)
+        // Large 20px thumb with 3px margin from track edge (matching Foto 5)
+        val thumbD = 20f
+        val startThumbX = trackX + 3f
+        val endThumbX = (trackX + trackW - thumbD - 3f)
         val thumbX = startThumbX + (endThumbX - startThumbX) * p
         val thumbY = trackY + (trackH - thumbD) / 2f
 
-        // Thumb color interpolation:
-        val offThumbColor = if (Theme.isDark) Color(255, 255, 255, 200) else Color(22, 23, 34, 160)
-        val onThumbColor = Color.WHITE
-        val currentThumbColor = blendColor(offThumbColor, onThumbColor, p)
+        val offThumbColor = if (Theme.isDark) Color(0xD4, 0xD3, 0xD8) else Color.WHITE
+        val currentThumbColor = blendColor(offThumbColor, Color.WHITE, p)
 
         g2.color = currentThumbColor
         g2.fill(java.awt.geom.Ellipse2D.Float(thumbX, thumbY, thumbD, thumbD))
@@ -914,7 +922,7 @@ class M3Switch(
 }
 
 /**
- * Material 3 Navigation Pill Button (emulating Mihon Android's active pill selection, icons, and badge counters).
+ * Material 3 / Libadwaita Top ViewSwitcher Pill Button (matching Fotos 4 & 5).
  */
 class M3NavPillButton(
     val labelText: String,
@@ -983,7 +991,7 @@ class M3NavPillButton(
     }
 
     override fun paintBorder(g: java.awt.Graphics) {
-        // Suppress FlatLaf/Swing default button borders to preserve clean M3 look
+        // Handled in paintComponent
     }
 
     override fun paintComponent(g: java.awt.Graphics) {
@@ -994,50 +1002,45 @@ class M3NavPillButton(
         val w = width
         val h = height
 
-        val pillX = 2
-        val pillY = 2
-        val pillW = w - 4
-        val pillH = h - 4
-        val arc = 12
+        val pillX = 1
+        val pillY = 1
+        val pillW = w - 2
+        val pillH = h - 2
+        val arc = Theme.CONTROL_RADIUS * 2
 
-        // Modern Squircle Active Pill Container with smooth hover/active blend
         if (hoverProgress > 0.01f && activeProgress < 0.99f) {
             val hc = Theme.BG_CARD_HOVER
-            g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress * (1f - activeProgress)).toInt().coerceIn(0, 255))
+            g2.color = Color(hc.red, hc.green, hc.blue, (255 * hoverProgress * (1f - activeProgress)).toInt().coerceIn(0, 255))
             g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
         }
         if (activeProgress > 0.01f) {
             val ac = Theme.BG_PILL_ACTIVE
             g2.color = Color(ac.red, ac.green, ac.blue, (ac.alpha * activeProgress).toInt().coerceIn(0, 255))
             g2.fillRoundRect(pillX, pillY, pillW, pillH, arc, arc)
-            // Subtle expanding accent indicator bar on the left
-            val barH = ((pillH - 16) * activeProgress).toInt().coerceAtLeast(4)
-            val barY = pillY + (pillH - barH) / 2
-            g2.color = Color(Theme.ACCENT.red, Theme.ACCENT.green, Theme.ACCENT.blue, (255 * activeProgress).toInt().coerceIn(0, 255))
-            g2.fillRoundRect(pillX, barY, 3, barH, 3, 3)
         }
 
         val iconW = navIcon.iconWidth
         val iconH = navIcon.iconHeight
         val iconY = (h - iconH) / 2
 
-        val expandedIconX = 14f
+        g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
+        val fm = g2.fontMetrics
+        val textW = fm.stringWidth(labelText)
+        val gap = 8
+        val totalContentW = iconW + gap + textW
+        val centeredStartX = ((w - totalContentW) / 2f).coerceAtLeast(8f)
         val collapsedIconX = (w - iconW) / 2f
-        val iconX = (expandedIconX + (collapsedIconX - expandedIconX) * collapseProgress).toInt()
+        val iconX = (centeredStartX + (collapsedIconX - centeredStartX) * collapseProgress).toInt()
         navIcon.paintIcon(this, g2, iconX, iconY)
 
-        // Smooth alpha fade-out for text and badge during collapse
         val textAlpha = ((1f - collapseProgress * 1.6f).coerceIn(0f, 1f) * 255).toInt()
         if (textAlpha > 4) {
-            g2.font = font.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
-            val baseColor = blendUiColor(Theme.TEXT_SECONDARY, Theme.TEXT_PRIMARY, activeProgress.coerceAtLeast(hoverProgress * 0.4f))
+            val baseColor = Theme.TEXT_PRIMARY
             g2.color = Color(baseColor.red, baseColor.green, baseColor.blue, textAlpha)
-            val fm = g2.fontMetrics
-            val textX = iconX + iconW + 12
+            val textX = iconX + iconW + gap
             val textY = ((h - fm.height) / 2) + fm.ascent
             g2.drawString(labelText, textX, textY)
 
-            // Subtle M3 Counter Badge on the right (if provided)
             if (!badgeText.isNullOrBlank()) {
                 g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
                 val bFm = g2.fontMetrics
@@ -1047,7 +1050,7 @@ class M3NavPillButton(
                 val by = (h - bh) / 2
                 val badgeBgAlpha = (((25f + 20f * activeProgress)) * (textAlpha / 255f)).toInt()
                 g2.color = if (Theme.isDark) Color(255, 255, 255, badgeBgAlpha) else Color(0, 0, 0, badgeBgAlpha)
-                g2.fillRoundRect(bx, by, bw, bh, bh, bh)
+                g2.fillRoundRect(bx, by, bw, bh, Theme.BADGE_RADIUS * 2, Theme.BADGE_RADIUS * 2)
                 g2.color = Color(Theme.TEXT_PRIMARY.red, Theme.TEXT_PRIMARY.green, Theme.TEXT_PRIMARY.blue, textAlpha)
                 g2.drawString(badgeText, bx + (bw - bFm.stringWidth(badgeText)) / 2, by + ((bh - bFm.height) / 2) + bFm.ascent)
             }
@@ -1060,7 +1063,10 @@ class M3NavPillButton(
  * Material 3 "Navegar" Hub (BrowseScreen):
  * Top TabRow with [Fontes], [Extensões (N)], and [Migrar] tabs, matching Mihon Android's Extensoes.jpeg.
  */
-class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
+class BrowseHubScreen(
+    private val ctx: AppContext,
+    private val onCatalogVisibilityChanged: (Boolean) -> Unit = {},
+) : JPanel(BorderLayout()) {
     private val cards = CardLayout()
     private val subContent = JPanel(cards)
 
@@ -1069,6 +1075,10 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private val searchScreen = SearchScreen(ctx, onBackToSources = {
         sourcesCards.show(sourcesHub, "sources_list")
+        tabStrip.isVisible = true
+        onCatalogVisibilityChanged(false)
+        revalidate()
+        repaint()
     })
 
     private val sourcesListScreen = SourcesListScreen(
@@ -1076,6 +1086,10 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         onSelectSource = { ext ->
             searchScreen.openSource(ext.name)
             sourcesCards.show(sourcesHub, "catalog")
+            tabStrip.isVisible = false
+            onCatalogVisibilityChanged(true)
+            revalidate()
+            repaint()
         },
         onSelectLocalSource = {
             ctx.navigator.showLibrary()
@@ -1120,9 +1134,9 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     private inner class BrowseTabStrip : JPanel() {
         private val tabs = listOf(
-            Triple("sources", "Fontes", ModernIcons.browse(16) { if (activeCard == "sources") Theme.TEXT_PRIMARY else Theme.TEXT_MUTED }),
-            Triple("extensions", "Extensões", ModernIcons.plug(16) { if (activeCard == "extensions") Theme.TEXT_PRIMARY else Theme.TEXT_MUTED }),
-            Triple("migrate", "Migrar", ModernIcons.sync(16) { if (activeCard == "migrate") Theme.TEXT_PRIMARY else Theme.TEXT_MUTED }),
+            Triple("sources", "Fontes", ModernIcons.browse(16) { Theme.TEXT_PRIMARY }),
+            Triple("extensions", "Extensões", ModernIcons.plug(16) { Theme.TEXT_PRIMARY }),
+            Triple("migrate", "Migrar", ModernIcons.sync(16) { Theme.TEXT_PRIMARY }),
         )
         private var activeCard = "sources"
         private var hoveredIdx = -1
@@ -1133,7 +1147,7 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         init {
             background = Theme.BG_APP
-            preferredSize = Dimension(0, 48)
+            preferredSize = Dimension(0, 46)
             addMouseMotionListener(object : java.awt.event.MouseMotionAdapter() {
                 override fun mouseMoved(e: MouseEvent) {
                     val idx = tabRects.indexOfFirst { it.contains(e.point) }
@@ -1168,32 +1182,8 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             if (card == "sources") sourcesCards.show(sourcesHub, "sources_list")
             cards.show(subContent, card)
             if (activeCard == card) return
-            val targetIdx = tabs.indexOfFirst { it.first == card }
             activeCard = card
-            val targetRect = tabRects.getOrNull(targetIdx)
-            if (targetRect != null && targetRect.width > 0 && indX >= 0f) {
-                val tx = (targetRect.x + 12).toFloat()
-                val tw = (targetRect.width - 24).coerceAtLeast(16).toFloat()
-                val sx = indX
-                val sw = indW
-                val startTime = System.currentTimeMillis()
-                indTimer?.stop()
-                indTimer = javax.swing.Timer(14) { ev ->
-                    val rawT = ((System.currentTimeMillis() - startTime).toFloat() / 160f).coerceIn(0f, 1f)
-                    val eased = 1f - (1f - rawT) * (1f - rawT) * (1f - rawT)
-                    indX = sx + (tx - sx) * eased
-                    indW = sw + (tw - sw) * eased
-                    repaint()
-                    if (rawT >= 1f) {
-                        (ev.source as? javax.swing.Timer)?.stop()
-                        indX = tx
-                        indW = tw
-                    }
-                }.also { it.start() }
-            } else {
-                indX = -1f
-                repaint()
-            }
+            repaint()
         }
 
         override fun paintComponent(g: java.awt.Graphics) {
@@ -1210,7 +1200,7 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             val widths = IntArray(tabs.size)
             for (i in tabs.indices) {
                 val (_, label, icon) = tabs[i]
-                g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 13f)
+                g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
                 val lw = g2.fontMetrics.stringWidth(label)
                 val badgeW = if (tabs[i].first == "extensions") {
                     g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
@@ -1222,23 +1212,27 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             }
             val totalW = widths.sum() + spacing * (tabs.size - 1)
             var x = ((width - totalW) / 2).coerceAtLeast(16)
+            val arc = Theme.CONTROL_RADIUS * 2
 
             for (i in tabs.indices) {
                 val (card, label, icon) = tabs[i]
                 val w = widths[i]
-                tabRects[i].setBounds(x, 4, w, h - 8)
+                tabRects[i].setBounds(x, 6, w, h - 12)
                 val isAct = activeCard == card
                 val isHov = hoveredIdx == i
 
-                if (isHov && !isAct) {
+                if (isAct) {
+                    g2.color = Theme.BG_PILL_ACTIVE
+                    g2.fillRoundRect(x, 6, w, h - 12, arc, arc)
+                } else if (isHov) {
                     g2.color = Theme.BG_CARD_HOVER
-                    g2.fillRoundRect(x, 6, w, h - 12, 10, 10)
+                    g2.fillRoundRect(x, 6, w, h - 12, arc, arc)
                 }
 
                 icon.paintIcon(this, g2, x + 14, (h - icon.iconHeight) / 2)
 
-                g2.font = Theme.FONT_UI.deriveFont(if (isAct) Font.BOLD else Font.PLAIN, 13f)
-                g2.color = if (isAct) Theme.TEXT_PRIMARY else Theme.TEXT_SECONDARY
+                g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
+                g2.color = Theme.TEXT_PRIMARY
                 val fm = g2.fontMetrics
                 val textX = x + 14 + icon.iconWidth + 8
                 g2.drawString(label, textX, (h - fm.height) / 2 + fm.ascent)
@@ -1250,22 +1244,13 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                     val bw = bFm.stringWidth(bText) + 12
                     val bx = textX + fm.stringWidth(label) + 6
                     val by = (h - 18) / 2
-                    g2.color = if (isAct) Theme.ACCENT_SOFT else Color(255, 255, 255, 22)
-                    g2.fillRoundRect(bx, by, bw, 18, 9, 9)
-                    g2.color = if (isAct) Theme.ACCENT_HOVER else Theme.TEXT_MUTED
+                    g2.color = if (Theme.isDark) Color(255, 255, 255, 28) else Color(22, 23, 34, 18)
+                    g2.fillRoundRect(bx, by, bw, 18, Theme.BADGE_RADIUS * 2, Theme.BADGE_RADIUS * 2)
+                    g2.color = Theme.TEXT_PRIMARY
                     g2.drawString(bText, bx + 6, by + (18 - bFm.height) / 2 + bFm.ascent)
                 }
 
-                if (isAct && indTimer?.isRunning != true) {
-                    indX = (x + 12).toFloat()
-                    indW = (w - 24).coerceAtLeast(16).toFloat()
-                }
                 x += w + spacing
-            }
-
-            if (indX >= 0f && indW > 0f) {
-                g2.color = Theme.ACCENT
-                g2.fillRoundRect(indX.toInt(), h - 3, indW.toInt(), 3, 3, 3)
             }
             g2.dispose()
         }
@@ -1307,62 +1292,44 @@ class BrowseHubScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
     fun reload() {
         extCount = ctx.extensions.size
+        tabStrip.isVisible = true
+        onCatalogVisibilityChanged(false)
+        sourcesCards.show(sourcesHub, "sources_list")
         tabStrip.repaint()
         sourcesListScreen.rebuildList()
-        searchScreen.loadPopular()
+    }
+
+    fun openExtensionsTab() {
+        extCount = ctx.extensions.size
+        tabStrip.isVisible = true
+        onCatalogVisibilityChanged(false)
+        tabStrip.selectTab("extensions")
     }
 
     fun openSourceByName(sourceName: String) {
         val ext = ctx.extensions.firstOrNull { it.name.equals(sourceName, ignoreCase = true) || it.name.startsWith(sourceName, ignoreCase = true) }
         if (ext != null) {
+            tabStrip.selectTab("sources")
             searchScreen.openSource(ext.name)
             sourcesCards.show(sourcesHub, "catalog")
-            tabStrip.selectTab("sources")
-        }
-    }
-}
-
-/**
- * Placeholder screen for "Atualizações" (recent chapters feed).
- */
-class UpdatesPlaceholderScreen(ctx: AppContext) : JPanel(BorderLayout()) {
-    init {
-        background = Theme.BG_APP
-        val titleLbl = JLabel("Atualizações", SwingConstants.CENTER).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
-            foreground = Theme.TEXT_PRIMARY
-            alignmentX = 0.5f
-        }
-        val descLbl = JLabel("Aqui são listados os capítulos mais recentes lançados pelas suas fontes instaladas.", SwingConstants.CENTER).apply {
-            font = Theme.FONT_UI.deriveFont(13f)
-            foreground = Theme.TEXT_MUTED
-            alignmentX = 0.5f
-        }
-        val center = JPanel().apply {
-            isOpaque = false
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(titleLbl)
-            add(Box.createVerticalStrut(8))
-            add(descLbl)
-        }
-        val wrap = JPanel(java.awt.GridBagLayout()).apply {
-            isOpaque = false
-            add(center)
-        }
-        add(wrap, BorderLayout.CENTER)
-        ctx.addThemeListener {
-            background = Theme.BG_APP
-            titleLbl.foreground = Theme.TEXT_PRIMARY
-            descLbl.foreground = Theme.TEXT_MUTED
+            tabStrip.isVisible = false
+            onCatalogVisibilityChanged(true)
+            revalidate()
             repaint()
         }
     }
+
+    fun dispose() {
+        searchScreen.dispose()
+        sourcesListScreen.dispose()
+        extensionsScreen.dispose()
+    }
 }
 
 /**
- * AntiGravity-styled "Mais" Screen (MoreScreen):
- * Uses grouped rounded cards (`SettingsGroupCard`) with internal 1px hairline dividers,
- * clear section headers, 15px icon margins, animated M3Switch toggles, and interactive hover rows.
+ * Mihon Index "Mais" Screen (MoreScreen) matching Foto 3:
+ * Top standalone `Modo anônimo` boxed-list card, followed by `Configurações` header
+ * and a single unified 8-row `SettingsGroupCard`.
  */
 class MoreScreen(
     private val ctx: AppContext,
@@ -1372,74 +1339,43 @@ class MoreScreen(
     private val onOpenBookmarks: () -> Unit = {},
     private val onOpenStorageManager: () -> Unit,
     private val onOpenSettings: () -> Unit,
+    private val onOpenSettingsCategory: (String) -> Unit = { onOpenSettings() },
+    private val onOpenSources: () -> Unit = {},
     private val onOpenAbout: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
     private val themeUpdaters = mutableListOf<() -> Unit>()
 
-    private val offlineSwitch = M3Switch(ctx.onlyOfflineFilter) { enabled ->
-        ctx.setOfflineFilter(enabled)
-        ctx.setStatus(if (enabled) "Filtro: Somente disponíveis offline ativado" else "Filtro offline desativado")
-    }
+    private val incognitoEmojiBadge = mihon.desktop.ui.components.IncognitoEmojiBadge(
+        initialIncognito = ctx.incognitoMode,
+        sizePx = 42,
+    )
 
     private val incognitoSwitch = M3Switch(ctx.incognitoMode) { enabled ->
         ctx.incognitoMode = enabled
-        ctx.setStatus(if (enabled) "Modo anônimo ativado (histórico pausado)" else "Modo anônimo desativado")
+        incognitoEmojiBadge.isIncognito = enabled
+        ctx.setStatus(if (enabled) "Modo anônimo ativado" else "Modo anônimo desativado")
+    }
+
+    fun syncIncognito(enabled: Boolean) {
+        if (incognitoSwitch.isSelected != enabled) {
+            incognitoSwitch.isSelected = enabled
+        }
+        incognitoEmojiBadge.isIncognito = enabled
     }
 
     init {
-        ctx.addOfflineFilterListener { offlineSwitch.isSelected = it }
         background = Theme.BG_APP
 
         val content = JPanel().apply {
             background = Theme.BG_APP
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(24, 24, 28, 24)
-        }
-
-        // Page Header (AntiGravity H1 + Subtitle)
-        val h1 = JLabel("Mais").apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 24f)
-            foreground = Theme.TEXT_PRIMARY
-            alignmentX = 0f
-        }
-        val subtitle = JLabel("Controle modos rápidos de leitura, ferramentas da biblioteca, estatísticas e preferências.").apply {
-            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
-            foreground = Theme.TEXT_MUTED
-            alignmentX = 0f
-        }
-        content.add(h1)
-        content.add(Box.createVerticalStrut(4))
-        content.add(subtitle)
-        content.add(Box.createVerticalStrut(24))
-        themeUpdaters.add {
-            h1.foreground = Theme.TEXT_PRIMARY
-            subtitle.foreground = Theme.TEXT_MUTED
-        }
-
-        fun addSectionHeader(title: String, desc: String) {
-            val tLbl = JLabel(title).apply {
-                font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
-                foreground = Theme.TEXT_PRIMARY
-                alignmentX = 0f
-            }
-            val dLbl = JLabel(desc).apply {
-                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
-                foreground = Theme.TEXT_MUTED
-                alignmentX = 0f
-            }
-            content.add(tLbl)
-            content.add(Box.createVerticalStrut(3))
-            content.add(dLbl)
-            content.add(Box.createVerticalStrut(10))
-            themeUpdaters.add {
-                tLbl.foreground = Theme.TEXT_PRIMARY
-                dLbl.foreground = Theme.TEXT_MUTED
-            }
+            border = BorderFactory.createEmptyBorder(18, 28, 28, 28)
         }
 
         fun createInteractiveRow(
-            icon: Icon,
+            icon: Icon? = null,
+            leadingComponent: JComponent? = null,
             title: String,
             desc: String,
             rightComponent: JComponent,
@@ -1447,24 +1383,24 @@ class MoreScreen(
         ): JPanel {
             var hovered = false
             val titleLbl = JLabel(title).apply {
-                font = Theme.FONT_UI.deriveFont(Font.BOLD, 13f)
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 13.5f)
                 foreground = Theme.TEXT_PRIMARY
                 alignmentX = 0f
             }
             val descLbl = JLabel(desc).apply {
-                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 11.5f)
-                foreground = Theme.TEXT_MUTED
+                font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
+                foreground = Theme.TEXT_SECONDARY
                 alignmentX = 0f
             }
-            val iconLbl = JLabel(icon)
+            val leadView: JComponent = leadingComponent ?: JLabel(icon)
 
             val row = object : JPanel(BorderLayout(12, 0)) {
                 override fun paintComponent(g: java.awt.Graphics) {
                     if (hovered) {
                         val g2 = g.create() as java.awt.Graphics2D
                         g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
-                        g2.color = if (Theme.isDark) Color(255, 255, 255, 10) else Color(0, 0, 0, 8)
-                        g2.fillRoundRect(4, 2, width - 8, height - 4, 10, 10)
+                        g2.color = Theme.BG_CARD_HOVER
+                        g2.fillRoundRect(4, 2, width - 8, height - 4, Theme.CONTROL_RADIUS * 2, Theme.CONTROL_RADIUS * 2)
                         g2.dispose()
                     }
                     super.paintComponent(g)
@@ -1477,10 +1413,9 @@ class MoreScreen(
                 val left = JPanel().apply {
                     isOpaque = false
                     layout = BoxLayout(this, BoxLayout.X_AXIS)
-                    // 15px left of icon and 15px right of icon
-                    border = BorderFactory.createEmptyBorder(0, 15, 0, 0)
-                    add(iconLbl)
-                    add(Box.createHorizontalStrut(15))
+                    border = BorderFactory.createEmptyBorder(0, 14, 0, 0)
+                    add(leadView)
+                    add(Box.createHorizontalStrut(14))
                     add(
                         JPanel().apply {
                             isOpaque = false
@@ -1492,7 +1427,7 @@ class MoreScreen(
                     )
                 }
 
-                val rightWrap = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                val rightWrap = JPanel(java.awt.GridBagLayout()).apply {
                     isOpaque = false
                     add(rightComponent)
                 }
@@ -1532,118 +1467,111 @@ class MoreScreen(
 
             themeUpdaters.add {
                 titleLbl.foreground = Theme.TEXT_PRIMARY
-                descLbl.foreground = Theme.TEXT_MUTED
-                iconLbl.repaint()
+                descLbl.foreground = Theme.TEXT_SECONDARY
+                leadView.repaint()
             }
             return row
         }
 
-        // --- SEÇÃO 1: Modos Rápidos ---
-        addSectionHeader(
-            "Modos Rápidos",
-            "Ative filtros globais de leitura e privacidade instantaneamente.",
-        )
-        val quickModesCard = SettingsGroupCard()
-        quickModesCard.addRow(
+        // Top standalone boxed-list card: Modo anônimo (Incognito mode) with expressive animated emoji
+        val incognitoCard = SettingsGroupCard()
+        incognitoCard.addRow(
             createInteractiveRow(
-                icon = ModernIcons.offline(20) { Theme.TEXT_PRIMARY },
-                title = "Somente disponíveis offline",
-                desc = "Filtra todos os itens em sua biblioteca para exibir apenas capítulos salvos no dispositivo.",
-                rightComponent = offlineSwitch,
-                onClick = { offlineSwitch.isSelected = !offlineSwitch.isSelected },
-            ),
-        )
-        quickModesCard.addRow(
-            createInteractiveRow(
-                icon = ModernIcons.incognito(20) { Theme.TEXT_PRIMARY },
+                leadingComponent = incognitoEmojiBadge,
                 title = "Modo anônimo",
-                desc = "Pausa o histórico de leitura e não registra novas páginas lidas enquanto estiver ativo.",
+                desc = "A leitura não registra histórico, página salva ou atualização no rastreador",
                 rightComponent = incognitoSwitch,
                 onClick = { incognitoSwitch.isSelected = !incognitoSwitch.isSelected },
             ),
         )
-        content.add(quickModesCard)
-        content.add(Box.createVerticalStrut(24))
+        content.add(incognitoCard)
+        content.add(Box.createVerticalStrut(18))
 
-        // --- SEÇÃO 2: Biblioteca & Atividade ---
-        addSectionHeader(
-            "Biblioteca & Atividade",
-            "Gerencie seus downloads em segundo plano, categorias e estatísticas de leitura.",
+        // Group header: Configurações (Settings)
+        val settingsTitle = JLabel("Configurações").apply {
+            font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
+            foreground = Theme.TEXT_PRIMARY
+            alignmentX = 0f
+            border = BorderFactory.createEmptyBorder(0, 2, 10, 0)
+        }
+        content.add(settingsTitle)
+        themeUpdaters.add { settingsTitle.foreground = Theme.TEXT_PRIMARY }
+
+        // Single unified 8-row SettingsGroupCard matching Foto 5
+        val settingsCard = SettingsGroupCard()
+        settingsCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.readerPages(20) { Theme.TEXT_PRIMARY },
+                title = "Leitor",
+                desc = "Direção, layout, plano de fundo",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
+                onClick = { onOpenSettingsCategory("reader") },
+            ),
         )
-        val libraryCard = SettingsGroupCard()
-        libraryCard.addRow(
+        settingsCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.palette(20) { Theme.TEXT_PRIMARY },
+                title = "Aparência",
+                desc = "Tema, cores e animações",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
+                onClick = { onOpenSettingsCategory("appearance") },
+            ),
+        )
+        settingsCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.libraryTag(20) { Theme.TEXT_PRIMARY },
+                title = "Biblioteca",
+                desc = "Atualizações, emblemas e notificações",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
+                onClick = { onOpenSettingsCategory("general") },
+            ),
+        )
+        settingsCard.addRow(
             createInteractiveRow(
                 icon = ModernIcons.downloads(20) { Theme.TEXT_PRIMARY },
-                title = "Fila de downloads",
-                desc = "Acompanhe e gerencie os capítulos que estão sendo baixados no momento.",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
-                onClick = onOpenDownloadsQueue,
-            ),
-        )
-        libraryCard.addRow(
-            createInteractiveRow(
-                icon = ModernIcons.categories(20) { Theme.TEXT_PRIMARY },
-                title = "Categorias",
-                desc = "Organize os mangás da sua biblioteca por status e coleções.",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
-                onClick = onOpenCategories,
-            ),
-        )
-        libraryCard.addRow(
-            createInteractiveRow(
-                icon = ModernIcons.statistics(20) { Theme.TEXT_PRIMARY },
-                title = "Estatísticas",
-                desc = "Visualize seu tempo total de leitura, obras lidas e progresso de capítulos.",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
-                onClick = onOpenStatistics,
-            ),
-        )
-        libraryCard.addRow(
-            createInteractiveRow(
-                icon = ModernIcons.bookmark(20) { Theme.TEXT_PRIMARY },
-                title = "Bookmarks e anotações",
-                desc = "Acesse todos os marcadores, notas e destaques salvos nos capítulos.",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
-                onClick = onOpenBookmarks,
-            ),
-        )
-        content.add(libraryCard)
-        content.add(Box.createVerticalStrut(24))
-
-        // --- SEÇÃO 3: Sistema & Preferências ---
-        addSectionHeader(
-            "Sistema & Preferências",
-            "Gerenciamento de armazenamento local, ajustes gerais do aplicativo e versão.",
-        )
-        val systemCard = SettingsGroupCard()
-        systemCard.addRow(
-            createInteractiveRow(
-                icon = ModernIcons.storage(20) { Theme.TEXT_PRIMARY },
-                title = "Dados e armazenamento",
-                desc = "Inspecione o uso de disco, limpe caches de capas e gerencie backups.",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                title = "Downloads",
+                desc = "Fila, armazenamento e cache",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
                 onClick = onOpenStorageManager,
             ),
         )
-        systemCard.addRow(
+        settingsCard.addRow(
             createInteractiveRow(
-                icon = ModernIcons.settings(20) { Theme.TEXT_PRIMARY },
-                title = "Configurações",
-                desc = "Personalize aparência, leitor, gráficos Traço Nitido, pastas e atalhos.",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
-                onClick = onOpenSettings,
+                icon = ModernIcons.storage(20) { Theme.TEXT_PRIMARY },
+                title = "Backup e Restauração",
+                desc = "Exportar e importar arquivos .zip",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
+                onClick = { onOpenSettingsCategory("storage") },
             ),
         )
-        systemCard.addRow(
+        settingsCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.browse(20) { Theme.TEXT_PRIMARY },
+                title = "Fontes",
+                desc = "Pasta local, repositórios e extensões",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
+                onClick = onOpenSources,
+            ),
+        )
+        settingsCard.addRow(
+            createInteractiveRow(
+                icon = ModernIcons.statistics(20) { Theme.TEXT_PRIMARY },
+                title = "Estatísticas",
+                desc = "Hábitos de leitura, Mihon Wrapped e recordes",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
+                onClick = onOpenStatistics,
+            ),
+        )
+        settingsCard.addRow(
             createInteractiveRow(
                 icon = ModernIcons.about(20) { Theme.TEXT_PRIMARY },
                 title = "Sobre",
-                desc = "Mihon Linux v0.3.0 • Port Desktop de Alta Performance",
-                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_MUTED }),
+                desc = "Versão 0.4.0 e informações",
+                rightComponent = JLabel(ModernIcons.chevronRight(16) { Theme.TEXT_SECONDARY }),
                 onClick = onOpenAbout,
             ),
         )
-        content.add(systemCard)
+        content.add(settingsCard)
 
         val wrapper = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
@@ -1664,7 +1592,6 @@ class MoreScreen(
             wrapper.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
-            offlineSwitch.repaint()
             incognitoSwitch.repaint()
             themeUpdaters.forEach { it.invoke() }
             repaint()

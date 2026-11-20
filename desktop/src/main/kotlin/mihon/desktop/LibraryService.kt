@@ -51,7 +51,13 @@ object LibraryCategory {
     private val listeners = mutableListOf<() -> Unit>()
 
     fun addChangeListener(listener: () -> Unit) {
-        synchronized(listeners) { listeners.add(listener) }
+        synchronized(listeners) {
+            if (listener !in listeners) listeners.add(listener)
+        }
+    }
+
+    fun removeChangeListener(listener: () -> Unit) {
+        synchronized(listeners) { listeners.remove(listener) }
     }
 
     private fun notifyChanged() {
@@ -165,12 +171,28 @@ class LibraryService(
     )
 
     val downloadQueue = java.util.concurrent.CopyOnWriteArrayList<DownloadQueueItem>()
+    private val downloadListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
+    fun addDownloadListener(listener: () -> Unit) {
+        if (listener !in downloadListeners) downloadListeners.add(listener)
+    }
+
+    fun removeDownloadListener(listener: () -> Unit) {
+        downloadListeners.remove(listener)
+    }
+
+    private fun notifyDownloadQueueChanged() {
+        downloadListeners.forEach { runCatching { it.invoke() } }
+    }
 
     fun clearCompletedDownloads() {
         downloadQueue.removeIf { it.isCompleted || it.hasError }
+        notifyDownloadQueueChanged()
     }
 
     fun isChapterDownloading(chapterId: Long): Boolean = chapterId in activeDownloads
+
+    fun activeDownloadCount(): Int = activeDownloads.size
 
     suspend fun library(): List<Manga> {
         val favs = mangas.getFavorites()
@@ -431,8 +453,28 @@ class LibraryService(
         return existingMatch ?: canonical
     }
 
-    fun isChapterDownloaded(manga: Manga, chapter: Chapter): Boolean =
-        manga.isLocal || chapterCbzFile(manga, chapter).let { it.exists() && it.length() > 0 }
+    private val downloadedChapterCache = ConcurrentHashMap<Long, Pair<Boolean, Long>>()
+    private val downloadCacheTtlMs = 10_000L
+
+    fun invalidateDownloadCache(chapterId: Long? = null) {
+        if (chapterId == null) {
+            downloadedChapterCache.clear()
+        } else {
+            downloadedChapterCache.remove(chapterId)
+        }
+    }
+
+    fun isChapterDownloaded(manga: Manga, chapter: Chapter): Boolean {
+        if (manga.isLocal) return true
+        val now = System.currentTimeMillis()
+        val cached = downloadedChapterCache[chapter.id]
+        if (cached != null && now - cached.second < downloadCacheTtlMs) {
+            return cached.first
+        }
+        val exists = chapterCbzFile(manga, chapter).let { it.exists() && it.length() > 0 }
+        downloadedChapterCache[chapter.id] = exists to now
+        return exists
+    }
 
     /**
      * Downloads all page images of [chapter] from [source] into a `.cbz` archive atomically.
@@ -454,6 +496,7 @@ class LibraryService(
 
             val queueItem = DownloadQueueItem(chapter.id, manga.title, chapter.name, "Conectando...")
             downloadQueue.add(queueItem)
+            notifyDownloadQueueChanged()
 
             val imageUrls = source.getChapterImages(chapter.url)
             require(imageUrls.isNotEmpty()) { "Nenhuma imagem encontrada para o capítulo '${chapter.name}'" }
@@ -476,6 +519,9 @@ class LibraryService(
                         } else {
                             "${idx + 1} / ${imageUrls.size} págs"
                         }
+                        if (idx == 0 || (idx + 1) % 3 == 0 || idx == imageUrls.lastIndex) {
+                            notifyDownloadQueueChanged()
+                        }
                         val cleanImgUrl = imgUrl.trim().replace(" ", "%20")
                         val ext = cleanImgUrl.substringBefore('?').substringAfterLast('.', "jpg")
                             .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "gif") } ?: "jpg"
@@ -484,7 +530,7 @@ class LibraryService(
                             .url(cleanImgUrl.toHttpUrl())
                             .header(
                                 "User-Agent",
-                                if (isMangaDex) "MihonLinux/0.3 (Linux Desktop)"
+                                if (isMangaDex) "MihonLinux/0.4 (Linux Desktop)"
                                 else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                             )
                             .header("Referer", if (isMangaDex) "https://mangadex.org/" else "${source.baseUrl}/")
@@ -518,6 +564,7 @@ class LibraryService(
                     partFile.copyTo(target, overwrite = true)
                     partFile.delete()
                 }
+                downloadedChapterCache[chapter.id] = true to System.currentTimeMillis()
                 queueItem.progress = "Concluído"
                 queueItem.isCompleted = true
                 return target
@@ -529,6 +576,7 @@ class LibraryService(
             } finally {
                 activeDownloads.remove(chapter.id)
                 chapterLocks.remove(chapter.id, lock)
+                notifyDownloadQueueChanged()
             }
         }
     }

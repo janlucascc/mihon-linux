@@ -317,9 +317,14 @@ class HttpScraperSource(
         val VOLUME_REGEX = Regex("""(?i)vol(?:ume)?\.?\s*(\d+)""")
         val CHAPTER_REGEX = Regex("""(?i)(?:ch(?:apter)?|cap(?:[ií]tulo)?)\.?\s*(\d+(?:\.\d+)?)""")
 
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .build()
+        private val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectionPool(okhttp3.ConnectionPool(4, 30, TimeUnit.SECONDS))
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+        }
+
+        fun defaultClient(): OkHttpClient = sharedClient
     }
 }

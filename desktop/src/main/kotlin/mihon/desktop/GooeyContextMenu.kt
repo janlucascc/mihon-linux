@@ -1,10 +1,12 @@
 package mihon.desktop
 
+import java.awt.AlphaComposite
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Component
 import java.awt.Cursor
 import java.awt.Font
+import java.awt.GradientPaint
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Point
@@ -16,34 +18,32 @@ import java.awt.event.MouseMotionAdapter
 import java.awt.geom.Ellipse2D
 import java.awt.geom.Path2D
 import java.awt.geom.RoundRectangle2D
+import java.awt.image.BufferedImage
 import javax.swing.JComponent
-import javax.swing.JLayeredPane
+import javax.swing.JRootPane
 import javax.swing.KeyStroke
+import javax.swing.RootPaneContainer
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import kotlin.math.PI
+import kotlin.math.acos
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Authentic 60 FPS GPU-accelerated Vector Gooey Menu (Lucas Bebber SVG Filter / Metaball Effect).
+ * High-FPS Vector Gooey Radial Menu (Analytical Metaball Bridges + Spring Physics).
  *
- * Optimized Architecture:
- * 1. 100% Vector Analytical Metaballs with Cubic Bézier Tangent Bridges:
- *    Calculated directly in Graphics2D with hardware-accelerated anti-aliasing.
- *    Eliminates heavy CPU pixel rasterization (no software Gaussian blur loops),
- *    yielding silky-smooth 60 FPS without frame drops or UI stuttering.
- *
- * 2. Theme Adaptation:
- *    Colors synchronize dynamically with the active theme:
- *    - AMOLED: Elegant Dark Surface pill/blobs with Theme.TEXT_PRIMARY high-contrast icons.
- *    - DARK: Sleek Graphite Slate.
- *    - MIDNIGHT_BLUE: Deep Navy Blue with Soft Blue glow.
- *    - LIGHT: Soft Material Off-white with crisp dark icons.
- *    - CUSTOM: Uses the user's custom accent, surface, and text colors.
+ * Performance Architecture:
+ * - Localized dirty-rectangle repaints (`repaintDirtyRegion()`): only repaints the ~380x380px
+ *   region around the radial menu instead of invalidating the entire window/reader canvas.
+ * - Pre-rendered soft glow sprites (zero per-frame `RadialGradientPaint` software rasterization).
+ * - Preallocated geometry (`Path2D.Double`, `Ellipse2D.Double`, `DoubleArray`) for zero GC churn.
+ * - Frame-rate independent `System.nanoTime()` spring simulation at 60 FPS (`Timer(16)`).
  */
 class GooeyContextMenu(
     private val items: List<GooeyMenuItem>,
@@ -54,6 +54,8 @@ class GooeyContextMenu(
         val label: String,
         val iconType: IconType,
         val isDanger: Boolean = false,
+        val isActive: Boolean = false,
+        val shortcutHint: String? = null,
         val onClick: () -> Unit,
     )
 
@@ -68,14 +70,20 @@ class GooeyContextMenu(
         MOVE_LEFT,
         MOVE_RIGHT,
         EDIT,
+        TRANSLATE,
+        BOOKMARK,
+        NOTE,
+        HIGHLIGHT,
+        BOOKMARKS_LIST,
+        COPY,
     }
 
     private class SpringValue(
         var value: Double = 0.0,
         var target: Double = 0.0,
         var velocity: Double = 0.0,
-        private val stiffness: Double = 260.0,
-        private val damping: Double = 18.0,
+        private val stiffness: Double = 380.0,
+        private val damping: Double = 20.0,
     ) {
         fun update(dt: Double): Boolean {
             val force = -stiffness * (value - target) - damping * velocity
@@ -88,27 +96,53 @@ class GooeyContextMenu(
             }
             return !settled
         }
+
+        fun snap(v: Double) {
+            value = v
+            target = v
+            velocity = 0.0
+        }
     }
 
     private var anchorX: Double = 0.0
     private var anchorY: Double = 0.0
-    private var arcCenterAngle: Double = PI / 2.0 // Default: fan downward/around like the video
+    private var arcCenterAngle: Double = PI / 2.0
+    private var totalArcSpan: Double = Math.toRadians(170.0)
+    private var fullCircleLayout: Boolean = false
+    private var orbitRadiusBase: Double = 80.0
 
-    private val hubScale = SpringValue(0.1, 1.0, stiffness = 300.0, damping = 18.0)
-    private val crossMorph = SpringValue(0.0, 1.0, stiffness = 260.0, damping = 19.0)
-    private val itemSprings = items.map { SpringValue(0.0, 0.0, stiffness = 230.0, damping = 15.0) }
-    private val hoverScales = items.map { SpringValue(1.0, 1.0, stiffness = 340.0, damping = 22.0) }
+    // Tight bounding box around the radial menu for fast localized repaints
+    private var dirtyX: Int = 0
+    private var dirtyY: Int = 0
+    private var dirtyW: Int = 0
+    private var dirtyH: Int = 0
+
+    private val hubScale = SpringValue(0.15, 1.0, stiffness = 420.0, damping = 22.0)
+    private val itemSprings = items.map { SpringValue(0.0, 0.0, stiffness = 360.0, damping = 18.5) }
+    private val hoverScales = items.map { SpringValue(1.0, 1.0, stiffness = 420.0, damping = 24.0) }
+    private val hoverPull = items.map { SpringValue(0.0, 0.0, stiffness = 400.0, damping = 24.0) }
+    private val labelAlpha = SpringValue(0.0, 0.0, stiffness = 380.0, damping = 28.0)
 
     private var hoveredIndex: Int = -1
+    private var lastDisplayedLabelIndex: Int = -1
     private var hubHovered: Boolean = false
     private var closing: Boolean = false
     private var pendingAction: (() -> Unit)? = null
-    private var elapsedTicks: Int = 0
-    private var hostLayeredPane: JLayeredPane? = null
+    private var openStartNanos: Long = 0L
+    private var lastTickNanos: Long = 0L
+    private var hostRootPane: JRootPane? = null
+    private var previousGlassPane: Component? = null
+
+    // Preallocated buffers & shapes for zero-allocation rendering
+    private val centersX = DoubleArray(items.size)
+    private val centersY = DoubleArray(items.size)
+    private val radii = DoubleArray(items.size)
+    private val reusableEllipse = Ellipse2D.Double()
+    private val reusableBridge = Path2D.Double()
 
     private val animTimer = Timer(16) {
         onTick()
-    }
+    }.apply { isCoalesce = true }
 
     init {
         isOpaque = false
@@ -131,93 +165,172 @@ class GooeyContextMenu(
             KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
             WHEN_IN_FOCUSED_WINDOW,
         )
+
+        addKeyListener(object : java.awt.event.KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (items.isEmpty() || closing) return
+                when (e.keyCode) {
+                    KeyEvent.VK_RIGHT, KeyEvent.VK_DOWN, KeyEvent.VK_TAB -> {
+                        val delta = if (e.isShiftDown && e.keyCode == KeyEvent.VK_TAB) -1 else 1
+                        hoveredIndex = Math.floorMod((if (hoveredIndex < 0) -1 else hoveredIndex) + delta, items.size)
+                        lastDisplayedLabelIndex = hoveredIndex
+                        ensureTimerRunning()
+                        repaintDirtyRegion()
+                        e.consume()
+                    }
+                    KeyEvent.VK_LEFT, KeyEvent.VK_UP -> {
+                        hoveredIndex = Math.floorMod((if (hoveredIndex < 0) 0 else hoveredIndex) - 1, items.size)
+                        lastDisplayedLabelIndex = hoveredIndex
+                        ensureTimerRunning()
+                        repaintDirtyRegion()
+                        e.consume()
+                    }
+                    KeyEvent.VK_ENTER, KeyEvent.VK_SPACE -> {
+                        if (hoveredIndex in items.indices) {
+                            val selected = items[hoveredIndex]
+                            closeMenu(selected.onClick)
+                        } else {
+                            closeMenu(null)
+                        }
+                        e.consume()
+                    }
+                }
+            }
+        })
     }
 
     fun showAt(invoker: Component, x: Int, y: Int) {
         val window = SwingUtilities.getWindowAncestor(invoker) ?: return
-        val layered = when (window) {
-            is javax.swing.JFrame -> window.layeredPane
-            is javax.swing.JDialog -> window.layeredPane
-            else -> null
-        } ?: return
+        val rootPane = (window as? RootPaneContainer)?.rootPane ?: return
 
-        // Remove any previous active GooeyContextMenu
-        layered.components.filterIsInstance<GooeyContextMenu>().forEach {
-            it.forceDismiss()
+        // Dismiss any active GooeyContextMenu cleanly so original glassPane is preserved
+        (rootPane.glassPane as? GooeyContextMenu)?.forceDismiss()
+
+        hostRootPane = rootPane
+        previousGlassPane = rootPane.glassPane
+
+        val pt = SwingUtilities.convertPoint(invoker, Point(x, y), rootPane)
+
+        // Adaptive radial geometry: balanced full ring for 5+ items, compact arc for 2-4 items
+        orbitRadiusBase = when {
+            items.size >= 7 -> 90.0
+            items.size >= 5 -> 82.0
+            else -> 76.0
+        }
+        val safeMargin = orbitRadiusBase + NODE_RADIUS + 34.0
+        val maxAnchorX = (rootPane.width - safeMargin).coerceAtLeast(safeMargin)
+        val maxAnchorY = (rootPane.height - safeMargin - 28.0).coerceAtLeast(safeMargin)
+        anchorX = pt.x.toDouble().coerceIn(safeMargin, maxAnchorX)
+        anchorY = pt.y.toDouble().coerceIn(safeMargin, maxAnchorY)
+
+        if (items.size >= 5) {
+            fullCircleLayout = true
+            totalArcSpan = 2.0 * PI
+            arcCenterAngle = -PI / 2.0 // Starts cleanly at 12 o'clock
+        } else {
+            fullCircleLayout = false
+            totalArcSpan = Math.toRadians(if (items.size <= 3) 136.0 else 168.0)
+            arcCenterAngle = if (pt.y > rootPane.height - 175) -PI / 2.0 else PI / 2.0
         }
 
-        hostLayeredPane = layered
-        setBounds(0, 0, layered.width, layered.height)
-
-        val pt = SwingUtilities.convertPoint(invoker, Point(x, y), layered)
-        val margin = 120.0
-        anchorX = pt.x.toDouble().coerceIn(margin, (layered.width - margin).coerceAtLeast(margin))
-        anchorY = pt.y.toDouble().coerceIn(85.0, (layered.height - 135.0).coerceAtLeast(85.0))
-
-        // Fan downward or upward based on bottom margin
-        arcCenterAngle = if (pt.y > layered.height - 165) -PI / 2.0 else PI / 2.0
+        // Precompute tight dirty repaint box (covers orbit, glow, shadows, and outer tooltip pill)
+        val padX = (orbitRadiusBase + NODE_RADIUS + 160.0).toInt()
+        val padY = (orbitRadiusBase + NODE_RADIUS + 96.0).toInt()
+        dirtyX = (anchorX.toInt() - padX).coerceAtLeast(0)
+        dirtyY = (anchorY.toInt() - padY).coerceAtLeast(0)
+        dirtyW = (anchorX.toInt() + padX).coerceAtMost(rootPane.width) - dirtyX
+        dirtyH = (anchorY.toInt() + padY).coerceAtMost(rootPane.height) - dirtyY
 
         closing = false
-        elapsedTicks = 0
-        hubScale.value = 0.15
-        hubScale.target = 1.0
-        crossMorph.value = 0.0
-        crossMorph.target = 1.0
-        itemSprings.forEach {
-            it.value = 0.0
-            it.target = 0.0
-            it.velocity = 0.0
+        hoveredIndex = -1
+        lastDisplayedLabelIndex = -1
+        hubHovered = false
+        openStartNanos = System.nanoTime()
+        lastTickNanos = openStartNanos
+
+        if (mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            hubScale.snap(0.22)
+            hubScale.target = 1.0
+            labelAlpha.snap(0.0)
+            itemSprings.forEach { it.snap(0.0) }
+            hoverScales.forEach { it.snap(1.0) }
+            hoverPull.forEach { it.snap(0.0) }
+        } else {
+            hubScale.snap(1.0)
+            labelAlpha.snap(0.0)
+            itemSprings.forEach { it.snap(1.0) }
+            hoverScales.forEach { it.snap(1.0) }
+            hoverPull.forEach { it.snap(0.0) }
         }
 
-        layered.add(this, JLayeredPane.POPUP_LAYER)
-        layered.moveToFront(this)
+        // Mount on JRootPane.glassPane so Swing's RepaintManager sets isOptimizedDrawingEnabled() = false
+        // and ALWAYS composites GooeyContextMenu strictly on top of underlying animations (zero flicker).
+        rootPane.glassPane = this
+        isVisible = true
+        rootPane.revalidate()
         requestFocusInWindow()
-        animTimer.start()
-        layered.repaint()
+        if (mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            animTimer.start()
+        }
+        repaintDirtyRegion()
+    }
+
+    private fun repaintDirtyRegion() {
+        if (dirtyW > 0 && dirtyH > 0) {
+            repaint(dirtyX, dirtyY, dirtyW, dirtyH)
+        } else {
+            repaint()
+        }
     }
 
     private fun onTick() {
-        elapsedTicks++
-        val dt = 0.016
+        val now = System.nanoTime()
+        val dt = ((now - lastTickNanos) / 1_000_000_000.0).coerceIn(0.005, 0.030)
+        lastTickNanos = now
+        val elapsedMs = (now - openStartNanos) / 1_000_000L
 
         if (!closing) {
-            // Staggered launch of each satellite node
+            // Crisp, unified liquid bloom (~14ms micro-stagger per satellite)
             items.indices.forEach { i ->
-                if (elapsedTicks >= i * 2 + 1) {
+                if (elapsedMs >= i * 14L) {
                     itemSprings[i].target = 1.0
                 }
             }
         } else {
-            // Snappier, instant retraction when closing
             items.indices.forEach { i ->
                 itemSprings[i].target = 0.0
             }
             hubScale.target = 0.0
-            crossMorph.target = 0.0
         }
 
         var moving = false
         if (hubScale.update(dt)) moving = true
-        if (crossMorph.update(dt)) moving = true
         itemSprings.forEach { if (it.update(dt)) moving = true }
         hoverScales.forEachIndexed { idx, spring ->
             spring.target = if (idx == hoveredIndex && !closing) 1.16 else 1.0
             if (spring.update(dt)) moving = true
         }
+        hoverPull.forEachIndexed { idx, spring ->
+            spring.target = if (idx == hoveredIndex && !closing) 5.5 else 0.0
+            if (spring.update(dt)) moving = true
+        }
+        labelAlpha.target = if (hoveredIndex in items.indices && !closing) 1.0 else 0.0
+        if (labelAlpha.update(dt)) moving = true
 
-        repaint()
+        repaintDirtyRegion()
 
-        if (closing && (!moving || hubScale.value <= 0.15)) {
+        if (closing && (!moving || hubScale.value <= 0.16)) {
             val action = pendingAction
             forceDismiss()
             action?.invoke()
-        } else if (!closing && !moving && elapsedTicks > 30) {
+        } else if (!closing && !moving && elapsedMs > items.size * 16L + 160L) {
             animTimer.stop()
         }
     }
 
     private fun ensureTimerRunning() {
         if (!animTimer.isRunning) {
+            lastTickNanos = System.nanoTime()
             animTimer.start()
         }
     }
@@ -225,32 +338,57 @@ class GooeyContextMenu(
     private fun closeMenu(afterClose: (() -> Unit)?) {
         if (closing) return
         closing = true
-        elapsedTicks = 0
         pendingAction = afterClose
         hoveredIndex = -1
         hubHovered = false
+        if (!mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            val action = pendingAction
+            forceDismiss()
+            action?.invoke()
+            return
+        }
         ensureTimerRunning()
     }
 
     fun forceDismiss() {
         animTimer.stop()
-        hostLayeredPane?.let {
-            it.remove(this)
-            it.repaint()
+        isVisible = false
+        val root = hostRootPane
+        val prev = previousGlassPane
+        hostRootPane = null
+        previousGlassPane = null
+        if (root != null) {
+            if (root.glassPane === this) {
+                if (prev != null && prev !== this) {
+                    root.glassPane = prev
+                    prev.isVisible = false
+                } else {
+                    root.glassPane = javax.swing.JPanel().apply { isOpaque = false; isVisible = false }
+                }
+            }
+            if (dirtyW > 0 && dirtyH > 0) {
+                root.repaint(dirtyX, dirtyY, dirtyW, dirtyH)
+            } else {
+                root.repaint()
+            }
+            SwingUtilities.getWindowAncestor(root)?.requestFocus()
         }
-        hostLayeredPane = null
     }
 
     private fun nodeAngle(index: Int): Double {
-        val totalSpan = Math.toRadians(168.0)
-        val start = arcCenterAngle + totalSpan / 2.0
-        val step = if (items.size > 1) totalSpan / (items.size - 1) else 0.0
-        return start - index * step
+        if (items.size <= 1) return arcCenterAngle
+        return if (fullCircleLayout) {
+            arcCenterAngle + (2.0 * PI * index) / items.size
+        } else {
+            val start = arcCenterAngle + totalArcSpan / 2.0
+            val step = totalArcSpan / (items.size - 1)
+            start - index * step
+        }
     }
 
     private fun nodeCenter(index: Int): Pair<Double, Double> {
         val progress = itemSprings[index].value
-        val orbitRadius = 80.0 * progress
+        val orbitRadius = orbitRadiusBase * progress + hoverPull[index].value * progress.coerceIn(0.0, 1.0)
         val angle = nodeAngle(index)
         val nx = anchorX + cos(angle) * orbitRadius
         val ny = anchorY + sin(angle) * orbitRadius
@@ -267,7 +405,7 @@ class GooeyContextMenu(
             for (i in items.indices) {
                 val (nx, ny) = nodeCenter(i)
                 val r = NODE_RADIUS * hoverScales[i].value
-                if (hypot(pt.x - nx, pt.y - ny) <= r + 4) {
+                if (hypot(pt.x - nx, pt.y - ny) <= r + 5) {
                     newHovered = i
                     break
                 }
@@ -276,14 +414,23 @@ class GooeyContextMenu(
 
         if (newHovered != hoveredIndex || newHubHover != hubHovered) {
             hoveredIndex = newHovered
+            if (newHovered >= 0) {
+                lastDisplayedLabelIndex = newHovered
+            }
             hubHovered = newHubHover
             cursor = if (hoveredIndex >= 0 || hubHovered) {
                 Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             } else {
                 Cursor.getDefaultCursor()
             }
-            ensureTimerRunning()
-            repaint()
+            if (mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+                ensureTimerRunning()
+            } else {
+                hoverScales.forEachIndexed { idx, s -> s.snap(if (idx == hoveredIndex) 1.14 else 1.0) }
+                hoverPull.forEachIndexed { idx, s -> s.snap(if (idx == hoveredIndex) 4.0 else 0.0) }
+                labelAlpha.snap(if (hoveredIndex >= 0) 1.0 else 0.0)
+            }
+            repaintDirtyRegion()
         }
     }
 
@@ -293,7 +440,7 @@ class GooeyContextMenu(
         for (i in items.indices) {
             val (nx, ny) = nodeCenter(i)
             val r = NODE_RADIUS * hoverScales[i].value
-            if (hypot(pt.x - nx, pt.y - ny) <= r + 5) {
+            if (hypot(pt.x - nx, pt.y - ny) <= r + 6) {
                 closeMenu(items[i].onClick)
                 return
             }
@@ -301,23 +448,20 @@ class GooeyContextMenu(
 
         val distHub = hypot(pt.x - anchorX, pt.y - anchorY)
         if (distHub <= HUB_RADIUS + 4) {
-            // Clicked directly on the central X button -> close smoothly
             closeMenu(null)
             return
         }
 
-        // Clicked outside the menu!
-        // Immediately dismiss the blocking overlay so the underlying click/selection/right-click is instant,
-        // without waiting for any delay.
-        val host = hostLayeredPane
+        // Clicked outside -> dismiss immediately and forward right-clicks to reopen cleanly at new position
+        val root = hostRootPane
         forceDismiss()
 
-        // Redispatch the event to the component underneath (e.g. library grid for immediate re-opening or selection)
-        if (host != null && originalEvent != null) {
+        if (root != null && originalEvent != null && originalEvent.isPopupTrigger) {
             val screenPt = originalEvent.locationOnScreen
-            val deep = SwingUtilities.getDeepestComponentAt(host, pt.x, pt.y)
+            val contentPt = SwingUtilities.convertPoint(root, pt, root.contentPane)
+            val deep = SwingUtilities.getDeepestComponentAt(root.contentPane, contentPt.x, contentPt.y)
             if (deep != null && deep !== this) {
-                val localPt = SwingUtilities.convertPoint(host, pt, deep)
+                val localPt = SwingUtilities.convertPoint(root.contentPane, contentPt, deep)
                 deep.dispatchEvent(
                     MouseEvent(
                         deep,
@@ -337,85 +481,122 @@ class GooeyContextMenu(
         }
     }
 
-    /**
-     * Resolves palette colors in full harmony with the active Theme:
-     */
     private data class GooeyPalette(
-        val blobBg: Color,
-        val blobHoverBg: Color,
+        val blobTop: Color,
+        val blobBottom: Color,
+        val blobHoverTop: Color,
+        val blobHoverBottom: Color,
         val iconColor: Color,
-        val hubBg: Color,
+        val hubTop: Color,
+        val hubBottom: Color,
+        val bridgeColor: Color,
         val dangerBg: Color,
         val dangerIcon: Color,
-        val shadowColor: Color,
+        val shadowAmbient: Color,
+        val shadowContact: Color,
+        val rimHighlight: Color,
         val outlineColor: Color,
+        val glowColor: Color,
+        val pillBg: Color,
+        val keycapBg: Color,
+    )
+
+    private fun shiftBrightness(c: Color, delta: Int): Color = Color(
+        (c.red + delta).coerceIn(0, 255),
+        (c.green + delta).coerceIn(0, 255),
+        (c.blue + delta).coerceIn(0, 255),
+        c.alpha,
     )
 
     private fun resolveThemePalette(): GooeyPalette {
         val dark = Theme.isDark
         val preset = Theme.currentPreset
+        val accent = Theme.PRIMARY
 
         return when {
             preset == Theme.ThemePreset.CUSTOM -> {
                 GooeyPalette(
-                    blobBg = Theme.BG_SURFACE,
-                    blobHoverBg = Theme.BG_CARD_HOVER,
+                    blobTop = shiftBrightness(Theme.BG_SURFACE, if (dark) 12 else 0),
+                    blobBottom = Theme.BG_SURFACE,
+                    blobHoverTop = shiftBrightness(Theme.BG_CARD_HOVER, if (dark) 16 else -4),
+                    blobHoverBottom = Theme.BG_CARD_HOVER,
                     iconColor = Theme.TEXT_PRIMARY,
-                    hubBg = Theme.ACCENT,
+                    hubTop = shiftBrightness(accent, 18),
+                    hubBottom = shiftBrightness(accent, -16),
+                    bridgeColor = Theme.BG_SURFACE,
                     dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(0, 0, 0, 95),
-                    outlineColor = Color(Theme.BORDER_SUBTLE.red, Theme.BORDER_SUBTLE.green, Theme.BORDER_SUBTLE.blue, 65),
+                    shadowAmbient = Color(0, 0, 0, 56),
+                    shadowContact = Color(0, 0, 0, 92),
+                    rimHighlight = Color(255, 255, 255, if (dark) 52 else 180),
+                    outlineColor = Color(Theme.BORDER_SUBTLE.red, Theme.BORDER_SUBTLE.green, Theme.BORDER_SUBTLE.blue, 85),
+                    glowColor = Color(accent.red, accent.green, accent.blue, 96),
+                    pillBg = Theme.BG_SURFACE,
+                    keycapBg = Color(255, 255, 255, if (dark) 24 else 18),
                 )
             }
             preset == Theme.ThemePreset.MIDNIGHT_BLUE -> {
                 GooeyPalette(
-                    blobBg = Color(0x18, 0x24, 0x38),
-                    blobHoverBg = Color(0x24, 0x36, 0x54),
+                    blobTop = Color(0x21, 0x31, 0x4C),
+                    blobBottom = Color(0x16, 0x22, 0x36),
+                    blobHoverTop = Color(0x2E, 0x44, 0x6A),
+                    blobHoverBottom = Color(0x20, 0x32, 0x50),
                     iconColor = Color(0xF0, 0xF6, 0xFC),
-                    hubBg = Color(0x28, 0x5C, 0x9B),
-                    dangerBg = Color(0xE0, 0x3E, 0x4E),
-                    dangerIcon = Color.WHITE,
-                    shadowColor = Color(5, 10, 20, 130),
-                    outlineColor = Color(112, 180, 255, 60),
-                )
-            }
-            preset == Theme.ThemePreset.DARK -> {
-                GooeyPalette(
-                    blobBg = Color(0x20, 0x21, 0x26),
-                    blobHoverBg = Color(0x2E, 0x30, 0x3A),
-                    iconColor = Color(0xEA, 0xEB, 0xF2),
-                    hubBg = Theme.PRIMARY,
+                    hubTop = shiftBrightness(accent, 22),
+                    hubBottom = shiftBrightness(accent, -18),
+                    bridgeColor = Color(0x1E, 0x2D, 0x47),
                     dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(0, 0, 0, 125),
-                    outlineColor = Color(255, 255, 255, 34),
+                    shadowAmbient = Color(4, 8, 18, 66),
+                    shadowContact = Color(4, 8, 18, 118),
+                    rimHighlight = Color(190, 210, 255, 58),
+                    outlineColor = Color(129, 140, 248, 72),
+                    glowColor = Color(accent.red, accent.green, accent.blue, 108),
+                    pillBg = Color(0x16, 0x22, 0x36, 244),
+                    keycapBg = Color(255, 255, 255, 26),
                 )
             }
             !dark -> {
-                // Mihon Light theme
                 GooeyPalette(
-                    blobBg = Color(0xFF, 0xFF, 0xFF),
-                    blobHoverBg = Color(0xEE, 0xEF, 0xF7),
-                    iconColor = Color(0x16, 0x17, 0x22),
-                    hubBg = Theme.PRIMARY,
+                    blobTop = Color(0xFF, 0xFF, 0xFF),
+                    blobBottom = Color(0xF2, 0xF3, 0xF8),
+                    blobHoverTop = Color(0xF0, 0xF1, 0xFA),
+                    blobHoverBottom = Color(0xE4, 0xE6, 0xF4),
+                    iconColor = Color(0x18, 0x1A, 0x26),
+                    hubTop = shiftBrightness(accent, 18),
+                    hubBottom = shiftBrightness(accent, -14),
+                    bridgeColor = Color(0xF5, 0xF6, 0xFB),
                     dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(22, 23, 34, 48),
-                    outlineColor = Color(22, 23, 34, 28),
+                    shadowAmbient = Color(18, 22, 38, 26),
+                    shadowContact = Color(18, 22, 38, 48),
+                    rimHighlight = Color(255, 255, 255, 220),
+                    outlineColor = Color(24, 26, 38, 30),
+                    glowColor = Color(accent.red, accent.green, accent.blue, 68),
+                    pillBg = Color(0xFF, 0xFF, 0xFF, 248),
+                    keycapBg = Color(24, 26, 38, 18),
                 )
             }
             else -> {
-                // AMOLED
+                val isAmoled = preset == Theme.ThemePreset.AMOLED
                 GooeyPalette(
-                    blobBg = Color(0x14, 0x15, 0x1B),
-                    blobHoverBg = Color(0x22, 0x24, 0x2E),
-                    iconColor = Color.WHITE,
-                    hubBg = Theme.PRIMARY,
+                    blobTop = if (isAmoled) Color(0x20, 0x22, 0x2C) else Color(0x2B, 0x2D, 0x36),
+                    blobBottom = if (isAmoled) Color(0x12, 0x13, 0x19) else Color(0x1D, 0x1E, 0x25),
+                    blobHoverTop = Color(0x36, 0x39, 0x48),
+                    blobHoverBottom = Color(0x27, 0x29, 0x35),
+                    iconColor = Color(0xF2, 0xF4, 0xFA),
+                    hubTop = shiftBrightness(accent, 22),
+                    hubBottom = shiftBrightness(accent, -18),
+                    bridgeColor = if (isAmoled) Color(0x1C, 0x1E, 0x28) else Color(0x26, 0x28, 0x33),
                     dangerBg = Theme.DANGER,
                     dangerIcon = Color.WHITE,
-                    shadowColor = Color(0, 0, 0, 145),
-                    outlineColor = Color(255, 255, 255, 34),
+                    shadowAmbient = Color(0, 0, 0, 68),
+                    shadowContact = Color(0, 0, 0, 124),
+                    rimHighlight = Color(255, 255, 255, 52),
+                    outlineColor = Color(255, 255, 255, 38),
+                    glowColor = Color(accent.red, accent.green, accent.blue, 112),
+                    pillBg = Color(0x18, 0x1A, 0x22, 246),
+                    keycapBg = Color(255, 255, 255, 26),
                 )
             }
         }
@@ -429,18 +610,9 @@ class GooeyContextMenu(
         g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
 
         val palette = resolveThemePalette()
-
-        // Soft backdrop dim
         val openProgress = hubScale.value.coerceIn(0.0, 1.0).toFloat()
-        val dimAlpha = if (Theme.isDark) (55 * openProgress).toInt() else (35 * openProgress).toInt()
-        g2.color = Color(0, 0, 0, dimAlpha)
-        g2.fillRect(0, 0, width, height)
 
-        val currentHubR = HUB_RADIUS * hubScale.value * (if (hubHovered) 1.07 else 1.0)
-        val centersX = DoubleArray(items.size)
-        val centersY = DoubleArray(items.size)
-        val radii = DoubleArray(items.size)
-
+        val currentHubR = HUB_RADIUS * hubScale.value * (if (hubHovered) 1.08 else 1.0)
         for (i in items.indices) {
             val (nx, ny) = nodeCenter(i)
             centersX[i] = nx
@@ -449,28 +621,59 @@ class GooeyContextMenu(
             radii[i] = NODE_RADIUS * min(1.0, p * 1.15) * hoverScales[i].value
         }
 
-        // 1. Draw Liquid Drop Shadow (offset +3px Y)
-        val shadowG = g2.create() as Graphics2D
-        shadowG.translate(0.0, 3.5)
-        shadowG.color = palette.shadowColor
-        renderLiquidMesh(shadowG, centersX, centersY, radii, currentHubR)
-        shadowG.dispose()
+        // 1. Pre-rendered soft ambient halo sprites (hardware-fast, zero RadialGradientPaint per frame)
+        if (currentHubR > 4.0) {
+            drawGlowSprite(g2, anchorX.toFloat(), anchorY.toFloat(), (currentHubR * 2.7).toFloat(), palette.glowColor, openProgress * 0.65f)
+        }
+        if (hoveredIndex in items.indices && !closing && radii[hoveredIndex] > 4.0) {
+            val glowTint = if (items[hoveredIndex].isDanger) palette.dangerBg else palette.glowColor
+            drawGlowSprite(
+                g2,
+                centersX[hoveredIndex].toFloat(),
+                centersY[hoveredIndex].toFloat(),
+                (radii[hoveredIndex] * 2.35).toFloat(),
+                glowTint,
+                0.55f,
+            )
+        }
 
-        // 2. Draw Solid Liquid Body (Metaball circles + seamless Bezier bridges)
-        renderLiquidMesh(g2, centersX, centersY, radii, currentHubR, palette = palette)
+        // 2. Dual-layer liquid drop shadow
+        paintShadowPass(g2, 0.0, 6.0, 1.04, palette.shadowAmbient, currentHubR)
+        paintShadowPass(g2, 0.0, 2.2, 1.01, palette.shadowContact, currentHubR)
 
-        // 4. Draw Satellite Icons
+        // 3. Analytical Vector Gooey Metaball Bridges (elastic liquid necks)
+        drawMetaballBridges(g2, currentHubR, palette)
+
+        // 4. Satellite liquid glass orbs
+        for (i in items.indices) {
+            val r = radii[i]
+            if (r > 1.2) {
+                drawSatelliteOrb(g2, i, centersX[i], centersY[i], r, palette)
+            }
+        }
+
+        // 5. Central Hub Orb
+        if (currentHubR > 1.2) {
+            drawHubOrb(g2, anchorX, anchorY, currentHubR, palette)
+        }
+
+        // 6. Satellite Icons
         val cx = anchorX.toFloat()
         val cy = anchorY.toFloat()
-
         items.forEachIndexed { idx, item ->
             val progress = itemSprings[idx].value.toFloat()
-            if (progress > 0.12f) {
+            if (progress > 0.16f) {
                 val nx = centersX[idx].toFloat()
                 val ny = centersY[idx].toFloat()
-                val alpha = ((progress - 0.12f) / 0.88f).coerceIn(0f, 1f)
-                val scale = hoverScales[idx].value.toFloat() * progress.coerceAtMost(1.05f)
-                val iconColor = if (item.isDanger && idx == hoveredIndex) palette.dangerIcon else palette.iconColor
+                val alpha = ((progress - 0.16f) / 0.84f).coerceIn(0f, 1f)
+                val scale = hoverScales[idx].value.toFloat() * progress.coerceAtMost(1.04f)
+                val isHov = idx == hoveredIndex
+                val iconColor = when {
+                    item.isDanger && isHov -> palette.dangerIcon
+                    item.isDanger -> Color(palette.dangerBg.red, palette.dangerBg.green, palette.dangerBg.blue)
+                    item.isActive -> Color.WHITE
+                    else -> palette.iconColor
+                }
                 drawSatelliteIcon(
                     g2 = g2,
                     cx = nx,
@@ -479,74 +682,121 @@ class GooeyContextMenu(
                     alpha = alpha,
                     type = item.iconType,
                     color = iconColor,
-                    hovered = idx == hoveredIndex,
+                    hovered = isHov,
+                    active = item.isActive,
                 )
             }
         }
 
-        // 5. Draw Central Hub Morph Icon (≡ -> ✕)
+        // 7. Central Hub Clean Rotating Close Icon (✕) — zero morph artifacts
         val hubS = hubScale.value.toFloat().coerceAtLeast(0f)
-        if (hubS > 0.08f) {
-            drawHubMorphIcon(g2, cx, cy, hubS, crossMorph.value.toFloat().coerceIn(0f, 1f), Color.WHITE)
+        if (hubS > 0.1f) {
+            drawHubCloseIcon(g2, cx, cy, hubS, openProgress, Color.WHITE)
         }
 
-        // 6. Floating Tooltip Pill for hovered option
-        if (hoveredIndex in items.indices && !closing) {
-            val item = items[hoveredIndex]
-            val nx = centersX[hoveredIndex].toFloat()
-            val ny = centersY[hoveredIndex].toFloat()
-            drawFloatingLabelPill(g2, item.label, nx, ny, item.isDanger, palette)
-        } else if (!closing && openProgress > 0.85f) {
-            drawFloatingHintPill(g2, "Selecione uma ação", cx, (cy - HUB_RADIUS - 20).toFloat(), palette)
+        // 8. Floating Tooltip Pill with Shortcut Keycap
+        val pillAlpha = labelAlpha.value.toFloat().coerceIn(0f, 1f)
+        if (pillAlpha > 0.03f && lastDisplayedLabelIndex in items.indices && !closing) {
+            val idx = if (hoveredIndex in items.indices) hoveredIndex else lastDisplayedLabelIndex
+            val item = items[idx]
+            val nx = centersX[idx].toFloat()
+            val ny = centersY[idx].toFloat()
+            drawFloatingLabelPill(g2, item, nx, ny, pillAlpha, palette)
         }
 
         g2.dispose()
     }
 
-    private val reusableEllipse = Ellipse2D.Double()
+    private fun drawGlowSprite(g2: Graphics2D, cx: Float, cy: Float, radius: Float, tint: Color, alphaScale: Float) {
+        if (radius <= 2f || alphaScale <= 0.02f) return
+        val sprite = getOrCreateGlowSprite(tint)
+        val prevComp = g2.composite
+        g2.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alphaScale.coerceIn(0f, 1f))
+        val size = (radius * 2f).toInt()
+        g2.drawImage(sprite, (cx - radius).toInt(), (cy - radius).toInt(), size, size, null)
+        g2.composite = prevComp
+    }
 
-    /**
-     * Renders each circular action button independently with smooth drop shadow.
-     * All bridge connections between buttons have been removed for a clean, detached floating layout.
-     */
-    private fun renderLiquidMesh(
+    private fun paintShadowPass(
         g2: Graphics2D,
-        centersX: DoubleArray,
-        centersY: DoubleArray,
-        radii: DoubleArray,
+        offsetX: Double,
+        offsetY: Double,
+        scaleR: Double,
+        color: Color,
         currentHubR: Double,
-        palette: GooeyPalette? = null,
     ) {
-        // Satellite circles
+        val sg = g2.create() as Graphics2D
+        sg.translate(offsetX, offsetY)
+        sg.color = color
         for (i in items.indices) {
-            val r = radii[i]
-            if (r > 1.0) {
-                if (palette != null) {
-                    g2.color = when {
-                        items[i].isDanger && hoveredIndex == i -> palette.dangerBg
-                        hoveredIndex == i -> palette.blobHoverBg
-                        else -> palette.blobBg
-                    }
-                }
+            val r = radii[i] * scaleR
+            if (r > 1.2) {
                 reusableEllipse.setFrame(centersX[i] - r, centersY[i] - r, r * 2.0, r * 2.0)
-                g2.fill(reusableEllipse)
+                sg.fill(reusableEllipse)
             }
         }
-
-        // Central hub circle
-        if (currentHubR > 1.0) {
-            if (palette != null) {
-                g2.color = palette.hubBg
-            }
-            reusableEllipse.setFrame(anchorX - currentHubR, anchorY - currentHubR, currentHubR * 2.0, currentHubR * 2.0)
-            g2.fill(reusableEllipse)
+        if (currentHubR > 1.2) {
+            val hr = currentHubR * scaleR
+            reusableEllipse.setFrame(anchorX - hr, anchorY - hr, hr * 2.0, hr * 2.0)
+            sg.fill(reusableEllipse)
         }
+        sg.dispose()
     }
 
     /**
-     * Analytical Metaball tangent Bézier bridge between two circles.
+     * Analytical vector metaball bridges:
+     * Renders genuinely visible molten liquid necks connecting the central hub and satellites
+     * during elastic bloom, retraction, and hovered magnetic tension.
      */
-    private fun drawMetaballBridge(
+    private fun drawMetaballBridges(g2: Graphics2D, currentHubR: Double, palette: GooeyPalette) {
+        if (currentHubR <= 2.0) return
+
+        for (i in items.indices) {
+            val r2 = radii[i]
+            if (r2 <= 2.0) continue
+            val isHov = i == hoveredIndex && !closing
+            // Generous liquid reach so the gooey neck stretches visibly during bloom and stays subtly tethered on hover
+            val extraReach = if (isHov) 54.0 else 44.0
+            val maxDist = currentHubR + r2 + extraReach
+            val d = hypot(centersX[i] - anchorX, centersY[i] - anchorY)
+            val minDist = kotlin.math.abs(currentHubR - r2) + 1.0
+            if (d > minDist && d < maxDist) {
+                val tension = (1.0 - (d - minDist) / (maxDist - minDist)).coerceIn(0.0, 1.0)
+                // Smooth sqrt curve keeps the bridge richly visible before snapping cleanly
+                val alpha = (sqrt(tension) * (if (isHov) 210.0 else 235.0)).toInt().coerceIn(0, 235)
+                if (alpha > 10) {
+                    val cStart = Color(palette.hubBottom.red, palette.hubBottom.green, palette.hubBottom.blue, alpha)
+                    val endBase = when {
+                        items[i].isDanger && isHov -> palette.dangerBg
+                        isHov -> palette.blobHoverBottom
+                        else -> palette.bridgeColor
+                    }
+                    val cEnd = Color(endBase.red, endBase.green, endBase.blue, alpha)
+                    fillMetaballBridge(
+                        g2 = g2,
+                        x1 = anchorX,
+                        y1 = anchorY,
+                        r1 = currentHubR * 0.95,
+                        x2 = centersX[i],
+                        y2 = centersY[i],
+                        r2 = r2 * 0.95,
+                        v = 0.45 + 0.30 * tension,
+                        handleScale = 2.25,
+                        paint = GradientPaint(
+                            anchorX.toFloat(),
+                            anchorY.toFloat(),
+                            cStart,
+                            centersX[i].toFloat(),
+                            centersY[i].toFloat(),
+                            cEnd,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun fillMetaballBridge(
         g2: Graphics2D,
         x1: Double,
         y1: Double,
@@ -554,101 +804,167 @@ class GooeyContextMenu(
         x2: Double,
         y2: Double,
         r2: Double,
-        maxDist: Double,
+        v: Double,
+        handleScale: Double,
+        paint: java.awt.Paint,
     ) {
         val d = hypot(x2 - x1, y2 - y1)
-        if (d <= kotlin.math.abs(r1 - r2) || d > maxDist || r1 <= 1.0 || r2 <= 1.0) return
-
-        val v = 0.52
-        val handleLenRate = 2.2
+        if (d <= 0.001 || d <= kotlin.math.abs(r1 - r2)) return
 
         val u1: Double
         val u2: Double
         if (d < r1 + r2) {
-            u1 = kotlin.math.acos(((r1 * r1 + d * d - r2 * r2) / (2.0 * r1 * d)).coerceIn(-1.0, 1.0))
-            u2 = kotlin.math.acos(((r2 * r2 + d * d - r1 * r1) / (2.0 * r2 * d)).coerceIn(-1.0, 1.0))
+            u1 = acos(((r1 * r1 + d * d - r2 * r2) / (2.0 * r1 * d)).coerceIn(-1.0, 1.0))
+            u2 = acos(((r2 * r2 + d * d - r1 * r1) / (2.0 * r2 * d)).coerceIn(-1.0, 1.0))
         } else {
             u1 = 0.0
             u2 = 0.0
         }
 
-        val angleBetween = kotlin.math.atan2(y2 - y1, x2 - x1)
-        val maxSpread = kotlin.math.acos(((r1 - r2) / d).coerceIn(-1.0, 1.0))
+        val angleBetween = atan2(y2 - y1, x2 - x1)
+        val maxSpread = acos(((r1 - r2) / d).coerceIn(-1.0, 1.0))
 
-        val angle1a = angleBetween + u1 + (maxSpread - u1) * v
-        val angle1b = angleBetween - u1 - (maxSpread - u1) * v
-        val angle2a = angleBetween + PI - u2 - (PI - u2 - maxSpread) * v
-        val angle2b = angleBetween - PI + u2 + (PI - u2 - maxSpread) * v
+        val angle1 = angleBetween + u1 + (maxSpread - u1) * v
+        val angle2 = angleBetween - u1 - (maxSpread - u1) * v
+        val angle3 = angleBetween + PI - u2 - (PI - u2 - maxSpread) * v
+        val angle4 = angleBetween - PI + u2 + (PI - u2 - maxSpread) * v
 
-        val p1aX = x1 + cos(angle1a) * r1
-        val p1aY = y1 + sin(angle1a) * r1
-        val p1bX = x1 + cos(angle1b) * r1
-        val p1bY = y1 + sin(angle1b) * r1
-        val p2aX = x2 + cos(angle2a) * r2
-        val p2aY = y2 + sin(angle2a) * r2
-        val p2bX = x2 + cos(angle2b) * r2
-        val p2bY = y2 + sin(angle2b) * r2
+        val p1x = x1 + cos(angle1) * r1
+        val p1y = y1 + sin(angle1) * r1
+        val p2x = x1 + cos(angle2) * r1
+        val p2y = y1 + sin(angle2) * r1
+        val p3x = x2 + cos(angle3) * r2
+        val p3y = y2 + sin(angle3) * r2
+        val p4x = x2 + cos(angle4) * r2
+        val p4y = y2 + sin(angle4) * r2
 
         val totalRadius = r1 + r2
-        var d2 = min(v * handleLenRate, hypot(p1aX - p2aX, p1aY - p2aY) / totalRadius)
-        d2 *= min(1.0, (d * 2.0) / totalRadius)
-
+        val d2Base = min(v * handleScale, hypot(p1x - p3x, p1y - p3y) / totalRadius)
+        val d2 = d2Base * min(1.0, d * 2.0 / totalRadius)
         val h1 = r1 * d2
         val h2 = r2 * d2
 
-        val path = Path2D.Double()
-        path.moveTo(p1aX, p1aY)
-        path.curveTo(
-            p1aX + cos(angle1a - PI / 2.0) * h1,
-            p1aY + sin(angle1a - PI / 2.0) * h1,
-            p2aX + cos(angle2a + PI / 2.0) * h2,
-            p2aY + sin(angle2a + PI / 2.0) * h2,
-            p2aX,
-            p2aY,
-        )
-        path.lineTo(p2bX, p2bY)
-        path.curveTo(
-            p2bX + cos(angle2b - PI / 2.0) * h2,
-            p2bY + sin(angle2b - PI / 2.0) * h2,
-            p1bX + cos(angle1b + PI / 2.0) * h1,
-            p1bY + sin(angle1b + PI / 2.0) * h1,
-            p1bX,
-            p1bY,
-        )
-        path.closePath()
-        g2.fill(path)
+        val c1x = p1x + cos(angle1 - PI / 2.0) * h1
+        val c1y = p1y + sin(angle1 - PI / 2.0) * h1
+        val c3x = p3x + cos(angle3 + PI / 2.0) * h2
+        val c3y = p3y + sin(angle3 + PI / 2.0) * h2
+        val c4x = p4x + cos(angle4 - PI / 2.0) * h2
+        val c4y = p4y + sin(angle4 - PI / 2.0) * h2
+        val c2x = p2x + cos(angle2 + PI / 2.0) * h1
+        val c2y = p2y + sin(angle2 + PI / 2.0) * h1
+
+        reusableBridge.reset()
+        reusableBridge.moveTo(p1x, p1y)
+        reusableBridge.curveTo(c1x, c1y, c3x, c3y, p3x, p3y)
+        reusableBridge.lineTo(p4x, p4y)
+        reusableBridge.curveTo(c4x, c4y, c2x, c2y, p2x, p2y)
+        reusableBridge.closePath()
+
+        val prevPaint = g2.paint
+        g2.paint = paint
+        g2.fill(reusableBridge)
+        g2.paint = prevPaint
     }
 
-    private fun drawHubMorphIcon(g2: Graphics2D, cx: Float, cy: Float, scale: Float, morph: Float, color: Color) {
-        val g = g2.create() as Graphics2D
-        g.translate(cx.toDouble(), cy.toDouble())
-        g.scale(scale.toDouble(), scale.toDouble())
-        g.color = color
-        g.stroke = BasicStroke(2.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+    private fun drawSatelliteOrb(
+        g2: Graphics2D,
+        index: Int,
+        cx: Double,
+        cy: Double,
+        r: Double,
+        palette: GooeyPalette,
+    ) {
+        val item = items[index]
+        val isHov = index == hoveredIndex && !closing
 
-        val halfW = 10f
-        val offset = 6.5f * (1f - morph)
-        val angle = (morph * (PI / 4.0)).toFloat()
-
-        val gTop = g.create() as Graphics2D
-        gTop.translate(0.0, (-offset).toDouble())
-        gTop.rotate(angle.toDouble())
-        gTop.drawLine((-halfW).toInt(), 0, halfW.toInt(), 0)
-        gTop.dispose()
-
-        if (morph < 0.85f) {
-            val midW = (halfW * (1f - morph / 0.85f)).toInt()
-            if (midW > 0) {
-                g.drawLine(-midW, 0, midW, 0)
+        val topCol: Color
+        val botCol: Color
+        when {
+            item.isDanger && isHov -> {
+                topCol = shiftBrightness(palette.dangerBg, 16)
+                botCol = shiftBrightness(palette.dangerBg, -14)
+            }
+            item.isActive -> {
+                topCol = shiftBrightness(Theme.PRIMARY, if (isHov) 24 else 12)
+                botCol = shiftBrightness(Theme.PRIMARY, if (isHov) -8 else -18)
+            }
+            isHov -> {
+                topCol = palette.blobHoverTop
+                botCol = palette.blobHoverBottom
+            }
+            else -> {
+                topCol = palette.blobTop
+                botCol = palette.blobBottom
             }
         }
 
-        val gBot = g.create() as Graphics2D
-        gBot.translate(0.0, offset.toDouble())
-        gBot.rotate((-angle).toDouble())
-        gBot.drawLine((-halfW).toInt(), 0, halfW.toInt(), 0)
-        gBot.dispose()
+        reusableEllipse.setFrame(cx - r, cy - r, r * 2.0, r * 2.0)
+        val prevPaint = g2.paint
+        g2.paint = GradientPaint(cx.toFloat(), (cy - r).toFloat(), topCol, cx.toFloat(), (cy + r).toFloat(), botCol)
+        g2.fill(reusableEllipse)
 
+        val rimStrokeColor = when {
+            item.isDanger && isHov -> Color(255, 255, 255, 130)
+            isHov -> Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 215)
+            item.isActive -> Color(255, 255, 255, 110)
+            else -> palette.outlineColor
+        }
+        g2.paint = GradientPaint(
+            cx.toFloat(),
+            (cy - r).toFloat(),
+            if (isHov) rimStrokeColor else palette.rimHighlight,
+            cx.toFloat(),
+            (cy + r).toFloat(),
+            rimStrokeColor,
+        )
+        g2.stroke = BasicStroke(if (isHov) 1.75f else 1.15f)
+        g2.draw(reusableEllipse)
+        g2.paint = prevPaint
+
+        if (item.isActive && !isHov) {
+            val dotR = 3.5
+            val dx = cx + r * 0.62
+            val dy = cy - r * 0.62
+            g2.color = Theme.SUCCESS
+            reusableEllipse.setFrame(dx - dotR, dy - dotR, dotR * 2.0, dotR * 2.0)
+            g2.fill(reusableEllipse)
+            g2.color = Color.WHITE
+            g2.stroke = BasicStroke(1.1f)
+            g2.draw(reusableEllipse)
+        }
+    }
+
+    private fun drawHubOrb(g2: Graphics2D, cx: Double, cy: Double, r: Double, palette: GooeyPalette) {
+        reusableEllipse.setFrame(cx - r, cy - r, r * 2.0, r * 2.0)
+        val prevPaint = g2.paint
+        g2.paint = GradientPaint(cx.toFloat(), (cy - r).toFloat(), palette.hubTop, cx.toFloat(), (cy + r).toFloat(), palette.hubBottom)
+        g2.fill(reusableEllipse)
+
+        g2.paint = GradientPaint(
+            cx.toFloat(),
+            (cy - r).toFloat(),
+            Color(255, 255, 255, 145),
+            cx.toFloat(),
+            (cy + r).toFloat(),
+            Color(255, 255, 255, 25),
+        )
+        g2.stroke = BasicStroke(1.35f)
+        g2.draw(reusableEllipse)
+        g2.paint = prevPaint
+    }
+
+    private fun drawHubCloseIcon(g2: Graphics2D, cx: Float, cy: Float, scale: Float, openProgress: Float, color: Color) {
+        val g = g2.create() as Graphics2D
+        g.translate(cx.toDouble(), cy.toDouble())
+        g.rotate(((1f - openProgress) * (-PI / 4.0)))
+        val iconScale = (scale * (0.72f + 0.28f * openProgress)).toDouble()
+        g.scale(iconScale, iconScale)
+        g.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, openProgress.coerceIn(0f, 1f))
+        g.color = color
+        g.stroke = BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        val r = 6.8
+        g.draw(java.awt.geom.Line2D.Double(-r, -r, r, r))
+        g.draw(java.awt.geom.Line2D.Double(r, -r, -r, r))
         g.dispose()
     }
 
@@ -661,13 +977,14 @@ class GooeyContextMenu(
         type: IconType,
         color: Color,
         hovered: Boolean,
+        active: Boolean = false,
     ) {
         val g = g2.create() as Graphics2D
         g.translate(cx.toDouble(), cy.toDouble())
         g.scale(scale.toDouble(), scale.toDouble())
         val aInt = (alpha * 255).toInt().coerceIn(0, 255)
         g.color = Color(color.red, color.green, color.blue, (color.alpha * aInt) / 255)
-        g.stroke = BasicStroke(if (hovered) 2.4f else 2.1f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+        g.stroke = BasicStroke(if (hovered) 2.3f else 2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
 
         when (type) {
             IconType.OPEN_DETAILS -> {
@@ -697,15 +1014,15 @@ class GooeyContextMenu(
                 path.lineTo(8.5f, -6f)
                 g.draw(path)
             }
-            IconType.PLAN_TO_READ -> {
+            IconType.PLAN_TO_READ, IconType.BOOKMARK -> {
                 val path = Path2D.Float()
                 path.moveTo(-6f, -8.5f)
                 path.lineTo(6f, -8.5f)
                 path.lineTo(6f, 8.5f)
-                path.lineTo(0f, 3.5f)
+                path.lineTo(0f, 3.8f)
                 path.lineTo(-6f, 8.5f)
                 path.closePath()
-                g.draw(path)
+                if (active) g.fill(path) else g.draw(path)
             }
             IconType.REMOVE -> {
                 g.drawLine(-8, -5, 8, -5)
@@ -724,7 +1041,6 @@ class GooeyContextMenu(
                 g.drawLine(-7, 8, 7, 8)
             }
             IconType.UNREAD -> {
-                // Circle / Eye-off / mark unread outline icon
                 g.drawOval(-6, -6, 12, 12)
                 g.drawLine(-4, -4, 4, 4)
             }
@@ -744,16 +1060,60 @@ class GooeyContextMenu(
                 arrow.lineTo(0f, 5f)
                 g.draw(arrow)
             }
-            IconType.EDIT -> {
+            IconType.EDIT, IconType.NOTE -> {
                 val pencil = Path2D.Float()
-                pencil.moveTo(-5f, 5f)
-                pencil.lineTo(-2f, 5f)
-                pencil.lineTo(5f, -2f)
-                pencil.lineTo(2f, -5f)
-                pencil.lineTo(-5f, 2f)
+                pencil.moveTo(-5.5f, 5.5f)
+                pencil.lineTo(-2f, 5.5f)
+                pencil.lineTo(5.5f, -2f)
+                pencil.lineTo(2f, -5.5f)
+                pencil.lineTo(-5.5f, 2f)
                 pencil.closePath()
                 g.draw(pencil)
                 g.drawLine(0, -3, 3, 0)
+            }
+            IconType.TRANSLATE -> {
+                g.drawLine(-8, -5, 0, -5)
+                g.drawLine(-4, -8, -4, -5)
+                val arc = Path2D.Float()
+                arc.moveTo(-7f, 2f)
+                arc.quadTo(-4f, -1f, -1f, -5f)
+                g.draw(arc)
+                g.drawLine(-6, -3, -1, 2)
+                val aGlyph = Path2D.Float()
+                aGlyph.moveTo(1.5f, 7.5f)
+                aGlyph.lineTo(5f, -1.5f)
+                aGlyph.lineTo(8.5f, 7.5f)
+                g.draw(aGlyph)
+                g.drawLine(3, 4, 7, 4)
+            }
+            IconType.HIGHLIGHT -> {
+                val star = Path2D.Float()
+                star.moveTo(0f, -9f)
+                star.quadTo(1.5f, -1.5f, 9f, 0f)
+                star.quadTo(1.5f, 1.5f, 0f, 9f)
+                star.quadTo(-1.5f, 1.5f, -9f, 0f)
+                star.quadTo(-1.5f, -1.5f, 0f, -9f)
+                star.closePath()
+                g.fill(star)
+            }
+            IconType.BOOKMARKS_LIST -> {
+                g.drawRoundRect(-8, -7, 16, 14, 4, 4)
+                g.drawLine(-4, -3, 4, -3)
+                g.drawLine(-4, 0, 4, 0)
+                g.drawLine(-4, 3, 1, 3)
+            }
+            IconType.COPY -> {
+                g.drawRoundRect(-3, -7, 10, 11, 3, 3)
+                val back = Path2D.Float()
+                back.moveTo(-3f, -3f)
+                back.lineTo(-6f, -3f)
+                back.quadTo(-8f, -3f, -8f, -1f)
+                back.lineTo(-8f, 6f)
+                back.quadTo(-8f, 8f, -6f, 8f)
+                back.lineTo(1f, 8f)
+                back.quadTo(3f, 8f, 3f, 6f)
+                back.lineTo(3f, 4f)
+                g.draw(back)
             }
         }
         g.dispose()
@@ -761,62 +1121,160 @@ class GooeyContextMenu(
 
     private fun drawFloatingLabelPill(
         g2: Graphics2D,
-        text: String,
+        item: GooeyMenuItem,
         nodeX: Float,
         nodeY: Float,
-        isDanger: Boolean,
+        alpha: Float,
         palette: GooeyPalette,
     ) {
-        g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
-        val fm = g2.fontMetrics
+        val g = g2.create() as Graphics2D
+        g.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha.coerceIn(0f, 1f))
+        g.font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+        val fm = g.fontMetrics
         val padH = 14
-        val pillW = fm.stringWidth(text) + padH * 2
-        val pillH = 28
-        val px = (nodeX - pillW / 2f).coerceIn(12f, (width - pillW - 12).toFloat())
-        val py = if (arcCenterAngle > 0) {
-            nodeY + NODE_RADIUS.toFloat() + 14f
+        val textW = fm.stringWidth(item.label)
+
+        val hint = item.shortcutHint?.takeIf { it.isNotBlank() }
+        val keyFont = Theme.FONT_MONO.deriveFont(Font.BOLD, 10.5f)
+        val keyFm = g.getFontMetrics(keyFont)
+        val keyW = if (hint != null) keyFm.stringWidth(hint) + 12 else 0
+        val keyGap = if (hint != null) 8 else 0
+
+        val pillW = textW + keyGap + keyW + padH * 2
+        val pillH = 30
+        val slideOffset = (1f - alpha) * 5f
+
+        // Always position cleanly outside the entire radial ring so it never overlaps any satellite orb
+        val ringOuter = (orbitRadiusBase + NODE_RADIUS + 18.0).toFloat()
+        val px = (anchorX.toFloat() - pillW / 2f).coerceIn(12f, max(12f, (width - pillW - 12).toFloat()))
+        val canPlaceBelow = anchorY.toFloat() + ringOuter + pillH + 10f <= height
+        val rawPy = if (canPlaceBelow) {
+            anchorY.toFloat() + ringOuter + slideOffset
         } else {
-            nodeY - NODE_RADIUS.toFloat() - pillH - 14f
+            anchorY.toFloat() - ringOuter - pillH - slideOffset
         }
+        val py = rawPy.coerceIn(10f, max(10f, (height - pillH - 10).toFloat()))
 
-        // Soft shadow
-        g2.color = Color(0, 0, 0, 95)
-        g2.fill(RoundRectangle2D.Float(px, py + 2.5f, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
+        // Soft elevation shadow
+        g.color = Color(0, 0, 0, 105)
+        g.fill(RoundRectangle2D.Float(px, py + 3f, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
 
-        // Pill background
-        g2.color = if (isDanger) palette.dangerBg else palette.blobBg
-        g2.fill(RoundRectangle2D.Float(px, py, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
+        // Pill surface
+        g.color = if (item.isDanger) palette.dangerBg else palette.pillBg
+        g.fill(RoundRectangle2D.Float(px, py, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
 
-        // Crisp border
-        g2.color = if (isDanger) Color(255, 255, 255, 120) else palette.outlineColor
-        g2.stroke = BasicStroke(1.2f)
-        g2.draw(RoundRectangle2D.Float(px, py, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
+        // Crisp rim border
+        g.color = if (item.isDanger) Color(255, 255, 255, 130) else palette.outlineColor
+        g.stroke = BasicStroke(1.15f)
+        g.draw(RoundRectangle2D.Float(px, py, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
 
         // Label text
-        g2.color = if (isDanger) Color.WHITE else palette.iconColor
-        g2.drawString(text, px + padH, py + (pillH - fm.height) / 2f + fm.ascent)
+        g.color = if (item.isDanger) Color.WHITE else palette.iconColor
+        g.drawString(item.label, px + padH, py + (pillH - fm.height) / 2f + fm.ascent)
+
+        // Shortcut keycap badge
+        if (hint != null) {
+            val kx = px + padH + textW + keyGap
+            val kh = 18f
+            val ky = py + (pillH - kh) / 2f
+            g.color = if (item.isDanger) Color(0, 0, 0, 55) else palette.keycapBg
+            g.fill(RoundRectangle2D.Float(kx, ky, keyW.toFloat(), kh, 8f, 8f))
+            g.font = keyFont
+            g.color = if (item.isDanger) Color.WHITE else Theme.TEXT_SECONDARY
+            g.drawString(hint, kx + 6f, ky + (kh - keyFm.height) / 2f + keyFm.ascent)
+        }
+
+        g.dispose()
     }
 
-    private fun drawFloatingHintPill(g2: Graphics2D, text: String, cx: Float, py: Float, palette: GooeyPalette) {
-        g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 11.5f)
-        val fm = g2.fontMetrics
-        val padH = 12
-        val pillW = fm.stringWidth(text) + padH * 2
-        val pillH = 24
-        val px = (cx - pillW / 2f).coerceIn(12f, (width - pillW - 12).toFloat())
-        val safeY = py.coerceAtLeast(10f)
-
-        g2.color = palette.blobBg
-        g2.fill(RoundRectangle2D.Float(px, safeY, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
-        g2.color = palette.outlineColor
-        g2.stroke = BasicStroke(1f)
-        g2.draw(RoundRectangle2D.Float(px, safeY, pillW.toFloat(), pillH.toFloat(), pillH.toFloat(), pillH.toFloat()))
-        g2.color = palette.iconColor
-        g2.drawString(text, px + padH, safeY + (pillH - fm.height) / 2f + fm.ascent)
+    enum class MenuStyle(val label: String) {
+        RADIAL("Radial Animado (Padrão)"),
+        CLASSIC("Menu Clássico Compacto"),
     }
 
     companion object {
-        private const val HUB_RADIUS = 30.0
-        private const val NODE_RADIUS = 26.0
+        private const val HUB_RADIUS = 28.0
+        private const val NODE_RADIUS = 24.5
+        private val stylePrefs = java.util.prefs.Preferences.userRoot().node("mihon-linux")
+
+        // Cached pre-rendered radial glow sprites keyed by ARGB to avoid RadialGradientPaint overhead
+        private val glowSpriteCache = java.util.concurrent.ConcurrentHashMap<Int, BufferedImage>()
+
+        init {
+            MemoryManager.registerTrimCallback {
+                glowSpriteCache.values.forEach { runCatching { it.flush() } }
+                glowSpriteCache.clear()
+            }
+        }
+
+        private fun getOrCreateGlowSprite(tint: Color): BufferedImage {
+            return glowSpriteCache.computeIfAbsent(tint.rgb) {
+                val size = 96
+                val img = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
+                val half = size / 2.0
+                for (y in 0 until size) {
+                    val dy = (y + 0.5 - half) / half
+                    for (x in 0 until size) {
+                        val dx = (x + 0.5 - half) / half
+                        val dist = hypot(dx, dy)
+                        if (dist < 1.0) {
+                            val falloff = (1.0 - dist) * (1.0 - dist)
+                            val a = (tint.alpha * falloff).toInt().coerceIn(0, 255)
+                            img.setRGB(x, y, (a shl 24) or (tint.red shl 16) or (tint.green shl 8) or tint.blue)
+                        }
+                    }
+                }
+                img
+            }
+        }
+
+        var preferredStyle: MenuStyle
+            get() = runCatching {
+                MenuStyle.valueOf(stylePrefs.get("contextMenuStyle", MenuStyle.RADIAL.name))
+            }.getOrDefault(MenuStyle.RADIAL)
+            set(value) = stylePrefs.put("contextMenuStyle", value.name)
+
+        /**
+         * Displays the user's preferred contextual action menu ([MenuStyle.RADIAL] or [MenuStyle.CLASSIC]).
+         */
+        fun showSmart(items: List<GooeyMenuItem>, invoker: Component, x: Int, y: Int) {
+            if (items.isEmpty()) return
+            if (preferredStyle == MenuStyle.CLASSIC) {
+                val popup = mihon.desktop.ui.components.MihonPopupMenu.create()
+                items.forEach { item ->
+                    val icon = when (item.iconType) {
+                        IconType.OPEN_DETAILS -> ModernIcons.bookOpen(15) { Theme.TEXT_PRIMARY }
+                        IconType.READING -> ModernIcons.play(15) { Theme.TEXT_PRIMARY }
+                        IconType.COMPLETED -> ModernIcons.checkCircle(15) { Theme.SUCCESS }
+                        IconType.PLAN_TO_READ, IconType.BOOKMARK -> ModernIcons.bookmark(15) {
+                            if (item.isActive) Theme.PRIMARY else Theme.TEXT_PRIMARY
+                        }
+                        IconType.REMOVE -> ModernIcons.trash(15) { Theme.DANGER }
+                        IconType.DOWNLOAD -> ModernIcons.downloads(15) { Theme.TEXT_PRIMARY }
+                        IconType.UNREAD -> ModernIcons.eyeOff(15) { Theme.TEXT_PRIMARY }
+                        IconType.MOVE_LEFT -> ModernIcons.chevronLeft(15) { Theme.TEXT_PRIMARY }
+                        IconType.MOVE_RIGHT -> ModernIcons.chevronRight(15) { Theme.TEXT_PRIMARY }
+                        IconType.EDIT, IconType.NOTE -> ModernIcons.edit(15) { Theme.TEXT_PRIMARY }
+                        IconType.TRANSLATE -> ModernIcons.translateIcon(15)
+                        IconType.HIGHLIGHT -> ModernIcons.sparkles(15) { Theme.TEXT_PRIMARY }
+                        IconType.BOOKMARKS_LIST -> ModernIcons.bookmark(15) { Theme.TEXT_PRIMARY }
+                        IconType.COPY -> ModernIcons.copy(15) { Theme.TEXT_PRIMARY }
+                    }
+                    if (item.isDanger && popup.componentCount > 0) popup.addSeparator()
+                    popup.add(
+                        mihon.desktop.ui.components.MihonPopupMenu.item(
+                            text = item.label,
+                            icon = icon,
+                            shortcutHint = item.shortcutHint,
+                            danger = item.isDanger,
+                            onClick = item.onClick,
+                        ),
+                    )
+                }
+                popup.show(invoker, x, y)
+            } else {
+                GooeyContextMenu(items).showAt(invoker, x, y)
+            }
+        }
     }
 }

@@ -14,6 +14,9 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Insets
 import java.awt.RenderingHints
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.RoundRectangle2D
@@ -40,11 +43,19 @@ import javax.swing.JToggleButton
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
+import javax.swing.Timer
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 import mihon.desktop.translator.TranslationProviderRegistry
 import mihon.desktop.translator.TranslatorLanguage
 import mihon.desktop.translator.TranslatorPreferences
+import mihon.desktop.ui.animation.MotionLevel
+import mihon.desktop.ui.animation.MotionPreferences
+import mihon.desktop.ui.components.MihonDropdown
+import mihon.desktop.ui.components.MihonPasswordField
+import mihon.desktop.ui.components.MihonSearchField
+import mihon.desktop.ui.components.MihonSegmentedSelector
+import mihon.desktop.ui.components.MihonTextField
 import tachiyomi.i18n.MR
 import kotlinx.coroutines.CoroutineScope
 
@@ -153,7 +164,7 @@ class SegmentedPillSelector<T>(
         for ((_, label) in options) {
             totalW += fm.stringWidth(label) + 16
         }
-        val size = Dimension(totalW, 30)
+        val size = Dimension(totalW, 34)
         preferredSize = size
         minimumSize = size
         maximumSize = size
@@ -175,10 +186,10 @@ class SegmentedPillSelector<T>(
 
         val w = width.toFloat()
         val h = height.toFloat()
-        val arc = h
+        val arc = (Theme.CONTROL_RADIUS * 2).toFloat()
 
-        // Outer pill track
-        val trackBg = if (Theme.isDark) Theme.BG_APP else Color(0xEA, 0xEC, 0xF4)
+        // Neutral container track
+        val trackBg = Theme.BG_APP
         val trackBorder = Theme.BORDER_SUBTLE
         g2.color = trackBg
         g2.fill(RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, arc, arc))
@@ -207,15 +218,11 @@ class SegmentedPillSelector<T>(
             val indW = animIndicatorW
             val indY = 3f
             val indH = h - 6f
-            val indArc = indH
+            val indArc = 12f
 
-            // Active segment pill
-            val activeBg = Theme.BG_CARD
-            val activeBorder = Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, 95)
-            g2.color = activeBg
+            // Solid Cobalt active segment
+            g2.color = Theme.PRIMARY
             g2.fill(RoundRectangle2D.Float(indX, indY, indW, indH, indArc, indArc))
-            g2.color = activeBorder
-            g2.draw(RoundRectangle2D.Float(indX, indY, indW, indH, indArc, indArc))
         }
 
         // Draw labels
@@ -225,9 +232,9 @@ class SegmentedPillSelector<T>(
             g2.font = font.deriveFont(if (isSel) Font.BOLD else Font.PLAIN, 12f)
             val fm = g2.fontMetrics
             g2.color = when {
-                isSel -> Theme.TEXT_PRIMARY
+                isSel -> Color.WHITE
                 isHov -> Theme.TEXT_PRIMARY
-                else -> Theme.TEXT_MUTED
+                else -> Theme.TEXT_SECONDARY
             }
             val sx = bounds[i][0]
             val sw = bounds[i][1]
@@ -260,7 +267,7 @@ class SettingsGroupCard : JPanel() {
         if (rows.isNotEmpty()) {
             val div = object : JPanel() {
                 override fun paintComponent(g: Graphics) {
-                    g.color = if (Theme.isDark) Color(255, 255, 255, 16) else Color(0, 0, 0, 14)
+                    g.color = Theme.BORDER_SUBTLE
                     g.fillRect(0, 0, width, 1)
                 }
             }.apply {
@@ -277,13 +284,35 @@ class SettingsGroupCard : JPanel() {
         add(row)
     }
 
+    fun applyFilter(queryLower: String): Int {
+        var visibleCount = 0
+        var seenVisible = false
+        for (i in rows.indices) {
+            val r = rows[i]
+            val searchText = (r.getClientProperty("settingsSearchText") as? String).orEmpty()
+            val matches = queryLower.isBlank() || searchText.contains(queryLower)
+            r.isVisible = matches
+            if (i > 0 && i - 1 < dividers.size) {
+                dividers[i - 1].isVisible = matches && seenVisible
+            }
+            if (matches) {
+                visibleCount++
+                seenVisible = true
+            }
+        }
+        isVisible = visibleCount > 0
+        revalidate()
+        repaint()
+        return visibleCount
+    }
+
     override fun paintComponent(g: Graphics) {
         val g2 = g.create() as Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
 
         val w = width.toFloat()
         val h = height.toFloat()
-        val arc = 14f
+        val arc = (Theme.CARD_RADIUS * 2).toFloat()
 
         val cardBg = Theme.BG_SURFACE
         val borderColor = Theme.BORDER_SUBTLE
@@ -332,8 +361,8 @@ class AntiGravityCategoryButton(
         isFocusPainted = false
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         alignmentX = 0f
-        preferredSize = Dimension(190, 36)
-        maximumSize = Dimension(Int.MAX_VALUE, 36)
+        preferredSize = Dimension(190, 40)
+        maximumSize = Dimension(Int.MAX_VALUE, 40)
         model.addChangeListener {
             if (!isDisplayable) {
                 hoverProgress = if (model.isRollover && !isSelected) 1f else 0f
@@ -365,15 +394,15 @@ class AntiGravityCategoryButton(
 
         val w = width
         val h = height
-        val arc = 10
+        val arc = Theme.CONTROL_RADIUS
 
         if (hoverProgress > 0.01f && activeProgress < 0.99f) {
-            val baseHover = if (Theme.isDark) Color(255, 255, 255, 16) else Theme.BG_CARD_HOVER
+            val baseHover = Theme.BG_CARD_HOVER
             g2.color = Color(
                 baseHover.red,
                 baseHover.green,
                 baseHover.blue,
-                (baseHover.alpha * hoverProgress * (1f - activeProgress)).toInt().coerceIn(0, 255),
+                (255 * hoverProgress * (1f - activeProgress)).toInt().coerceIn(0, 255),
             )
             g2.fillRoundRect(2, 2, w - 4, h - 4, arc, arc)
         }
@@ -382,7 +411,7 @@ class AntiGravityCategoryButton(
             g2.color = Color(activeBg.red, activeBg.green, activeBg.blue, (activeBg.alpha * activeProgress).toInt().coerceIn(0, 255))
             g2.fillRoundRect(2, 2, w - 4, h - 4, arc, arc)
             val barH = ((h - 16) * activeProgress).toInt().coerceAtLeast(4)
-            g2.color = Color(Theme.ACCENT.red, Theme.ACCENT.green, Theme.ACCENT.blue, (255 * activeProgress).toInt().coerceIn(0, 255))
+            g2.color = Color(Theme.PRIMARY.red, Theme.PRIMARY.green, Theme.PRIMARY.blue, (255 * activeProgress).toInt().coerceIn(0, 255))
             g2.fillRoundRect(2, (h - barH) / 2, 3, barH, 3, 3)
         }
 
@@ -394,7 +423,12 @@ class AntiGravityCategoryButton(
         }
 
         g2.font = Theme.FONT_UI.deriveFont(if (isSelected) Font.BOLD else Font.PLAIN, 13f)
-        g2.color = blendUiColor(Theme.TEXT_SECONDARY, Theme.TEXT_PRIMARY, activeProgress.coerceAtLeast(hoverProgress * 0.45f))
+        val activeColor = if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
+        g2.color = when {
+            isSelected -> blendUiColor(Theme.TEXT_SECONDARY, activeColor, activeProgress)
+            hoverProgress > 0.01f -> blendUiColor(Theme.TEXT_SECONDARY, Theme.TEXT_PRIMARY, hoverProgress)
+            else -> Theme.TEXT_SECONDARY
+        }
         val fm = g2.fontMetrics
         val ty = ((h - fm.height) / 2) + fm.ascent
         g2.drawString(titleText, textX, ty)
@@ -427,8 +461,71 @@ class AntiGravitySettingsScreen(
     private val detailContainer = JPanel(detailCards)
     private val themeUpdaters = mutableListOf<() -> Unit>()
 
-    private lateinit var themeBox: JComboBox<String>
+    private lateinit var themeBox: MihonDropdown<String>
     private var updatingThemeBox = false
+    private val categoryButtons = mutableMapOf<String, AntiGravityCategoryButton>()
+    private var activeCardId: String = "general"
+
+    private data class IndexedSettingsSection(
+        val cardId: String,
+        val leadingViews: List<Component>,
+        val card: SettingsGroupCard,
+        val trailingSpacer: Component?,
+    )
+
+    private val indexedSections = mutableListOf<IndexedSettingsSection>()
+    private lateinit var sidebarSearchField: MihonSearchField
+
+    fun openCategory(cardId: String) {
+        activeCardId = cardId
+        categoryButtons[cardId]?.isSelected = true
+        detailCards.show(detailContainer, cardId)
+    }
+
+    private fun indexPageForSearch(cardId: String, page: JPanel) {
+        val comps = page.components
+        // Skip first 4 components (h1, strut, subtitle, strut)
+        val pendingHeader = mutableListOf<Component>()
+        var i = 4
+        while (i < comps.size) {
+            val comp = comps[i]
+            if (comp is SettingsGroupCard) {
+                val trailing = comps.getOrNull(i + 1)?.takeIf { it !is SettingsGroupCard && it is javax.swing.Box.Filler }
+                indexedSections.add(IndexedSettingsSection(cardId, pendingHeader.toList(), comp, trailing))
+                pendingHeader.clear()
+                if (trailing != null) i++
+            } else {
+                pendingHeader.add(comp)
+            }
+            i++
+        }
+    }
+
+    private fun filterSettings(rawQuery: String) {
+        val q = rawQuery.trim().lowercase()
+        val matchCounts = mutableMapOf<String, Int>()
+        for (section in indexedSections) {
+            val count = section.card.applyFilter(q)
+            val cardVisible = q.isBlank() || count > 0
+            section.leadingViews.forEach { it.isVisible = cardVisible }
+            section.trailingSpacer?.isVisible = cardVisible
+            matchCounts[section.cardId] = (matchCounts[section.cardId] ?: 0) + count
+        }
+        categoryButtons.forEach { (id, btn) ->
+            val count = matchCounts[id] ?: 0
+            btn.isEnabled = q.isBlank() || count > 0
+            btn.toolTipText = if (q.isNotBlank() && count > 0) "$count opção(ões) encontrada(s)" else null
+        }
+        if (q.isNotBlank() && (matchCounts[activeCardId] ?: 0) == 0) {
+            val firstMatch = listOf("general", "appearance", "reader", "performance", "storage", "about")
+                .firstOrNull { (matchCounts[it] ?: 0) > 0 }
+            if (firstMatch != null) {
+                openCategory(firstMatch)
+            }
+        }
+        detailContainer.revalidate()
+        detailContainer.repaint()
+    }
 
     private val themeListener = { isDark: Boolean ->
         background = Theme.BG_APP
@@ -455,12 +552,20 @@ class AntiGravitySettingsScreen(
         val leftNav = buildLeftSidebar()
         add(leftNav, BorderLayout.WEST)
 
-        detailContainer.add(wrapScrollable(buildGeneralPage()), "general")
-        detailContainer.add(wrapScrollable(buildAppearancePage()), "appearance")
-        detailContainer.add(wrapScrollable(buildReaderPage()), "reader")
-        detailContainer.add(wrapScrollable(buildGraphicsPage()), "performance")
-        detailContainer.add(wrapScrollable(buildStoragePage()), "storage")
-        detailContainer.add(wrapScrollable(buildAboutPage()), "about")
+        val pages = listOf(
+            "general" to buildGeneralPage(),
+            "appearance" to buildAppearancePage(),
+            "reader" to buildReaderPage(),
+            "translator" to buildTranslatorPage(),
+            "shortcuts" to buildShortcutsPage(),
+            "performance" to buildGraphicsPage(),
+            "storage" to buildStoragePage(),
+            "about" to buildAboutPage(),
+        )
+        pages.forEach { (id, pagePanel) ->
+            indexPageForSearch(id, pagePanel)
+            detailContainer.add(wrapScrollable(pagePanel), id)
+        }
 
         add(detailContainer, BorderLayout.CENTER)
 
@@ -495,21 +600,39 @@ class AntiGravitySettingsScreen(
         navPanel.add(backBtn)
         navPanel.add(Box.createVerticalStrut(16))
 
-        val settingsHeaderLbl = JLabel("Settings").apply {
+        val settingsHeaderLbl = JLabel("Configurações").apply {
             font = Theme.FONT_UI.deriveFont(Font.BOLD, 11.5f)
-            foreground = Theme.TEXT_MUTED
+            foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             border = BorderFactory.createEmptyBorder(0, 12, 6, 0)
             alignmentX = 0f
         }
         navPanel.add(settingsHeaderLbl)
 
+        sidebarSearchField = MihonSearchField(
+            columns = 12,
+            placeholder = "Filtrar opções…",
+            compact = true,
+            shortcutBadge = null,
+            debounceMs = 90,
+            onEscapeEmpty = { filterSettings("") },
+        ).apply {
+            alignmentX = 0f
+            maximumSize = Dimension(Int.MAX_VALUE, 34)
+            onDebouncedChange = { filterSettings(it) }
+            onSubmit = { filterSettings(it) }
+        }
+        navPanel.add(sidebarSearchField)
+        navPanel.add(Box.createVerticalStrut(10))
+
         val group = ButtonGroup()
         val categories = listOf(
-            Triple("general", "Geral", ModernIcons.settings(16) { Theme.TEXT_PRIMARY }),
-            Triple("appearance", "Aparência", ModernIcons.sparkles(16) { Theme.TEXT_PRIMARY }),
-            Triple("reader", "Leitor", ModernIcons.library(16) { Theme.TEXT_PRIMARY }),
+            Triple("general", "Geral & Biblioteca", ModernIcons.settings(16) { Theme.TEXT_PRIMARY }),
+            Triple("appearance", "Aparência", ModernIcons.palette(16) { Theme.TEXT_PRIMARY }),
+            Triple("reader", "Leitor", ModernIcons.readerPages(16) { Theme.TEXT_PRIMARY }),
+            Triple("translator", "Tradutor", ModernIcons.translateIcon(16)),
+            Triple("shortcuts", "Atalhos", ModernIcons.edit(16) { Theme.TEXT_PRIMARY }),
             Triple("performance", "Desempenho", ModernIcons.statistics(16) { Theme.TEXT_PRIMARY }),
-            Triple("storage", "Dados & Backup", ModernIcons.storage(16) { Theme.TEXT_PRIMARY }),
+            Triple("storage", "Backup & Dados", ModernIcons.storage(16) { Theme.TEXT_PRIMARY }),
             Triple("about", "Sobre", ModernIcons.about(16) { Theme.TEXT_PRIMARY }),
         )
 
@@ -517,9 +640,10 @@ class AntiGravitySettingsScreen(
             val btn = AntiGravityCategoryButton(label, icon).apply {
                 if (idx == 0) isSelected = true
                 addActionListener {
-                    detailCards.show(detailContainer, cardId)
+                    openCategory(cardId)
                 }
             }
+            categoryButtons[cardId] = btn
             group.add(btn)
             navPanel.add(btn)
             navPanel.add(Box.createVerticalStrut(3))
@@ -541,15 +665,15 @@ class AntiGravitySettingsScreen(
                     font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
                     foreground = Theme.TEXT_PRIMARY
                 }
-                val appVer = JLabel("v0.3.0 • Desktop").apply {
+                val appVer = JLabel("Edição Index • Desktop").apply {
                     font = Theme.FONT_UI.deriveFont(Font.PLAIN, 10.5f)
-                    foreground = Theme.TEXT_MUTED
+                    foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                 }
                 add(appTitle)
                 add(appVer)
                 themeUpdaters.add {
                     appTitle.foreground = Theme.TEXT_PRIMARY
-                    appVer.foreground = Theme.TEXT_MUTED
+                    appVer.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                 }
             }
             add(iconLbl, BorderLayout.WEST)
@@ -563,7 +687,7 @@ class AntiGravitySettingsScreen(
                 BorderFactory.createMatteBorder(0, 0, 0, 1, Theme.BORDER_SUBTLE),
                 BorderFactory.createEmptyBorder(18, 14, 18, 14),
             )
-            settingsHeaderLbl.foreground = Theme.TEXT_MUTED
+            settingsHeaderLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
         }
 
         return navPanel
@@ -596,13 +720,13 @@ class AntiGravitySettingsScreen(
         }
 
         val h1 = JLabel(pageTitle).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 25f)
             foreground = Theme.TEXT_PRIMARY
             alignmentX = 0f
         }
         val sub = JLabel(pageSubtitle).apply {
             font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
-            foreground = Theme.TEXT_MUTED
+            foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             alignmentX = 0f
         }
 
@@ -614,7 +738,7 @@ class AntiGravitySettingsScreen(
         themeUpdaters.add {
             page.background = Theme.BG_APP
             h1.foreground = Theme.TEXT_PRIMARY
-            sub.foreground = Theme.TEXT_MUTED
+            sub.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
         }
 
         return page
@@ -633,11 +757,11 @@ class AntiGravitySettingsScreen(
             page.add(Box.createVerticalStrut(3))
             val descLbl = JLabel(description).apply {
                 font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
-                foreground = Theme.TEXT_MUTED
+                foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                 alignmentX = 0f
             }
             page.add(descLbl)
-            themeUpdaters.add { descLbl.foreground = Theme.TEXT_MUTED }
+            themeUpdaters.add { descLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY }
         }
         page.add(Box.createVerticalStrut(10))
     }
@@ -655,7 +779,7 @@ class AntiGravitySettingsScreen(
         }
         val subLbl = JLabel(subtitle).apply {
             font = Theme.FONT_UI.deriveFont(Font.PLAIN, 11.5f)
-            foreground = Theme.TEXT_MUTED
+            foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             alignmentX = 0f
         }
         val textCol = JPanel().apply {
@@ -684,12 +808,17 @@ class AntiGravitySettingsScreen(
 
         return JPanel(BorderLayout(12, 0)).apply {
             isOpaque = false
+            minimumSize = Dimension(0, 48)
             border = BorderFactory.createEmptyBorder(12, 14, 12, 14)
+            putClientProperty(
+                "settingsSearchText",
+                listOfNotNull(title, subtitle, monoDetail).joinToString(" ").lowercase(),
+            )
             add(textCol, BorderLayout.CENTER)
             add(rightWrap, BorderLayout.EAST)
             themeUpdaters.add {
                 titleLbl.foreground = Theme.TEXT_PRIMARY
-                subLbl.foreground = Theme.TEXT_MUTED
+                subLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             }
         }
     }
@@ -741,7 +870,7 @@ class AntiGravitySettingsScreen(
             "Preferências de pré-carregamento em segundo plano durante a leitura online.",
         )
         val execCard = SettingsGroupCard()
-        val autoPrefetchPill = SegmentedPillSelector(
+        val autoPrefetchPill = MihonSegmentedSelector(
             options = listOf(false to "Sob Demanda", true to "Pré-baixar (2 Cap.)"),
             initialValue = readerPrefs.getBoolean("autoPrefetch", true),
         ) { enabled ->
@@ -777,16 +906,16 @@ class AntiGravitySettingsScreen(
                 rightControl = notificationsSwitch,
             ),
         )
-        val intervalCombo = JComboBox(
+        val intervalCombo = MihonDropdown(
             LibraryUpdateScheduler.INTERVAL_OPTIONS.map { it.second }.toTypedArray(),
         ).apply {
             val cur = LibraryUpdateScheduler.intervalHours
             selectedIndex = LibraryUpdateScheduler.INTERVAL_OPTIONS.indexOfFirst { it.first == cur }.coerceAtLeast(0)
-            preferredSize = Dimension(200, 32)
+            preferredSize = Dimension(210, Theme.CONTROL_HEIGHT_COMPACT)
             addActionListener {
-                val chosen = LibraryUpdateScheduler.INTERVAL_OPTIONS.getOrNull(selectedIndex)?.first ?: 6
-                LibraryUpdateScheduler.intervalHours = chosen
-                ctx.setStatus("Frequência de atualização: ${LibraryUpdateScheduler.INTERVAL_OPTIONS[selectedIndex].second}")
+                val chosen = LibraryUpdateScheduler.INTERVAL_OPTIONS.getOrNull(selectedIndex) ?: return@addActionListener
+                LibraryUpdateScheduler.intervalHours = chosen.first
+                ctx.setStatus("Frequência de atualização: ${chosen.second}")
             }
         }
         execCard.addRow(
@@ -821,25 +950,74 @@ class AntiGravitySettingsScreen(
             variant = ModernButton.Variant.SURFACE,
         ).apply {
             addActionListener {
-                val panel = JPanel(java.awt.GridLayout(4, 1, 6, 6))
-                val aniField = javax.swing.JTextField(TrackerService.anilistToken, 28)
-                val malField = javax.swing.JTextField(TrackerService.malToken, 28)
-                panel.add(JLabel("Token de Acesso AniList (Bearer Token OAuth):"))
-                panel.add(aniField)
-                panel.add(JLabel("Token de Acesso MyAnimeList (Bearer Token API v2):"))
-                panel.add(malField)
-                val res = JOptionPane.showConfirmDialog(
-                    this@AntiGravitySettingsScreen,
-                    panel,
-                    "Credenciais de Rastreamento (AniList & MyAnimeList)",
-                    JOptionPane.OK_CANCEL_OPTION,
-                    JOptionPane.PLAIN_MESSAGE,
-                )
-                if (res == JOptionPane.OK_OPTION) {
-                    TrackerService.anilistToken = aniField.text.trim()
-                    TrackerService.malToken = malField.text.trim()
-                    ctx.setStatus("Tokens de rastreamento salvos com sucesso!")
+                val owner = SwingUtilities.getWindowAncestor(this@AntiGravitySettingsScreen)
+                val dlg = JDialog(owner, "Credenciais de Rastreamento", java.awt.Dialog.ModalityType.APPLICATION_MODAL).apply {
+                    setSize(470, 290)
+                    isResizable = false
+                    setLocationRelativeTo(this@AntiGravitySettingsScreen)
                 }
+                val root = JPanel(BorderLayout(0, 14)).apply {
+                    background = Theme.BG_SURFACE
+                    border = BorderFactory.createEmptyBorder(20, 24, 18, 24)
+                }
+                val aniField = MihonPasswordField(
+                    initialValue = TrackerService.anilistToken,
+                    columns = 28,
+                    placeholder = "Cole o Bearer Token OAuth do AniList…",
+                )
+                val malField = MihonPasswordField(
+                    initialValue = TrackerService.malToken,
+                    columns = 28,
+                    placeholder = "Cole o Bearer Token API v2 do MyAnimeList…",
+                )
+                val form = JPanel().apply {
+                    isOpaque = false
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    add(JLabel("Credenciais de Rastreamento (AniList & MyAnimeList)").apply {
+                        font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 16f)
+                        foreground = Theme.TEXT_PRIMARY
+                        alignmentX = 0f
+                    })
+                    add(Box.createVerticalStrut(12))
+                    add(JLabel("Token de Acesso AniList (Bearer Token OAuth):").apply {
+                        font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
+                        foreground = Theme.TEXT_SECONDARY
+                        alignmentX = 0f
+                    })
+                    add(Box.createVerticalStrut(4))
+                    aniField.alignmentX = 0f
+                    add(aniField)
+                    add(Box.createVerticalStrut(12))
+                    add(JLabel("Token de Acesso MyAnimeList (Bearer Token API v2):").apply {
+                        font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
+                        foreground = Theme.TEXT_SECONDARY
+                        alignmentX = 0f
+                    })
+                    add(Box.createVerticalStrut(4))
+                    malField.alignmentX = 0f
+                    add(malField)
+                }
+                val btnCancel = ModernButton(text = "Cancelar", variant = ModernButton.Variant.GHOST).apply {
+                    addActionListener { dlg.dispose() }
+                }
+                val btnSave = ModernButton(text = "Salvar Tokens", variant = ModernButton.Variant.PRIMARY).apply {
+                    addActionListener {
+                        TrackerService.anilistToken = aniField.plainText.trim()
+                        TrackerService.malToken = malField.plainText.trim()
+                        ctx.setStatus("Tokens de rastreamento salvos com sucesso!")
+                        dlg.dispose()
+                    }
+                }
+                val bar = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                    isOpaque = false
+                    add(btnCancel)
+                    add(btnSave)
+                }
+                root.add(form, BorderLayout.CENTER)
+                root.add(bar, BorderLayout.SOUTH)
+                dlg.rootPane.defaultButton = btnSave
+                dlg.contentPane = root
+                dlg.isVisible = true
             }
         }
         trackerCard.addRow(
@@ -871,14 +1049,40 @@ class AntiGravitySettingsScreen(
         )
         val themeCard = SettingsGroupCard()
 
-        themeBox = JComboBox(Theme.ThemePreset.entries.map { it.displayName }.toTypedArray()).apply {
-            val savedPreset = runCatching { Theme.ThemePreset.valueOf(prefs.get("themePreset", Theme.currentPreset.name)) }
+        themeBox = MihonDropdown(Theme.ThemePreset.entries.map { it.displayName }.toTypedArray()).apply {
+            val savedPreset = runCatching { Theme.ThemePreset.valueOf(prefs.get("themePresetIndex", Theme.currentPreset.name)) }
                 .getOrDefault(Theme.currentPreset)
             selectedIndex = savedPreset.ordinal
-            preferredSize = Dimension(220, 32)
+            preferredSize = Dimension(245, Theme.CONTROL_HEIGHT_COMPACT)
+            val baseRenderer = javax.swing.DefaultListCellRenderer()
+            renderer = javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
+                val lbl = baseRenderer.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
+                val preset = Theme.ThemePreset.entries.firstOrNull { it.displayName == value }
+                if (preset != null) {
+                    lbl.iconTextGap = 10
+                    lbl.icon = object : Icon {
+                        override fun getIconWidth(): Int = 20
+                        override fun getIconHeight(): Int = 14
+                        override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+                            val g2 = g.create() as Graphics2D
+                            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                            g2.color = preset.bgApp
+                            g2.fillRoundRect(x, y, 20, 14, 4, 4)
+                            g2.color = preset.bgSidebar
+                            g2.fillRoundRect(x, y, 6, 14, 4, 4)
+                            g2.color = if (preset == Theme.ThemePreset.CUSTOM) Theme.PRIMARY else Theme.PRIMARY
+                            g2.fillOval(x + 11, y + 4, 6, 6)
+                            g2.color = Theme.BORDER_SUBTLE
+                            g2.drawRoundRect(x, y, 19, 13, 4, 4)
+                            g2.dispose()
+                        }
+                    }
+                }
+                lbl
+            }
             addActionListener {
                 if (updatingThemeBox) return@addActionListener
-                val selected = Theme.ThemePreset.entries[selectedIndex]
+                val selected = Theme.ThemePreset.entries.getOrNull(selectedIndex) ?: return@addActionListener
                 if (selected == Theme.ThemePreset.CUSTOM) {
                     onOpenCustomThemeDialog()
                 } else {
@@ -898,26 +1102,46 @@ class AntiGravitySettingsScreen(
 
         addSectionHeader(
             page,
-            "Navegação Lateral",
-            "Configure o modo de exibição padrão do menu principal.",
+            "Movimento & Interação",
+            "Personalize a intensidade das animações e o estilo do menu contextual dos cartões.",
         )
-        val navCard = SettingsGroupCard()
-        val sidebarPill = SegmentedPillSelector(
-            options = listOf(false to "Expandida", true to "Compacta (Ícones)"),
-            initialValue = prefs.getBoolean("sidebar_collapsed", false),
-        ) { collapsed ->
-            prefs.putBoolean("sidebar_collapsed", collapsed)
-            onToggleSidebarDefault(collapsed)
-            ctx.setStatus(if (collapsed) "Barra lateral compacta ativada" else "Barra lateral expandida ativada")
+        val motionCard = SettingsGroupCard()
+        val motionSelector = MihonSegmentedSelector(
+            options = listOf(
+                MotionLevel.COMPLETE to "Completa",
+                MotionLevel.REDUCED to "Reduzida",
+                MotionLevel.OFF to "Desligada",
+            ),
+            initialValue = MotionPreferences.current,
+        ) { level ->
+            MotionPreferences.setLevel(level)
+            ctx.setStatus("Animações: ${level.label}")
         }
-        navCard.addRow(
+        motionCard.addRow(
             createSettingsRow(
-                title = "Estilo da Barra Lateral",
-                subtitle = "Alterna entre exibir rótulos completos ou apenas os ícones centralizados.",
-                rightControl = sidebarPill,
+                title = "Intensidade das Animações",
+                subtitle = "Reduza ou desative transições e molas de movimento mantendo clareza visual.",
+                rightControl = motionSelector,
             ),
         )
-        page.add(navCard)
+        val menuStyleSelector = MihonSegmentedSelector(
+            options = listOf(
+                GooeyContextMenu.MenuStyle.RADIAL to "Radial Animado",
+                GooeyContextMenu.MenuStyle.CLASSIC to "Menu Clássico",
+            ),
+            initialValue = GooeyContextMenu.preferredStyle,
+        ) { style ->
+            GooeyContextMenu.preferredStyle = style
+            ctx.setStatus("Menu contextual: ${style.label}")
+        }
+        motionCard.addRow(
+            createSettingsRow(
+                title = "Estilo do Menu de Ações (Clique Direito)",
+                subtitle = "Escolha entre o menu radial elástico ou o menu popup compacto clássico.",
+                rightControl = menuStyleSelector,
+            ),
+        )
+        page.add(motionCard)
         page.add(Box.createVerticalStrut(24))
 
         // Language selector
@@ -939,9 +1163,9 @@ class AntiGravitySettingsScreen(
         }
         val currentDisplayName = MR.getLocaleDisplayName(currentLocale)
         
-        val langCombo = JComboBox(localeNames.map { it.second }.toTypedArray()).apply {
+        val langCombo = MihonDropdown(localeNames.map { it.second }.toTypedArray()).apply {
             selectedItem = currentDisplayName
-            preferredSize = Dimension(220, 32)
+            preferredSize = Dimension(245, Theme.CONTROL_HEIGHT_COMPACT)
             addActionListener {
                 val selectedName = selectedItem as String
                 val selectedLocale = localeNames.first { it.second == selectedName }.first
@@ -980,7 +1204,7 @@ class AntiGravitySettingsScreen(
         val readerCard = SettingsGroupCard()
 
         val savedMode = runCatching { ReadMode.valueOf(readerPrefs.get("mode", "SINGLE")) }.getOrDefault(ReadMode.SINGLE)
-        val modeSelector = SegmentedPillSelector(
+        val modeSelector = MihonSegmentedSelector(
             options = listOf(
                 ReadMode.SINGLE to "Página Única",
                 ReadMode.DOUBLE_RTL to "Dupla (Mangá)",
@@ -1000,7 +1224,7 @@ class AntiGravitySettingsScreen(
         )
 
         val savedFit = runCatching { FitMode.valueOf(readerPrefs.get("fit", "WINDOW")) }.getOrDefault(FitMode.WINDOW)
-        val fitSelector = SegmentedPillSelector(
+        val fitSelector = MihonSegmentedSelector(
             options = listOf(
                 FitMode.WINDOW to "Ajustar Janela",
                 FitMode.WIDTH to "Ajustar Largura",
@@ -1016,6 +1240,26 @@ class AntiGravitySettingsScreen(
                 title = "Enquadramento de Página",
                 subtitle = "Controla como as imagens são dimensionadas dentro da área visível do leitor.",
                 rightControl = fitSelector,
+            ),
+        )
+
+        val savedBg = readerPrefs.get("readerBackground", "BLACK")
+        val bgSelector = MihonSegmentedSelector(
+            options = listOf(
+                "BLACK" to "Preto AMOLED",
+                "DARK_GRAPHITE" to "Grafite",
+                "LIGHT_PAPER" to "Papel Claro",
+            ),
+            initialValue = savedBg,
+        ) { chosenBg ->
+            readerPrefs.put("readerBackground", chosenBg)
+            ctx.setStatus("Plano de fundo do leitor atualizado")
+        }
+        readerCard.addRow(
+            createSettingsRow(
+                title = "Plano de Fundo das Páginas",
+                subtitle = "Define a cor da moldura ao redor das páginas abertas no leitor.",
+                rightControl = bgSelector,
             ),
         )
         page.add(readerCard)
@@ -1037,7 +1281,7 @@ class AntiGravitySettingsScreen(
                 rightControl = splitSwitch,
             ),
         )
-        val rtlPill = SegmentedPillSelector(
+        val rtlPill = MihonSegmentedSelector(
             options = listOf(true to "Direita → Esquerda (Mangá)", false to "Esquerda → Direita"),
             initialValue = readerPrefs.getBoolean("splitWideRtl", true),
         ) { rtl ->
@@ -1051,12 +1295,22 @@ class AntiGravitySettingsScreen(
             ),
         )
         page.add(spreadCard)
-        page.add(Box.createVerticalStrut(24))
+        return page
+    }
+
+    // =========================================================================
+    // PAGE 3B: TRADUTOR SIMULTÂNEO (GOOGLE LENS)
+    // =========================================================================
+    private fun buildTranslatorPage(): JPanel {
+        val page = createPageContainer(
+            "Tradutor",
+            "Detecção automática de texto (OCR), idiomas e provedor de tradução sobreposta no leitor.",
+        )
 
         addSectionHeader(
             page,
             "Tradutor Simultâneo (Google Lens)",
-            "Configure a detecção automática de texto, idiomas de origem/destino e provedor de tradução sobreposta.",
+            "Configure como os balões de fala são reconhecidos e traduzidos em tempo real.",
         )
         val translatorCard = SettingsGroupCard()
         val initialTranslatorCfg = TranslatorPreferences.load()
@@ -1079,7 +1333,7 @@ class AntiGravitySettingsScreen(
         )
 
         val sourceLangs = TranslatorLanguage.sourceLanguages().toTypedArray()
-        val sourceLangCombo = object : JComboBox<TranslatorLanguage>(sourceLangs) {
+        val sourceLangCombo = object : MihonDropdown<TranslatorLanguage>(sourceLangs) {
             override fun setSelectedItem(anObject: Any?) {
                 val resolved = when (anObject) {
                     is TranslatorLanguage -> anObject
@@ -1094,7 +1348,7 @@ class AntiGravitySettingsScreen(
             }
         }.apply {
             name = "translatorSourceLangCombo"
-            preferredSize = Dimension(200, 32)
+            preferredSize = Dimension(210, Theme.CONTROL_HEIGHT_COMPACT)
             renderer = javax.swing.DefaultListCellRenderer().let { base ->
                 javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
                     val comp = base.getListCellRendererComponent(
@@ -1104,6 +1358,11 @@ class AntiGravitySettingsScreen(
                         isSelected,
                         cellHasFocus,
                     )
+                    if (comp is JLabel && index >= 0) {
+                        comp.border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
+                        comp.background = if (isSelected) Theme.ACCENT_SOFT else Theme.BG_SURFACE
+                        comp.foreground = Theme.TEXT_PRIMARY
+                    }
                     comp
                 }
             }
@@ -1124,7 +1383,7 @@ class AntiGravitySettingsScreen(
         )
 
         val targetLangs = TranslatorLanguage.targetLanguages().toTypedArray()
-        val targetLangCombo = object : JComboBox<TranslatorLanguage>(targetLangs) {
+        val targetLangCombo = object : MihonDropdown<TranslatorLanguage>(targetLangs) {
             override fun setSelectedItem(anObject: Any?) {
                 val resolved = when (anObject) {
                     is TranslatorLanguage -> if (anObject == TranslatorLanguage.AUTO) TranslatorLanguage.PORTUGUESE_BR else anObject
@@ -1139,7 +1398,7 @@ class AntiGravitySettingsScreen(
             }
         }.apply {
             name = "translatorTargetLangCombo"
-            preferredSize = Dimension(200, 32)
+            preferredSize = Dimension(210, Theme.CONTROL_HEIGHT_COMPACT)
             renderer = javax.swing.DefaultListCellRenderer().let { base ->
                 javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
                     val comp = base.getListCellRendererComponent(
@@ -1149,6 +1408,11 @@ class AntiGravitySettingsScreen(
                         isSelected,
                         cellHasFocus,
                     )
+                    if (comp is JLabel && index >= 0) {
+                        comp.border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
+                        comp.background = if (isSelected) Theme.ACCENT_SOFT else Theme.BG_SURFACE
+                        comp.foreground = Theme.TEXT_PRIMARY
+                    }
                     comp
                 }
             }
@@ -1170,7 +1434,7 @@ class AntiGravitySettingsScreen(
 
         val providerDescriptors = TranslationProviderRegistry.availableProviders
         val providerIds = providerDescriptors.map { it.id }.toTypedArray()
-        val providerCombo = object : JComboBox<String>(providerIds) {
+        val providerCombo = object : MihonDropdown<String>(providerIds) {
             override fun setSelectedItem(anObject: Any?) {
                 val resolved = when (anObject) {
                     is mihon.desktop.translator.TranslationProviderDescriptor -> anObject.id
@@ -1187,11 +1451,17 @@ class AntiGravitySettingsScreen(
             }
         }.apply {
             name = "translatorProviderCombo"
-            preferredSize = Dimension(220, 32)
+            preferredSize = Dimension(225, Theme.CONTROL_HEIGHT_COMPACT)
             renderer = javax.swing.DefaultListCellRenderer().let { base ->
                 javax.swing.ListCellRenderer { list, value, index, isSelected, cellHasFocus ->
                     val label = providerDescriptors.firstOrNull { it.id == value }?.displayName ?: (value ?: "")
-                    base.getListCellRendererComponent(list, label, index, isSelected, cellHasFocus)
+                    val comp = base.getListCellRendererComponent(list, label, index, isSelected, cellHasFocus)
+                    if (comp is JLabel && index >= 0) {
+                        comp.border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
+                        comp.background = if (isSelected) Theme.ACCENT_SOFT else Theme.BG_SURFACE
+                        comp.foreground = Theme.TEXT_PRIMARY
+                    }
+                    comp
                 }
             }
             selectedItem = initialTranslatorCfg.providerId
@@ -1230,59 +1500,136 @@ class AntiGravitySettingsScreen(
             ),
         )
 
-        val libreUrlField = JTextField(initialTranslatorCfg.libreTranslateUrl, 18).apply {
+        val libreUrlField = MihonTextField(
+            columns = 18,
+            placeholder = "https://libretranslate.com/translate",
+            compact = true,
+            leadingIconProvider = { ModernIcons.link(14) { Theme.TEXT_MUTED } },
+            showClearButton = true,
+        ).apply {
+            text = initialTranslatorCfg.libreTranslateUrl
             name = "libreTranslateUrlField"
-            preferredSize = Dimension(220, 30)
-            fun persistUrl() {
+            preferredSize = Dimension(250, 34)
+            var urlSaveTimer: Timer? = null
+            fun persistUrlNow() {
+                urlSaveTimer?.stop()
                 val raw = text?.trim().orEmpty()
+                validationError = if (raw.isNotEmpty() && !raw.startsWith("http://") && !raw.startsWith("https://")) {
+                    "URL inválida (use http:// ou https://)"
+                } else {
+                    null
+                }
                 val current = TranslatorPreferences.load()
                 TranslatorPreferences.save(current.copy(libreTranslateUrl = raw))
             }
-            addActionListener { persistUrl() }
+            addActionListener { persistUrlNow() }
+            addFocusListener(object : FocusAdapter() {
+                override fun focusLost(e: FocusEvent?) = persistUrlNow()
+            })
             document.addDocumentListener(object : DocumentListener {
-                override fun insertUpdate(e: DocumentEvent?) = persistUrl()
-                override fun removeUpdate(e: DocumentEvent?) = persistUrl()
-                override fun changedUpdate(e: DocumentEvent?) = persistUrl()
+                fun onDocEdit() {
+                    val raw = text?.trim().orEmpty()
+                    if (raw.isEmpty()) {
+                        persistUrlNow()
+                    } else {
+                        validationError = if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
+                            "URL inválida (use http:// ou https://)"
+                        } else {
+                            null
+                        }
+                        urlSaveTimer?.stop()
+                        urlSaveTimer = Timer(350) { persistUrlNow() }.apply {
+                            isRepeats = false
+                            start()
+                        }
+                    }
+                }
+                override fun insertUpdate(e: DocumentEvent?) = onDocEdit()
+                override fun removeUpdate(e: DocumentEvent?) = onDocEdit()
+                override fun changedUpdate(e: DocumentEvent?) = onDocEdit()
             })
         }
-        translatorCard.addRow(
-            createSettingsRow(
-                title = "Endpoint LibreTranslate",
-                subtitle = "URL do servidor LibreTranslate (usado quando LibreTranslate está selecionado).",
-                rightControl = libreUrlField,
-            ),
+        val libreUrlRow = createSettingsRow(
+            title = "Endpoint LibreTranslate",
+            subtitle = "URL do servidor LibreTranslate (usado apenas quando LibreTranslate está selecionado).",
+            rightControl = libreUrlField,
         )
+        translatorCard.addRow(libreUrlRow)
 
-        val libreKeyField = JTextField(initialTranslatorCfg.libreTranslateApiKey, 16).apply {
+        val libreKeyField = MihonPasswordField(
+            initialValue = initialTranslatorCfg.libreTranslateApiKey,
+            columns = 16,
+            placeholder = "Opcional (chave de API)",
+            compact = true,
+        ).apply {
             name = "libreTranslateApiKeyField"
-            preferredSize = Dimension(220, 30)
-            fun persistKey() {
-                val raw = text ?: ""
+            preferredSize = Dimension(250, 34)
+            var keySaveTimer: Timer? = null
+            fun persistKeyNow() {
+                keySaveTimer?.stop()
+                val raw = plainText
                 val current = TranslatorPreferences.load()
                 TranslatorPreferences.save(current.copy(libreTranslateApiKey = raw))
             }
-            addActionListener { persistKey() }
+            addActionListener { persistKeyNow() }
+            addFocusListener(object : FocusAdapter() {
+                override fun focusLost(e: FocusEvent?) = persistKeyNow()
+            })
             document.addDocumentListener(object : DocumentListener {
-                override fun insertUpdate(e: DocumentEvent?) = persistKey()
-                override fun removeUpdate(e: DocumentEvent?) = persistKey()
-                override fun changedUpdate(e: DocumentEvent?) = persistKey()
+                fun onDocEdit() {
+                    val raw = plainText
+                    if (raw.isEmpty()) {
+                        persistKeyNow()
+                    } else {
+                        keySaveTimer?.stop()
+                        keySaveTimer = Timer(350) { persistKeyNow() }.apply {
+                            isRepeats = false
+                            start()
+                        }
+                    }
+                }
+                override fun insertUpdate(e: DocumentEvent?) = onDocEdit()
+                override fun removeUpdate(e: DocumentEvent?) = onDocEdit()
+                override fun changedUpdate(e: DocumentEvent?) = onDocEdit()
             })
         }
-        translatorCard.addRow(
-            createSettingsRow(
-                title = "Chave de API LibreTranslate",
-                subtitle = "Chave de autenticação opcional para instâncias protegidas do LibreTranslate.",
-                rightControl = libreKeyField,
-            ),
+        val libreKeyRow = createSettingsRow(
+            title = "Chave de API LibreTranslate",
+            subtitle = "Chave de autenticação opcional para instâncias protegidas do LibreTranslate.",
+            rightControl = libreKeyField,
         )
+        translatorCard.addRow(libreKeyRow)
+
+        fun syncLibreRowsVisibility(providerId: String) {
+            val isLibre = providerId.equals("libretranslate", ignoreCase = true)
+            libreUrlRow.isVisible = isLibre
+            libreKeyRow.isVisible = isLibre
+            translatorCard.revalidate()
+            translatorCard.repaint()
+        }
+        syncLibreRowsVisibility(initialTranslatorCfg.providerId)
+        providerCombo.addActionListener {
+            val chosenId = (providerCombo.selectedItem as? String)?.trim().orEmpty()
+            if (chosenId.isNotEmpty()) syncLibreRowsVisibility(chosenId)
+        }
 
         page.add(translatorCard)
-        page.add(Box.createVerticalStrut(24))
+        return page
+    }
+
+    // =========================================================================
+    // PAGE 3C: ATALHOS DE TECLADO
+    // =========================================================================
+    private fun buildShortcutsPage(): JPanel {
+        val page = createPageContainer(
+            "Atalhos",
+            "Personalize todas as teclas e combinações rápidas usadas durante a leitura.",
+        )
 
         addSectionHeader(
             page,
             "Atalhos de Teclado Personalizáveis",
-            "Clique sobre qualquer atalho para definir uma nova tecla de controle do leitor.",
+            "Clique sobre qualquer atalho para definir uma nova tecla ou combinação (ex.: Ctrl+T).",
         )
         val shortcutsCard = SettingsGroupCard()
 
@@ -1298,7 +1645,7 @@ class AntiGravitySettingsScreen(
             }
             dialog.title = "Definir Atalho: ${action.title}"
             dialog.isModal = true
-            dialog.setSize(420, 200)
+            dialog.setSize(450, 230)
             dialog.setLocationRelativeTo(this)
 
             val p = JPanel(BorderLayout(16, 16)).apply {
@@ -1313,12 +1660,18 @@ class AntiGravitySettingsScreen(
                 font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
                 foreground = Theme.TEXT_MUTED
             }
+            val lblConflict = JLabel(" ").apply {
+                font = Theme.FONT_UI.deriveFont(Font.BOLD, 11.5f)
+                foreground = Theme.WARNING
+            }
             val center = JPanel().apply {
                 isOpaque = false
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 add(lblPrompt)
                 add(Box.createVerticalStrut(6))
                 add(lblCurrent)
+                add(Box.createVerticalStrut(8))
+                add(lblConflict)
             }
             p.add(center, BorderLayout.CENTER)
 
@@ -1348,13 +1701,33 @@ class AntiGravitySettingsScreen(
             }
             p.add(btnBar, BorderLayout.SOUTH)
 
+            var pendingConflictCombo: KeyCombo? = null
             dialog.addKeyListener(object : java.awt.event.KeyAdapter() {
-                override fun keyPressed(e: java.awt.event.KeyEvent) {
-                    if (e.keyCode != java.awt.event.KeyEvent.VK_ESCAPE) {
-                        ReaderAction.setKeyCodes(action, listOf(e.keyCode))
-                        onUpdated()
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_ESCAPE) {
                         dialog.dispose()
+                        return
                     }
+                    // Ignore bare modifier presses until an actual key is pressed
+                    if (e.keyCode in setOf(KeyEvent.VK_CONTROL, KeyEvent.VK_SHIFT, KeyEvent.VK_ALT, KeyEvent.VK_META, KeyEvent.VK_ALT_GRAPH)) {
+                        return
+                    }
+                    val combo = KeyCombo(e.keyCode, e.modifiersEx).let { KeyCombo(it.keyCode, it.normalizedModifiers()) }
+                    val conflicting = ReaderAction.findConflict(action, combo.keyCode, combo.modifiers)
+                    if (conflicting != null && pendingConflictCombo != combo) {
+                        pendingConflictCombo = combo
+                        lblConflict.text = "O atalho '${combo.toDisplayText()}' já está em '${conflicting.title}'. Pressione novamente para substituir."
+                        return
+                    }
+                    if (conflicting != null && pendingConflictCombo == combo) {
+                        val cleaned = ReaderAction.getKeyCombos(conflicting).filter {
+                            !(it.keyCode == combo.keyCode && it.normalizedModifiers() == combo.modifiers)
+                        }
+                        ReaderAction.setKeyCombos(conflicting, cleaned)
+                    }
+                    ReaderAction.setKeyCombos(action, listOf(combo))
+                    onUpdated()
+                    dialog.dispose()
                 }
             })
             dialog.isFocusable = true
@@ -1414,41 +1787,46 @@ class AntiGravitySettingsScreen(
             1024 to "1024 MB (Sem Restrições)",
         )
         val currentLimit = MemoryManager.ramLimitMb
-        val ramLimitBox = JComboBox(ramLimitOptions.map { it.second }.toTypedArray()).apply {
+        val ramLimitBox = MihonDropdown(ramLimitOptions.map { it.second }.toTypedArray()).apply {
             val selectedIdx = ramLimitOptions.indexOfFirst { it.first == currentLimit }.let { if (it >= 0) it else 2 } // 2 is 500MB
             selectedIndex = selectedIdx
-            preferredSize = Dimension(280, 32)
+            preferredSize = Dimension(280, Theme.CONTROL_HEIGHT_COMPACT)
         }
 
-        val memStatusLbl = JLabel("${MemoryManager.usedMemoryMb} MB / ${MemoryManager.ramLimitMb} MB").apply {
+        fun formatMemoryStatus(limit: Int = MemoryManager.ramLimitMb): String =
+            "Heap: ${MemoryManager.usedMemoryMb} MB • RAM: ${MemoryManager.processRssMb} MB / $limit MB"
+
+        val memStatusLbl = JLabel(formatMemoryStatus()).apply {
             font = Theme.FONT_UI.deriveFont(Font.BOLD, 12f)
-            foreground = Theme.ACCENT
+            foreground = if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
         }
 
         ramLimitBox.addActionListener {
-            val chosen = ramLimitOptions[ramLimitBox.selectedIndex].first
+            val idx = ramLimitBox.selectedIndex
+            if (idx !in ramLimitOptions.indices) return@addActionListener
+            val chosen = ramLimitOptions[idx].first
             MemoryManager.ramLimitMb = chosen
-            memStatusLbl.text = "${MemoryManager.usedMemoryMb} MB / ${chosen} MB"
-            ctx.setStatus("Limite de RAM configurado para ${chosen} MB")
+            memStatusLbl.text = formatMemoryStatus(chosen)
+            ctx.setStatus("Limite de RAM configurado para ${chosen} MB (caches ajustados; teto JVM total aplica ao reiniciar)")
         }
 
         ramCard.addRow(
             createSettingsRow(
                 title = "Limite de Consumo de RAM",
-                subtitle = "Define o orçamento máximo de memória RAM. O leitor adapta automaticamente o pré-carregamento e buffers para respeitar este teto.",
+                subtitle = "Ajusta em tempo real os orçamentos de cache em MB e grava o teto -Xmx para a próxima inicialização.",
                 rightControl = ramLimitBox,
             ),
         )
 
         val btnCleanRam = ModernButton(
             text = "Otimizar / Liberar RAM",
-            icon = ModernIcons.storage(14) { Color.WHITE },
+            icon = ModernIcons.storage(14) { Theme.TEXT_PRIMARY },
             variant = ModernButton.Variant.SURFACE,
         ).apply {
             addActionListener {
                 MemoryManager.trimMemoryIfNeeded(force = true)
-                memStatusLbl.text = "${MemoryManager.usedMemoryMb} MB / ${MemoryManager.ramLimitMb} MB"
-                ctx.setStatus("Memória RAM desfragmentada e buffers liberados.")
+                memStatusLbl.text = formatMemoryStatus()
+                ctx.setStatus("Caches liberados e coleta de memória acionada.")
             }
         }
 
@@ -1481,7 +1859,7 @@ class AntiGravitySettingsScreen(
             if (qStr in setOf("FAST", "BILINEAR")) MangaImageEnhancer.QualityMode.BILINEAR else MangaImageEnhancer.QualityMode.NITIDO
         }.getOrDefault(MangaImageEnhancer.QualityMode.NITIDO)
 
-        val qualityPill = SegmentedPillSelector(
+        val qualityPill = MihonSegmentedSelector(
             options = listOf(
                 MangaImageEnhancer.QualityMode.BILINEAR to "Bilinear",
                 MangaImageEnhancer.QualityMode.NITIDO to "Traço Nitido",
@@ -1523,14 +1901,14 @@ class AntiGravitySettingsScreen(
         )
         val installCard = SettingsGroupCard()
 
-        val installEnhanceBox = JComboBox(MangaImageEnhancer.InstallEnhanceMode.entries.map { it.label }.toTypedArray()).apply {
+        val installEnhanceBox = MihonDropdown(MangaImageEnhancer.InstallEnhanceMode.entries.map { it.label }.toTypedArray()).apply {
             val saved = runCatching {
                 MangaImageEnhancer.InstallEnhanceMode.valueOf(readerPrefs.get("installEnhanceMode", "OFF"))
             }.getOrDefault(MangaImageEnhancer.InstallEnhanceMode.OFF)
             selectedIndex = saved.ordinal
-            preferredSize = Dimension(260, 32)
+            preferredSize = Dimension(260, Theme.CONTROL_HEIGHT_COMPACT)
             addActionListener {
-                val chosen = MangaImageEnhancer.InstallEnhanceMode.entries[selectedIndex]
+                val chosen = MangaImageEnhancer.InstallEnhanceMode.entries.getOrNull(selectedIndex) ?: return@addActionListener
                 readerPrefs.put("installEnhanceMode", chosen.name)
                 ctx.setStatus("Melhoria visual nos downloads: ${chosen.label}")
             }
@@ -1543,14 +1921,14 @@ class AntiGravitySettingsScreen(
             ),
         )
 
-        val installFormatBox = JComboBox(MangaImageEnhancer.InstallOutputFormat.entries.map { it.label }.toTypedArray()).apply {
+        val installFormatBox = MihonDropdown(MangaImageEnhancer.InstallOutputFormat.entries.map { it.label }.toTypedArray()).apply {
             val saved = runCatching {
                 MangaImageEnhancer.InstallOutputFormat.valueOf(readerPrefs.get("installOutputFormat", "JPEG_HQ"))
             }.getOrDefault(MangaImageEnhancer.InstallOutputFormat.JPEG_HQ)
             selectedIndex = saved.ordinal
-            preferredSize = Dimension(260, 32)
+            preferredSize = Dimension(260, Theme.CONTROL_HEIGHT_COMPACT)
             addActionListener {
-                val chosen = MangaImageEnhancer.InstallOutputFormat.entries[selectedIndex]
+                val chosen = MangaImageEnhancer.InstallOutputFormat.entries.getOrNull(selectedIndex) ?: return@addActionListener
                 readerPrefs.put("installOutputFormat", chosen.name)
             }
         }
@@ -1695,25 +2073,63 @@ class AntiGravitySettingsScreen(
             variant = ModernButton.Variant.SURFACE,
         ).apply {
             addActionListener {
-                JOptionPane.showMessageDialog(
-                    this@AntiGravitySettingsScreen,
-                    "Mihon Desktop Linux v0.3.0\nKotlin + Exposed/SQLite + FlatLaf Swing\nDesign System inspirado em Google AntiGravity",
-                    "Sobre o Mihon",
-                    JOptionPane.INFORMATION_MESSAGE,
-                )
+                val owner = SwingUtilities.getWindowAncestor(this@AntiGravitySettingsScreen)
+                val dlg = JDialog(owner, "Sobre o Mihon Linux", java.awt.Dialog.ModalityType.APPLICATION_MODAL).apply {
+                    setSize(420, 230)
+                    isResizable = false
+                    setLocationRelativeTo(this@AntiGravitySettingsScreen)
+                }
+                val root = JPanel(BorderLayout(14, 14)).apply {
+                    background = Theme.BG_SURFACE
+                    border = BorderFactory.createEmptyBorder(20, 24, 18, 24)
+                }
+                val body = JPanel().apply {
+                    isOpaque = false
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    add(JLabel("Mihon Desktop Linux v0.4.0").apply {
+                        font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 17f)
+                        foreground = Theme.TEXT_PRIMARY
+                        alignmentX = 0f
+                    })
+                    add(Box.createVerticalStrut(6))
+                    add(JLabel("Kotlin JVM + Exposed/SQLite + FlatLaf Swing").apply {
+                        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
+                        foreground = Theme.TEXT_SECONDARY
+                        alignmentX = 0f
+                    })
+                    add(Box.createVerticalStrut(4))
+                    add(JLabel("Design System Mihon Index + Motion Engine 60 FPS").apply {
+                        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+                        foreground = Theme.TEXT_MUTED
+                        alignmentX = 0f
+                    })
+                }
+                val btnOk = ModernButton(text = "Fechar", variant = ModernButton.Variant.PRIMARY).apply {
+                    addActionListener { dlg.dispose() }
+                }
+                val bar = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                    isOpaque = false
+                    add(btnOk)
+                }
+                root.add(JLabel(AppIcon.getIcon(40)), BorderLayout.WEST)
+                root.add(body, BorderLayout.CENTER)
+                root.add(bar, BorderLayout.SOUTH)
+                dlg.rootPane.defaultButton = btnOk
+                dlg.contentPane = root
+                dlg.isVisible = true
             }
         }
         aboutCard.addRow(
             createSettingsRow(
                 title = "Versão Instalada",
-                subtitle = "Mihon Linux v0.3.0 — Arquitetura modular Kotlin JVM.",
+                subtitle = "Mihon Linux v0.4.0 — Arquitetura modular Kotlin JVM.",
                 rightControl = btnInfo,
             ),
         )
 
         val btnExit = ModernButton(
             text = "Encerrar Aplicativo",
-            variant = ModernButton.Variant.FAVORITE,
+            variant = ModernButton.Variant.DANGER,
         ).apply {
             addActionListener { onExitApp() }
         }
@@ -1725,39 +2141,6 @@ class AntiGravitySettingsScreen(
             ),
         )
         page.add(aboutCard)
-        page.add(Box.createVerticalStrut(24))
-
-        addSectionHeader(
-            page,
-            "Atalhos do Leitor",
-            "Teclas rápidas disponíveis durante a leitura de capítulos.",
-        )
-        val shortcutsCard = SettingsGroupCard()
-        val shortcuts = listOf(
-            Triple("Navegar Páginas", "Avança ou retrocede páginas no capítulo aberto", "← / →  ou  Espaço"),
-            Triple("Auto-Scroll Mãos-Livres", "Ativa ou pausa a rolagem vertical contínua", "Tecla A"),
-            Triple("Tela Cheia", "Alterna o modo imersivo sem bordas de janela", "F11  ou  Esc"),
-            Triple("Zoom in / Zoom out", "Amplia ou reduz a escala da página atual", "Ctrl + Roda do Mouse"),
-        )
-        for ((title, desc, keyText) in shortcuts) {
-            val keyBadge = JLabel(keyText, SwingConstants.CENTER).apply {
-                font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11.5f)
-                foreground = Theme.TEXT_PRIMARY
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1, true),
-                    BorderFactory.createEmptyBorder(4, 10, 4, 10),
-                )
-            }
-            themeUpdaters.add { keyBadge.foreground = Theme.TEXT_PRIMARY }
-            shortcutsCard.addRow(
-                createSettingsRow(
-                    title = title,
-                    subtitle = desc,
-                    rightControl = keyBadge,
-                ),
-            )
-        }
-        page.add(shortcutsCard)
 
         return page
     }

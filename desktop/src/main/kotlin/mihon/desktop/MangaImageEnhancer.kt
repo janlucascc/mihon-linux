@@ -111,6 +111,14 @@ object MangaImageEnhancer {
     private const val FP_SHIFT = 14
     private const val FP_ONE = 1 shl FP_SHIFT
 
+    private val nitidoConcurrencyLimiter = java.util.concurrent.Semaphore(2)
+
+    private fun maxNitidoPixels(): Long = when {
+        MemoryManager.ramLimitMb <= 256 -> 3_000_000L
+        MemoryManager.ramLimitMb <= 384 -> 4_500_000L
+        else -> 8_000_000L
+    }
+
     /**
      * Scales [src] to ([targetW] x [targetH]) using the selected [quality] pipeline.
      */
@@ -124,10 +132,12 @@ object MangaImageEnhancer {
         val th = targetH.coerceAtLeast(1)
         if (src.width == tw && src.height == th && quality == QualityMode.BILINEAR) return src
 
-        if (quality == QualityMode.BILINEAR || src.width.toLong() * src.height > 8_000_000L || tw.toLong() * th > 8_000_000L) {
+        val maxPixels = maxNitidoPixels()
+        if (quality == QualityMode.BILINEAR || src.width.toLong() * src.height > maxPixels || tw.toLong() * th > maxPixels) {
             return scaleImageFast(src, tw, th)
         }
 
+        nitidoConcurrencyLimiter.acquire()
         return try {
             val srcPixels = extractRgbPixels(src)
             val sw = src.width
@@ -147,12 +157,14 @@ object MangaImageEnhancer {
                 strength = if (scaleRatio > 1.05) 0.85f else 0.65f,
                 isUpscale = scaleRatio > 1.05,
             )
-            val finalPixels = enhance64BitColorAndClarity(lineArt, tw, th)
-            packRgbPixels(finalPixels, tw, th)
+            enhance64BitColorAndClarityInPlace(lineArt)
+            packRgbPixels(lineArt, tw, th)
         } catch (_: OutOfMemoryError) {
-            System.gc()
+            MemoryManager.trimMemoryIfNeeded(force = true)
             // Seamless fallback to lightweight bilinear scaling if heap is exhausted
             scaleImageFast(src, tw, th)
+        } finally {
+            nitidoConcurrencyLimiter.release()
         }
     }
 
@@ -215,65 +227,46 @@ object MangaImageEnhancer {
         return if (filter != ColorFilterMode.NONE) applyColorFilter(scaled, filter) else scaled
     }
 
+    private val sCurveContrastLut = IntArray(256) { i ->
+        val norm = i / 255.0
+        val s = if (norm <= 0.0) 0.0 else if (norm >= 1.0) 1.0 else {
+            val p1 = Math.pow(norm, 1.15)
+            val p2 = Math.pow(1.0 - norm, 1.15)
+            p1 / (p1 + p2)
+        }
+        (s * 255.0 + 0.5).toInt().coerceIn(0, 255)
+    }
+
     /**
-     * Perceptual color enhancement & high-dynamic clarity pass ("64-bit graphic look").
-     * - Preserves pure black text/ink and pure white paper.
-     * - Enhances midtone contrast (subtle S-curve) so details pop.
-     * - Boosts color saturation smoothly (vibrance: desaturated colors are boosted more than already saturated ones).
-     * - Sharpens texture and micro-contrasts with local unsharp masking.
+     * In-place perceptual color enhancement & high-dynamic clarity pass ("64-bit graphic look").
+     * Mutates [pixels] in-place to avoid allocating a duplicate full-page IntArray.
      */
-    private fun enhance64BitColorAndClarity(src: IntArray, w: Int, h: Int): IntArray {
-        if (w < 3 || h < 3) return src
-        val out = IntArray(w * h)
+    private fun enhance64BitColorAndClarityInPlace(pixels: IntArray) {
+        val len = pixels.size
+        if (len < 9) return
+        val lut = sCurveContrastLut
+        IntStream.range(0, len).parallel().forEach { idx ->
+            val px = pixels[idx]
+            var r = lut[(px ushr 16) and 0xFF]
+            var g = lut[(px ushr 8) and 0xFF]
+            var b = lut[px and 0xFF]
 
-        // Precompute S-curve contrast LUT (0..255)
-        val contrastLut = IntArray(256) { i ->
-            val norm = i / 255.0
-            // Smooth sigmoidal curve: x^1.12 / (x^1.12 + (1-x)^1.12)
-            val s = if (norm <= 0.0) 0.0 else if (norm >= 1.0) 1.0 else {
-                val p1 = Math.pow(norm, 1.15)
-                val p2 = Math.pow(1.0 - norm, 1.15)
-                p1 / (p1 + p2)
+            val maxC = max(r, max(g, b))
+            val minC = min(r, min(g, b))
+            val delta = maxC - minC
+
+            if (delta > 4 && maxC > 20 && minC < 245) {
+                val sat = delta.toFloat() / maxC.toFloat()
+                val vibFactor = (1.0f - sat * 0.65f) * 0.25f
+                val luma = (r * 77 + g * 150 + b * 29) shr 8
+
+                r = (r + (r - luma) * vibFactor).toInt().coerceIn(0, 255)
+                g = (g + (g - luma) * vibFactor).toInt().coerceIn(0, 255)
+                b = (b + (b - luma) * vibFactor).toInt().coerceIn(0, 255)
             }
-            (s * 255.0 + 0.5).toInt().coerceIn(0, 255)
+
+            pixels[idx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
         }
-
-        IntStream.range(0, h).parallel().forEach { y ->
-            val row = y * w
-            for (x in 0 until w) {
-                val idx = row + x
-                val px = src[idx]
-                var r = (px ushr 16) and 0xFF
-                var g = (px ushr 8) and 0xFF
-                var b = px and 0xFF
-
-                // Apply S-curve contrast
-                r = contrastLut[r]
-                g = contrastLut[g]
-                b = contrastLut[b]
-
-                // Perceptual Vibrance boost:
-                val maxC = max(r, max(g, b))
-                val minC = min(r, min(g, b))
-                val delta = maxC - minC
-
-                if (delta > 4 && maxC > 20 && minC < 245) {
-                    // Saturation = delta / maxC
-                    val sat = delta.toFloat() / maxC.toFloat()
-                    // Vibrance factor: boosts lower/medium saturated colors by up to 22%, protecting already saturated colors
-                    val vibFactor = (1.0f - sat * 0.65f) * 0.25f
-                    val luma = (r * 77 + g * 150 + b * 29) shr 8
-
-                    r = (r + (r - luma) * vibFactor).toInt().coerceIn(0, 255)
-                    g = (g + (g - luma) * vibFactor).toInt().coerceIn(0, 255)
-                    b = (b + (b - luma) * vibFactor).toInt().coerceIn(0, 255)
-                }
-
-                out[idx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-
-        return out
     }
 
     /**

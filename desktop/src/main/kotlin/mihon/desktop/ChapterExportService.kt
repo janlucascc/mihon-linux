@@ -381,17 +381,15 @@ class ExportChapterDialog(
     private val chaptersToExport: List<Chapter>,
 ) : JDialog(owner, "Exportar Capítulos (PDF / EPUB)", ModalityType.APPLICATION_MODAL) {
 
-    private val formatCombo = JComboBox(
+    private val formatCombo = mihon.desktop.ui.components.MihonDropdown(
         ChapterExportService.ExportFormat.entries.map { it.displayName }.toTypedArray(),
     ).apply {
-        preferredSize = Dimension(240, 32)
+        preferredSize = Dimension(240, Theme.CONTROL_HEIGHT_COMPACT)
     }
 
-    private val grayscaleCheck = JCheckBox("Otimizar para e-Reader / Kindle (Tons de cinza 8-bit)").apply {
-        isOpaque = false
-        foreground = Theme.TEXT_PRIMARY
-        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
-    }
+    private val grayscaleCheck = mihon.desktop.ui.components.MihonCheckbox(
+        "Otimizar para e-Reader / Kindle (Tons de cinza 8-bit)",
+    )
 
     private var targetDir = File(System.getProperty("user.home"), "Downloads").let {
         if (it.exists()) it else File(System.getProperty("user.home"))
@@ -462,7 +460,7 @@ class ExportChapterDialog(
             alignmentX = 0f
             maximumSize = Dimension(Int.MAX_VALUE, 34)
             add(dirLabel, BorderLayout.CENTER)
-            add(JButton("Escolher Pasta…").apply {
+            add(ModernButton("Escolher Pasta…", variant = ModernButton.Variant.SURFACE, compact = true).apply {
                 addActionListener {
                     val chooser = JFileChooser(targetDir).apply {
                         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY

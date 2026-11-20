@@ -14,21 +14,21 @@ import javax.swing.Icon
 import javax.swing.ImageIcon
 
 /**
- * Procedural vector icon generator for Mihon Linux:
- * Renders the indigo rounded-squircle open book mark with dual-tone leaves and cyan completion badge.
+ * Procedural vector icon generator for Mihon Linux (Mihon Index):
+ * Renders the Cobalt rounded-squircle open book mark with dual-tone leaves and Signal Orange completion badge.
  */
 object AppIcon {
 
-    private const val ICON_VERSION = "v2-indigo-book"
+    private const val ICON_VERSION = "v3-mihon-index"
 
     val CANONICAL_SVG: String = """
         <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-          <rect x="8" y="8" width="112" height="112" rx="26" fill="#5B5BD6"/>
+          <rect x="8" y="8" width="112" height="112" rx="26" fill="#4F46E5"/>
           <path d="M28 38c0-5 4-9 9-9h24c7 0 12 5 12 12v52c-6-5-12-7-20-7H28V38z" fill="#F7F7FA"/>
           <path d="M100 38c0-5-4-9-9-9H67c-7 0-12 5-12 12v52c6-5 12-7 20-7h25V38z" fill="#E8E9FF"/>
-          <path d="M64 41v45" fill="none" stroke="#5B5BD6" stroke-width="5" stroke-linecap="round"/>
-          <path d="M37 46h18M37 58h18M73 46h18M73 58h18" fill="none" stroke="#8D8DE8" stroke-width="4" stroke-linecap="round"/>
-          <circle cx="94" cy="94" r="18" fill="#36C5F0"/>
+          <path d="M64 41v45" fill="none" stroke="#4F46E5" stroke-width="5" stroke-linecap="round"/>
+          <path d="M37 46h18M37 58h18M73 46h18M73 58h18" fill="none" stroke="#818CF8" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="94" cy="94" r="18" fill="#F97316"/>
           <path d="M86 94l6 6 11-13" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
     """.trimIndent() + "\n"
@@ -44,8 +44,8 @@ object AppIcon {
         val scale = safeSize / 128.0
         g2.scale(scale, scale)
 
-        // Rounded squircle container (#5B5BD6, rx=26 -> arc diameter 52 in 128x128 viewBox)
-        g2.color = Color(0x5B, 0x5B, 0xD6)
+        // Rounded squircle container (#4F46E5, rx=26 -> arc diameter 52 in 128x128 viewBox)
+        g2.color = Color(0x4F, 0x46, 0xE5)
         g2.fill(RoundRectangle2D.Float(8f, 8f, 112f, 112f, 52f, 52f))
 
         // Left page (#F7F7FA)
@@ -76,21 +76,21 @@ object AppIcon {
         g2.color = Color(0xE8, 0xE9, 0xFF)
         g2.fill(rightPage)
 
-        // Center spine (#5B5BD6)
-        g2.color = Color(0x5B, 0x5B, 0xD6)
+        // Center spine (#4F46E5)
+        g2.color = Color(0x4F, 0x46, 0xE5)
         g2.stroke = BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
         g2.draw(Line2D.Float(64f, 41f, 64f, 86f))
 
-        // Page line rules (#8D8DE8)
-        g2.color = Color(0x8D, 0x8D, 0xE8)
+        // Page line rules (#818CF8)
+        g2.color = Color(0x81, 0x8C, 0xF8)
         g2.stroke = BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
         g2.draw(Line2D.Float(37f, 46f, 55f, 46f))
         g2.draw(Line2D.Float(37f, 58f, 55f, 58f))
         g2.draw(Line2D.Float(73f, 46f, 91f, 46f))
         g2.draw(Line2D.Float(73f, 58f, 91f, 58f))
 
-        // Cyan completion badge (#36C5F0)
-        g2.color = Color(0x36, 0xC5, 0xF0)
+        // Signal orange completion badge (#F97316)
+        g2.color = Color(0xF9, 0x73, 0x16)
         g2.fill(Ellipse2D.Float(76f, 76f, 36f, 36f))
 
         // White checkmark (#FFFFFF)

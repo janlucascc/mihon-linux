@@ -56,13 +56,93 @@ class SearchScreen(
     private val cardPrototype = MangaPosterCard()
     private val hoverAnimator = GridHoverAnimator(grid)
 
-    private val field = JTextField(26).apply {
-        putClientProperty("JTextField.placeholderText", "Pesquisar mangá (ex: One Piece, Naruto, Solo Leveling)…")
-        putClientProperty("JComponent.roundRect", true)
+    private val field = mihon.desktop.ui.components.MihonSearchField(
+        columns = 26,
+        placeholder = "Pesquisar mangá (ex: One Piece, Berserk, Solo Leveling)…",
+        compact = false,
+        shortcutBadge = null,
+        debounceMs = 0,
+    ).apply {
+        minimumSize = Dimension(180, Theme.CONTROL_HEIGHT_COMPACT)
+        preferredSize = Dimension(300, Theme.CONTROL_HEIGHT_COMPACT)
+        onSubmit = { search() }
     }
-    private val sourceFilter = JComboBox(
+    private val sourceFilter = mihon.desktop.ui.components.MihonDropdown(
         (listOf("Todas as fontes") + ctx.extensions.map { it.name }).toTypedArray(),
-    )
+    ).apply {
+        preferredSize = Dimension(170, Theme.CONTROL_HEIGHT_COMPACT)
+    }
+    private val headerTitleLabel = JLabel("Todas as fontes", SwingConstants.CENTER).apply {
+        font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
+        foreground = Theme.TEXT_PRIMARY
+    }
+    private var activeCatalogMode: Int = 0 // 0 = Popular, 1 = Recentes, 2 = Busca
+    private val searchBarPanel = JPanel(BorderLayout(8, 0)).apply {
+        isOpaque = false
+        border = BorderFactory.createEmptyBorder(0, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER)
+        isVisible = false
+    }
+    private val modeSegmentedBar = mihon.desktop.ui.components.MihonSegmentedSelector(
+        options = listOf(0 to "Popular", 1 to "Recentes", 2 to "Busca"),
+        initialValue = 0,
+    ) { mode ->
+        setCatalogMode(mode)
+    }.apply {
+        preferredSize = Dimension(400, Theme.CONTROL_HEIGHT_COMPACT)
+        minimumSize = Dimension(240, Theme.CONTROL_HEIGHT_COMPACT)
+        maximumSize = Dimension(Int.MAX_VALUE, Theme.CONTROL_HEIGHT_COMPACT)
+    }
+    private val loadingStrip = JPanel(BorderLayout(10, 0)).apply {
+        isOpaque = true
+        background = Theme.BG_SURFACE
+        border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+            BorderFactory.createEmptyBorder(6, Theme.PAGE_GUTTER, 6, Theme.PAGE_GUTTER),
+        )
+        isVisible = false
+    }
+    private val loadingLabel = JLabel("Pesquisando…").apply {
+        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
+        foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+    }
+    private val loadingProgress = javax.swing.JProgressBar().apply {
+        isIndeterminate = true
+        preferredSize = Dimension(130, 8)
+    }
+    private val sourceErrorStrip = JPanel(BorderLayout(12, 0)).apply {
+        isOpaque = true
+        background = Theme.BG_SURFACE
+        border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.DANGER),
+            BorderFactory.createEmptyBorder(8, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER),
+        )
+        isVisible = false
+    }
+    private val sourceErrorLabel = JLabel("").apply {
+        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+        foreground = Theme.DANGER
+    }
+    private val retrySearchBtn = ModernButton("Tentar novamente", variant = ModernButton.Variant.SURFACE, compact = true)
+    private val centerCards = java.awt.CardLayout()
+    private val centerPanel = JPanel(centerCards)
+    private val emptyTitleLbl = JLabel("Nenhum resultado").apply {
+        font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 18f)
+        foreground = Theme.TEXT_PRIMARY
+        alignmentX = 0.5f
+    }
+    private val emptyDescLbl = JLabel("Nenhuma obra corresponde ao termo pesquisado nesta fonte.").apply {
+        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
+        foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+        alignmentX = 0.5f
+    }
+    private val emptyClearBtn = ModernButton("Limpar busca", variant = ModernButton.Variant.PRIMARY).apply {
+        alignmentX = 0.5f
+        addActionListener {
+            field.text = ""
+            loadPopular()
+        }
+    }
+    private var lastActionWasSearch = false
     private var themeListener: ((Boolean) -> Unit)? = null
     private var extensionListener: (() -> Unit)? = null
 
@@ -73,9 +153,9 @@ class SearchScreen(
         grid.visibleRowCount = -1
         grid.fixedCellWidth = CARD_W
         grid.fixedCellHeight = CARD_H
-        grid.border = BorderFactory.createEmptyBorder(16, 18, 16, 18)
-        grid.cellRenderer = ListCellRenderer { _, hit, index, selected, _ ->
-            renderHit(hit, index, selected)
+        grid.border = BorderFactory.createEmptyBorder(14, Theme.PAGE_GUTTER, Theme.PAGE_GUTTER, Theme.PAGE_GUTTER)
+        grid.cellRenderer = ListCellRenderer { _, hit, index, selected, cellHasFocus ->
+            renderHit(hit, index, selected, cellHasFocus)
         }
         grid.addMouseMotionListener(object : MouseMotionAdapter() {
             override fun mouseMoved(e: MouseEvent) {
@@ -100,58 +180,174 @@ class SearchScreen(
             }
         })
 
-        val btnPopular = ModernButton(
-            text = "Em Alta",
-            icon = ModernIcons.flame(14) { Theme.ACCENT_HOVER },
-            variant = ModernButton.Variant.SURFACE,
-        ).apply {
-            addActionListener { loadPopular() }
-        }
         val btnSearch = ModernButton(
-            text = "Buscar",
-            icon = ModernIcons.search(14) { Color.WHITE },
+            text = "Ir",
             variant = ModernButton.Variant.PRIMARY,
+            compact = true,
         ).apply {
+            preferredSize = Dimension(64, Theme.CONTROL_HEIGHT_COMPACT)
             addActionListener { search() }
         }
         field.addActionListener { search() }
         sourceFilter.addActionListener {
-            if (field.text.isBlank()) loadPopular() else search()
+            val sel = sourceFilter.selectedItem as? String ?: "Todas as fontes"
+            headerTitleLabel.text = sel
+            if (activeCatalogMode == 2 && field.text.isNotBlank()) search() else loadPopular()
+        }
+        retrySearchBtn.addActionListener {
+            if (lastActionWasSearch && field.text.isNotBlank()) search() else loadPopular()
         }
 
-        val top = JPanel(FlowLayout(FlowLayout.LEFT, 10, 10)).apply {
-            background = Theme.BG_SURFACE
-            border = BorderFactory.createEmptyBorder(4, 12, 4, 12)
+        val leftBackPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
             if (onBackToSources != null) {
                 add(
-                    ModernButton(
-                        text = "Fontes",
-                        icon = ModernIcons.chevronLeft(14) { Theme.TEXT_PRIMARY },
-                        variant = ModernButton.Variant.SURFACE,
+                    ModernIconButton(
+                        icon = ModernIcons.chevronLeft(18) { Theme.TEXT_PRIMARY },
+                        tip = "Voltar às fontes",
+                        sizePx = 32,
                     ).apply {
                         addActionListener { onBackToSources() }
                     },
                 )
             }
-            add(JLabel("Fonte:"))
-            add(sourceFilter)
-            add(btnPopular)
-            add(field)
-            add(btnSearch)
         }
-        val scroll = JScrollPane(grid).apply {
+
+        val btnFilters = ModernButton(
+            text = "Filtros",
+            variant = ModernButton.Variant.SURFACE,
+            compact = true,
+        ).apply {
+            preferredSize = Dimension(78, 32)
+            addActionListener {
+                val popup = mihon.desktop.ui.components.MihonPopupMenu.create()
+                popup.add(mihon.desktop.ui.components.MihonPopupMenu.header("SELECIONAR FONTE:"))
+                val grp = javax.swing.ButtonGroup()
+                for (i in 0 until sourceFilter.itemCount) {
+                    val label = sourceFilter.getItemAt(i)
+                    val item = mihon.desktop.ui.components.MihonPopupMenu.radioItem(label, i == sourceFilter.selectedIndex) {
+                        sourceFilter.selectedIndex = i
+                    }
+                    grp.add(item)
+                    popup.add(item)
+                }
+                popup.show(this, 0, height + 4)
+            }
+        }
+
+        val rightFilterPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+            isOpaque = false
+            add(btnFilters)
+        }
+
+        val topCatalogBar = JPanel(BorderLayout()).apply {
+            background = Theme.BG_SIDEBAR
+            preferredSize = Dimension(100, 46)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(6, 12, 6, 12),
+            )
+            add(leftBackPanel, BorderLayout.WEST)
+            add(headerTitleLabel, BorderLayout.CENTER)
+            add(rightFilterPanel, BorderLayout.EAST)
+        }
+
+        val modeBarOuter = JPanel(BorderLayout()).apply {
+            background = Theme.BG_APP
+            border = BorderFactory.createEmptyBorder(10, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER)
+            add(modeSegmentedBar, BorderLayout.CENTER)
+        }
+
+        searchBarPanel.add(field, BorderLayout.CENTER)
+        searchBarPanel.add(btnSearch, BorderLayout.EAST)
+
+        loadingStrip.add(loadingLabel, BorderLayout.CENTER)
+        loadingStrip.add(loadingProgress, BorderLayout.EAST)
+        sourceErrorStrip.add(sourceErrorLabel, BorderLayout.CENTER)
+        sourceErrorStrip.add(retrySearchBtn, BorderLayout.EAST)
+
+        val northStack = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(topCatalogBar)
+            add(modeBarOuter)
+            add(searchBarPanel)
+            add(loadingStrip)
+            add(sourceErrorStrip)
+        }
+
+        val loadMoreBtn = ModernButton("Carregar mais", variant = ModernButton.Variant.SURFACE).apply {
+            preferredSize = Dimension(148, 38)
+            addActionListener {
+                if (activeCatalogMode == 2 && field.text.isNotBlank()) search() else loadPopular()
+            }
+        }
+
+        val loadMoreFooter = JPanel(FlowLayout(FlowLayout.CENTER, 0, 12)).apply {
+            background = Theme.BG_APP
+            add(loadMoreBtn)
+        }
+
+        val gridWithFooter = JPanel(BorderLayout()).apply {
+            background = Theme.BG_APP
+            add(grid, BorderLayout.CENTER)
+            add(loadMoreFooter, BorderLayout.SOUTH)
+        }
+
+        val scroll = JScrollPane(gridWithFooter).apply {
             border = null
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
             verticalScrollBar.unitIncrement = 28
+            horizontalScrollBarPolicy = javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         }
-        add(top, BorderLayout.NORTH)
-        add(scroll, BorderLayout.CENTER)
+        val emptyBox = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(JLabel(ModernIcons.search(44) { if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY }).apply { alignmentX = 0.5f })
+            add(Box.createVerticalStrut(12))
+            add(emptyTitleLbl)
+            add(Box.createVerticalStrut(6))
+            add(emptyDescLbl)
+            add(Box.createVerticalStrut(16))
+            add(emptyClearBtn)
+        }
+        val emptyWrap = JPanel(java.awt.GridBagLayout()).apply {
+            background = Theme.BG_APP
+            add(emptyBox)
+        }
+        centerPanel.background = Theme.BG_APP
+        centerPanel.add(scroll, "grid")
+        centerPanel.add(emptyWrap, "empty")
+
+        add(northStack, BorderLayout.NORTH)
+        add(centerPanel, BorderLayout.CENTER)
 
         val listener = { _: Boolean ->
             background = Theme.BG_APP
             grid.background = Theme.BG_APP
-            top.background = Theme.BG_SURFACE
+            gridWithFooter.background = Theme.BG_APP
+            loadMoreFooter.background = Theme.BG_APP
+            topCatalogBar.background = Theme.BG_SIDEBAR
+            topCatalogBar.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(6, 12, 6, 12),
+            )
+            headerTitleLabel.foreground = Theme.TEXT_PRIMARY
+            modeBarOuter.background = Theme.BG_APP
+            modeSegmentedBar.repaint()
+            loadingStrip.background = Theme.BG_SURFACE
+            loadingLabel.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+            sourceErrorStrip.background = Theme.BG_SURFACE
+            sourceErrorLabel.foreground = Theme.DANGER
+            emptyWrap.background = Theme.BG_APP
+            emptyTitleLbl.foreground = Theme.TEXT_PRIMARY
+            emptyDescLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+            centerPanel.background = Theme.BG_APP
+            field.foreground = Theme.TEXT_PRIMARY
+            field.background = Theme.BG_SURFACE
+            field.caretColor = Theme.PRIMARY
+            field.repaint()
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             grid.repaint()
@@ -175,6 +371,25 @@ class SearchScreen(
         loadPopular()
     }
 
+    private fun setCatalogMode(mode: Int) {
+        activeCatalogMode = mode.coerceIn(0, 2)
+        modeSegmentedBar.repaint()
+        when (activeCatalogMode) {
+            0, 1 -> {
+                searchBarPanel.isVisible = false
+                revalidate()
+                repaint()
+                loadPopular()
+            }
+            2 -> {
+                searchBarPanel.isVisible = true
+                revalidate()
+                repaint()
+                field.requestFocusInWindow()
+            }
+        }
+    }
+
     fun dispose() {
         hoverAnimator.stop()
         themeListener?.let { ctx.removeThemeListener(it) }
@@ -184,71 +399,125 @@ class SearchScreen(
     fun openSource(sourceName: String) {
         val idx = (1 until sourceFilter.itemCount).firstOrNull { sourceFilter.getItemAt(it) == sourceName } ?: 0
         sourceFilter.selectedIndex = idx
+        headerTitleLabel.text = if (idx > 0) sourceName else "Todas as fontes"
         field.text = ""
+        activeCatalogMode = 0
+        searchBarPanel.isVisible = false
+        modeSegmentedBar.setSelectedValue(0, animate = false)
         loadPopular()
     }
 
     fun loadPopular() {
+        lastActionWasSearch = false
         val chosenIdx = sourceFilter.selectedIndex
         val sourcesToQuery = if (chosenIdx <= 0) ctx.extensions else listOfNotNull(ctx.extensions.getOrNull(chosenIdx - 1))
         if (sourcesToQuery.isEmpty()) return
-        ctx.setStatus("Carregando mangás em alta de ${sourcesToQuery.joinToString { it.name }}…")
+        sourceErrorStrip.isVisible = false
+        loadingLabel.text = "Carregando catálogo de ${sourcesToQuery.joinToString { it.name }}…"
+        loadingStrip.isVisible = true
+        ctx.setStatus("Carregando catálogo de ${sourcesToQuery.joinToString { it.name }}…")
+        val reverseForLatest = activeCatalogMode == 1
         background({
-            sourcesToQuery.flatMap { ext ->
+            val errs = mutableListOf<String>()
+            val hits = sourcesToQuery.flatMap { ext ->
                 runCatching { ext.getPopularManga().map { Hit(ext, it) } }
-                    .getOrElse { emptyList() }
+                    .getOrElse {
+                        errs.add("${ext.name}: ${it.message ?: "falha de rede"}")
+                        emptyList()
+                    }
             }
+            (if (reverseForLatest) hits.reversed() else hits) to errs
         }) { result ->
-            val found = result.getOrDefault(emptyList())
+            loadingStrip.isVisible = false
+            val (found, errors) = result.getOrDefault(emptyList<Hit>() to emptyList<String>())
             model.clear()
             found.forEach { hit ->
                 model.addElement(hit)
                 ctx.covers.loadUrl(hit.item.coverUrl) { grid.repaint() }
             }
-            ctx.setStatus("Exibindo ${found.size} mangá(s) em alta — clique em qualquer capa para abrir")
+            if (found.isEmpty() && errors.isNotEmpty()) {
+                sourceErrorLabel.text = "Erro ao carregar fonte: ${errors.first()}"
+                sourceErrorStrip.isVisible = true
+            }
+            if (found.isEmpty()) {
+                emptyTitleLbl.text = "Nenhum mangá carregado"
+                emptyDescLbl.text = "Não foi possível obter títulos desta fonte."
+                emptyClearBtn.isVisible = false
+                centerCards.show(centerPanel, "empty")
+            } else {
+                centerCards.show(centerPanel, "grid")
+            }
+            ctx.setStatus("Exibindo ${found.size} mangá(s) — clique em qualquer capa para abrir")
         }
     }
 
     private fun search() {
         val query = field.text.trim()
         if (query.isEmpty()) return
+        lastActionWasSearch = true
         val chosenIdx = sourceFilter.selectedIndex
         val sourcesToQuery = if (chosenIdx <= 0) ctx.extensions else listOfNotNull(ctx.extensions.getOrNull(chosenIdx - 1))
         if (sourcesToQuery.isEmpty()) {
             ctx.setStatus("Nenhuma fonte disponível")
             return
         }
+        sourceErrorStrip.isVisible = false
+        loadingLabel.text = "Pesquisando '$query'…"
+        loadingStrip.isVisible = true
         ctx.setStatus("Buscando '$query' em ${sourcesToQuery.joinToString { it.name }}…")
         background({
-            sourcesToQuery.flatMap { ext ->
+            val errs = mutableListOf<String>()
+            val hits = sourcesToQuery.flatMap { ext ->
                 runCatching { ext.searchManga(query).map { Hit(ext, it) } }
-                    .getOrElse { emptyList() }
+                    .getOrElse {
+                        errs.add("${ext.name}: ${it.message ?: "falha de rede"}")
+                        emptyList()
+                    }
             }
+            hits to errs
         }) { result ->
-            val found = result.getOrDefault(emptyList())
+            loadingStrip.isVisible = false
+            val (found, errors) = result.getOrDefault(emptyList<Hit>() to emptyList<String>())
             model.clear()
             found.forEach { hit ->
                 model.addElement(hit)
                 ctx.covers.loadUrl(hit.item.coverUrl) { grid.repaint() }
             }
+            if (found.isEmpty() && errors.isNotEmpty()) {
+                sourceErrorLabel.text = "Erro na busca: ${errors.first()}"
+                sourceErrorStrip.isVisible = true
+            }
+            if (found.isEmpty()) {
+                emptyTitleLbl.text = "Nenhum resultado"
+                emptyDescLbl.text = "Nenhuma obra encontrada para \"$query\". Tente outro termo."
+                emptyClearBtn.isVisible = true
+                centerCards.show(centerPanel, "empty")
+            } else {
+                centerCards.show(centerPanel, "grid")
+            }
             ctx.setStatus("Busca por '$query': ${found.size} resultado(s) — clique na capa para abrir")
         }
     }
 
-    private fun renderHit(hit: Hit, index: Int, selected: Boolean): Component {
-        val shortSource = hit.source.name.substringBefore(" (")
+    private fun renderHit(hit: Hit, index: Int, selected: Boolean, focused: Boolean): Component {
         val url = hit.item.coverUrl
         if (!url.isNullOrBlank() && !ctx.covers.hasUrl(url)) {
             ctx.covers.loadUrl(url) { grid.repaint() }
         }
+        val fadeAlpha = ctx.covers.fadeAlphaForUrl(url)
+        if (fadeAlpha < 0.99f) {
+            SwingUtilities.invokeLater { grid.repaint() }
+        }
         return cardPrototype.apply {
             coverIcon = ctx.covers.getByUrl(hit.item.coverUrl, hit.item.title)
+            coverFadeAlpha = fadeAlpha
+            isSkeleton = false
             titleText = hit.item.title
-            subtitleText = hit.item.author ?: hit.source.name
-            topLeftBadge = shortSource
-            topRightBadge = hit.item.latestChapter
-            topRightColor = Theme.SUCCESS
+            subtitleText = ""
+            topLeftBadge = null
+            topRightBadge = null
             selectedState = selected
+            focusedState = focused && !selected
             hoverProgress = hoverAnimator.progressFor(index)
         }
     }
@@ -283,25 +552,38 @@ sealed interface HistoryListItem {
 /** Shows recent reading history with sticky date headers, covers, and quick actions (favorite & remove). */
 class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
+    private val emptyTitleLbl = JLabel("Nenhum histórico recente", SwingConstants.CENTER).apply {
+        font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 18f)
+        foreground = Theme.TEXT_PRIMARY
+        alignmentX = 0.5f
+    }
+    private val emptyDescLbl = JLabel("Os capítulos que você ler aparecerão listados aqui.", SwingConstants.CENTER).apply {
+        font = Theme.FONT_UI.deriveFont(13f)
+        foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+        alignmentX = 0.5f
+    }
     private val emptyPanel = JPanel().apply {
         isOpaque = false
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(60, 20, 40, 20)
-        add(JLabel(ModernIcons.history(48) { Theme.TEXT_MUTED }).apply {
+        add(JLabel(ModernIcons.history(48) { if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY }).apply {
             alignmentX = 0.5f
         })
         add(Box.createVerticalStrut(14))
-        add(JLabel("Nenhum histórico recente", SwingConstants.CENTER).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 17f)
-            foreground = Theme.TEXT_PRIMARY
-            alignmentX = 0.5f
-        })
+        add(emptyTitleLbl)
         add(Box.createVerticalStrut(6))
-        add(JLabel("Os capítulos que você ler aparecerão listados aqui.", SwingConstants.CENTER).apply {
-            font = font.deriveFont(13f)
-            foreground = Theme.TEXT_MUTED
-            alignmentX = 0.5f
-        })
+        add(emptyDescLbl)
+        add(Box.createVerticalStrut(16))
+        add(
+            ModernButton(
+                text = "Ir para Biblioteca",
+                icon = ModernIcons.library(15) { Color.WHITE },
+                variant = ModernButton.Variant.PRIMARY,
+            ).apply {
+                alignmentX = 0.5f
+                addActionListener { ctx.navigator.showLibrary() }
+            },
+        )
         isVisible = false
     }
 
@@ -425,6 +707,8 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             centerContainer.background = Theme.BG_APP
             list.background = Theme.BG_APP
             top.background = Theme.BG_SURFACE
+            emptyTitleLbl.foreground = Theme.TEXT_PRIMARY
+            emptyDescLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             list.repaint()
@@ -490,11 +774,12 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
 
         override fun paintComponent(g: Graphics) {
+            super.paintComponent(g)
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
-            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 12.5f)
-            g2.color = Theme.TEXT_MUTED
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 12.5f)
+            g2.color = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             g2.drawString(text, 14, 24)
             g2.dispose()
         }
@@ -511,69 +796,88 @@ class HistoryScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         init {
             isOpaque = false
-            preferredSize = java.awt.Dimension(0, 68)
+            preferredSize = java.awt.Dimension(0, 86)
         }
 
         override fun paintComponent(g: Graphics) {
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
             val x = 8
             val w = width - 16
             val h = height
+            val cardArc = Theme.CARD_RADIUS * 2
 
             if (selectedState) {
-                g2.color = Theme.BG_CARD_HOVER
-                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
+                g2.color = Theme.ACCENT_SOFT
+                g2.fillRoundRect(x, 3, w, h - 6, cardArc, cardArc)
+                g2.color = Theme.PRIMARY
+                g2.stroke = java.awt.BasicStroke(1.2f)
+                g2.drawRoundRect(x, 3, w - 1, h - 7, cardArc, cardArc)
             } else if (hoverProgress > 0.01f) {
-                val hc = Theme.BG_SURFACE
-                g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress).toInt().coerceIn(0, 255))
-                g2.fillRoundRect(x, 2, w, h - 4, 8, 8)
+                val hc = Theme.BG_CARD_HOVER
+                g2.color = Color(hc.red, hc.green, hc.blue, (255 * easeOutCubic(hoverProgress)).toInt().coerceIn(0, 255))
+                g2.fillRoundRect(x, 3, w, h - 6, cardArc, cardArc)
             }
             g2.color = Theme.BORDER_SUBTLE
-            g2.drawLine(x + 6, h - 1, x + w - 6, h - 1)
+            g2.drawLine(x + 8, h - 1, x + w - 8, h - 1)
 
-            // Small vertical cover thumbnail on the left (Mihon Android style)
-            val thumbW = 38
-            val thumbH = 54
+            // Capa vertical 48x72 com raio CARD_RADIUS (10px -> arc 20)
+            val thumbW = 48
+            val thumbH = 72
+            val thumbX = x + 10
             val thumbY = (h - thumbH) / 2
+            val thumbArc = 14
             val coverImg = coverIcon?.image
             if (coverImg != null) {
-                g2.clip = java.awt.geom.RoundRectangle2D.Float((x + 8).toFloat(), thumbY.toFloat(), thumbW.toFloat(), thumbH.toFloat(), 6f, 6f)
-                g2.drawImage(coverImg, x + 8, thumbY, thumbW, thumbH, null)
+                g2.clip = java.awt.geom.RoundRectangle2D.Float(thumbX.toFloat(), thumbY.toFloat(), thumbW.toFloat(), thumbH.toFloat(), thumbArc.toFloat(), thumbArc.toFloat())
+                g2.drawImage(coverImg, thumbX, thumbY, thumbW, thumbH, null)
                 g2.clip = null
             } else {
-                g2.color = Theme.BG_SURFACE
-                g2.fillRoundRect(x + 8, thumbY, thumbW, thumbH, 6, 6)
+                g2.color = Theme.BG_CARD
+                g2.fillRoundRect(thumbX, thumbY, thumbW, thumbH, thumbArc, thumbArc)
             }
-            g2.color = Color(255, 255, 255, 24)
-            g2.drawRoundRect(x + 8, thumbY, thumbW - 1, thumbH - 1, 6, 6)
+            g2.color = Theme.BORDER_SUBTLE
+            g2.drawRoundRect(thumbX, thumbY, thumbW - 1, thumbH - 1, thumbArc, thumbArc)
 
-            // Action button positions
+            // Action button positions + Continuar pill
             val favX = x + w - 74
             val delX = x + w - 36
-            val textX = x + thumbW + 20
-            val maxTextW = (favX - textX - 16).coerceAtLeast(60)
+            val contLabel = "Continuar"
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 11.5f)
+            val cFm = g2.fontMetrics
+            val contW = cFm.stringWidth(contLabel) + 22
+            val contX = favX - contW - 14
+            val contH = 26
+            val contY = (h - contH) / 2
+            g2.color = Theme.ACCENT_SOFT
+            g2.fillRoundRect(contX, contY, contW, contH, Theme.CONTROL_RADIUS * 2, Theme.CONTROL_RADIUS * 2)
+            g2.color = if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY
+            g2.drawString(contLabel, contX + 11, contY + ((contH - cFm.height) / 2) + cFm.ascent)
 
-            // Manga Title (ellipsized safely before action buttons)
-            g2.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14.5f)
+            val textX = thumbX + thumbW + 14
+            val maxTextW = (contX - textX - 16).coerceAtLeast(60)
+
+            // Manga Title (CJK-safe)
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 14.5f)
             g2.color = Theme.TEXT_PRIMARY
-            g2.drawString(clipUiText(g2, mangaTitle, maxTextW), textX, 28)
+            Theme.drawStringWithFallback(g2, clipUiText(g2, mangaTitle, maxTextW), textX, 34)
 
-            // Chapter name + timestamp
-            g2.font = font.deriveFont(Font.PLAIN, 12f)
+            // Chapter name + timestamp (CJK-safe)
+            g2.font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
             g2.color = Theme.TEXT_SECONDARY
-            val sub = if (chapterTime.isNotBlank()) "$chapterName  —  $chapterTime" else chapterName
-            g2.drawString(clipUiText(g2, sub, maxTextW), textX, 48)
+            val sub = if (chapterTime.isNotBlank()) "$chapterName  •  $chapterTime" else chapterName
+            Theme.drawStringWithFallback(g2, clipUiText(g2, sub, maxTextW), textX, 56)
 
-            // Action 1: Vector Favorite heart icon
+            // Action 1: Favorite heart icon
             val favIcon = ModernIcons.heart(16, filled = isFavorite) {
-                if (isFavorite) Theme.ACCENT else Theme.TEXT_MUTED
+                if (isFavorite) Theme.SIGNAL else (if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY)
             }
             favIcon.paintIcon(this, g2, favX + 6, (h - favIcon.iconHeight) / 2)
 
-            // Action 2: Vector Delete trash icon
-            val trashIcon = ModernIcons.trash(15) { Theme.TEXT_MUTED }
+            // Action 2: Delete trash icon
+            val trashIcon = ModernIcons.trash(15) { if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY }
             trashIcon.paintIcon(this, g2, delX + 6, (h - trashIcon.iconHeight) / 2)
 
             g2.dispose()
@@ -628,35 +932,30 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 },
             )
         }
-        val urlInput = JTextField(26).apply {
-            putClientProperty("JTextField.placeholderText", "Cole o link do site (ex: https://meumanga.com)…")
-            putClientProperty("JComponent.roundRect", true)
-            preferredSize = Dimension(280, 34)
+        val urlInput = mihon.desktop.ui.components.MihonTextField(
+            columns = 26,
+            placeholder = "Cole o link do site (ex: https://meumanga.com)…",
+            leadingIconProvider = { focused ->
+                ModernIcons.link(15) { if (focused) Theme.PRIMARY else Theme.TEXT_MUTED }
+            },
+            showClearButton = true,
+        ).apply {
+            preferredSize = Dimension(300, Theme.CONTROL_HEIGHT_COMPACT)
         }
         val btnGenerate = ModernButton("+ Transformar Link em Extensão", variant = ModernButton.Variant.PRIMARY).apply {
             toolTipText = "Detecta a estrutura do site e cria uma extensão ativa instantaneamente"
         }
 
-        fun triggerGenerate() {
-            val rawUrl = urlInput.text.trim()
-            if (rawUrl.isEmpty()) {
-                val inputDialog = JOptionPane.showInputDialog(
-                    this@ExtensionsScreen,
-                    "Cole o link do site de mangá que deseja transformar em extensão:\n(Ex: https://mangalivre.to ou https://meusitemanga.com)",
-                    "Gerador de Extensão por Link (Beta)",
-                    JOptionPane.PLAIN_MESSAGE,
-                )?.trim().orEmpty()
-                if (inputDialog.isEmpty()) return
-                urlInput.text = inputDialog
-            }
-            val targetUrl = urlInput.text.trim()
+        fun runGenerateForUrl(targetUrl: String) {
             btnGenerate.isEnabled = false
+            btnGenerate.isLoading = true
             btnGenerate.text = "Analisando site…"
             ctx.setStatus("Conectando a '$targetUrl' e gerando extensão Beta…")
 
             background({
                 UrlExtensionGenerator.generateFromUrl(targetUrl)
             }) { result ->
+                btnGenerate.isLoading = false
                 btnGenerate.isEnabled = true
                 btnGenerate.text = "+ Transformar Link em Extensão"
                 result.onSuccess { gen ->
@@ -686,7 +985,33 @@ class ExtensionsScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             }
         }
 
-        urlInput.addActionListener { triggerGenerate() }
+        fun triggerGenerate() {
+            val rawUrl = urlInput.text.trim()
+            if (rawUrl.isEmpty()) {
+                val ownerWin = SwingUtilities.getWindowAncestor(this@ExtensionsScreen)
+                mihon.desktop.ui.components.MihonPromptDialog(
+                    owner = ownerWin,
+                    dialogTitle = "Gerador de Extensão por Link (Beta)",
+                    promptLabel = "Cole o link do site de mangá (ex: https://mangalivre.to):",
+                    placeholder = "https://meusitemanga.com",
+                    confirmText = "Gerar Extensão",
+                    validator = { v ->
+                        when {
+                            v.isBlank() -> "Informe o link do site."
+                            !v.startsWith("http://") && !v.startsWith("https://") && !v.contains('.') -> "URL inválida."
+                            else -> null
+                        }
+                    },
+                ) { enteredUrl ->
+                    urlInput.text = enteredUrl
+                    runGenerateForUrl(enteredUrl)
+                }.isVisible = true
+                return
+            }
+            runGenerateForUrl(rawUrl)
+        }
+
+        urlInput.onSubmit = { triggerGenerate() }
         btnGenerate.addActionListener { triggerGenerate() }
 
         val btnCommunityStore = ModernButton(
@@ -1006,14 +1331,19 @@ class SourcesListScreen(
 ) : JPanel(BorderLayout()) {
 
     private val pinnedSources = mutableSetOf<String>()
-    private val searchField = JTextField(24).apply {
-        putClientProperty("JTextField.placeholderText", "Pesquisar fontes...")
-        putClientProperty("JComponent.roundRect", true)
+    private val searchField = mihon.desktop.ui.components.MihonSearchField(
+        columns = 24,
+        placeholder = "Pesquisar fontes…",
+        compact = false,
+        shortcutBadge = null,
+        debounceMs = 90,
+    ).apply {
+        preferredSize = Dimension(320, Theme.CONTROL_HEIGHT_COMPACT)
     }
     private val container = JPanel().apply {
         background = Theme.BG_APP
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        border = BorderFactory.createEmptyBorder(12, 24, 24, 24)
+        border = BorderFactory.createEmptyBorder(14, 28, 28, 28)
     }
     private var themeListener: ((Boolean) -> Unit)? = null
     private var extensionListener: (() -> Unit)? = null
@@ -1021,11 +1351,13 @@ class SourcesListScreen(
     init {
         background = Theme.BG_APP
 
-        val searchBar = JPanel(FlowLayout(FlowLayout.CENTER, 0, 10)).apply {
+        val searchBar = JPanel(BorderLayout()).apply {
             background = Theme.BG_APP
-            border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
-            searchField.preferredSize = Dimension(420, 36)
-            add(searchField)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(10, 28, 10, 28),
+            )
+            add(searchField, BorderLayout.CENTER)
         }
         add(searchBar, BorderLayout.NORTH)
 
@@ -1035,7 +1367,11 @@ class SourcesListScreen(
             override fun changedUpdate(e: DocumentEvent) = rebuildList()
         })
 
-        val scroll = JScrollPane(container).apply {
+        val wrapper = JPanel(BorderLayout()).apply {
+            background = Theme.BG_APP
+            add(container, BorderLayout.NORTH)
+        }
+        val scroll = JScrollPane(wrapper).apply {
             border = null
             background = Theme.BG_APP
             viewport.background = Theme.BG_APP
@@ -1046,8 +1382,15 @@ class SourcesListScreen(
         val listener = { _: Boolean ->
             background = Theme.BG_APP
             container.background = Theme.BG_APP
+            wrapper.background = Theme.BG_APP
             searchBar.background = Theme.BG_APP
-            searchBar.border = BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE)
+            searchBar.border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(10, 28, 10, 28),
+            )
+            searchField.foreground = Theme.TEXT_PRIMARY
+            searchField.background = Theme.BG_SURFACE
+            searchField.repaint()
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
             rebuildList()
@@ -1080,20 +1423,29 @@ class SourcesListScreen(
 
         if (pinned.isNotEmpty()) {
             addSectionHeader("Fixadas")
-            pinned.forEach { ext -> addSourceRow(ext, isPinned = true) }
+            val card = SettingsGroupCard()
+            pinned.forEach { ext -> card.addRow(buildSourceRow(ext, isPinned = true)) }
+            container.add(card)
+            container.add(Box.createVerticalStrut(16))
         }
 
         // 1. Última utilizada
         val lastUsed = unpinned.firstOrNull()
         if (lastUsed != null && query.isEmpty()) {
             addSectionHeader("Última utilizada")
-            addSourceRow(lastUsed, isPinned = false)
+            val card = SettingsGroupCard()
+            card.addRow(buildSourceRow(lastUsed, isPinned = false))
+            container.add(card)
+            container.add(Box.createVerticalStrut(16))
         }
 
         // 2. Outras (Fonte local)
         if (query.isEmpty() || "fonte local".contains(query) || "local".contains(query)) {
             addSectionHeader("Outras")
-            addLocalSourceRow()
+            val card = SettingsGroupCard()
+            card.addRow(buildLocalSourceRow())
+            container.add(card)
+            container.add(Box.createVerticalStrut(16))
         }
 
         // 3. Português (Brasil)
@@ -1103,7 +1455,10 @@ class SourcesListScreen(
         }
         if (ptSources.isNotEmpty()) {
             addSectionHeader("Português (Brasil)")
-            ptSources.forEach { ext -> addSourceRow(ext, isPinned = false) }
+            val card = SettingsGroupCard()
+            ptSources.forEach { ext -> card.addRow(buildSourceRow(ext, isPinned = false)) }
+            container.add(card)
+            container.add(Box.createVerticalStrut(16))
         }
 
         // 4. Outros idiomas / Global
@@ -1113,7 +1468,10 @@ class SourcesListScreen(
         }
         if (otherSources.isNotEmpty()) {
             addSectionHeader("Inglês / Outras")
-            otherSources.forEach { ext -> addSourceRow(ext, isPinned = false) }
+            val card = SettingsGroupCard()
+            otherSources.forEach { ext -> card.addRow(buildSourceRow(ext, isPinned = false)) }
+            container.add(card)
+            container.add(Box.createVerticalStrut(16))
         }
 
         container.revalidate()
@@ -1122,32 +1480,28 @@ class SourcesListScreen(
 
     private fun addSectionHeader(title: String) {
         val lbl = JLabel(title).apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 13f)
-            foreground = Theme.TEXT_MUTED
-            border = BorderFactory.createEmptyBorder(16, 8, 8, 8)
+            font = Theme.FONT_UI.deriveFont(Font.BOLD, 13.5f)
+            foreground = Theme.TEXT_PRIMARY
+            border = BorderFactory.createEmptyBorder(2, 2, 8, 2)
             alignmentX = 0f
         }
         container.add(lbl)
     }
 
-    private fun addLocalSourceRow() {
-        val row = createRowPanel(
-            iconImage = null,
-            leadingIcon = ModernIcons.folder(20) { Theme.ACCENT },
-            iconText = "",
-            title = "Fonte local",
-            subtitle = "Local",
-            onRecents = onSelectLocalSource,
-            onRowClick = onSelectLocalSource,
-        )
-        container.add(row)
-        container.add(Box.createVerticalStrut(6))
-    }
+    private fun buildLocalSourceRow(): JPanel = createRowPanel(
+        iconImage = null,
+        leadingIcon = ModernIcons.folder(20) { Theme.ACCENT },
+        iconText = "",
+        title = "Fonte local",
+        subtitle = "Local",
+        onRecents = onSelectLocalSource,
+        onRowClick = onSelectLocalSource,
+    )
 
-    private fun addSourceRow(ext: ExtensionSource, isPinned: Boolean) {
+    private fun buildSourceRow(ext: ExtensionSource, isPinned: Boolean): JPanel {
         val iconText = ext.name.take(2).uppercase()
         val iconImg = ctx.covers.getSourceIcon(ext) { rebuildList() }
-        val row = createRowPanel(
+        return createRowPanel(
             iconImage = iconImg,
             leadingIcon = null,
             iconText = iconText,
@@ -1161,8 +1515,6 @@ class SourcesListScreen(
             onRecents = { onSelectSource(ext) },
             onRowClick = { onSelectSource(ext) },
         )
-        container.add(row)
-        container.add(Box.createVerticalStrut(6))
     }
 
     private fun createRowPanel(
@@ -1252,15 +1604,15 @@ class SourcesListScreen(
                     add(Box.createVerticalGlue())
                     add(
                         JLabel(title).apply {
-                            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 14.5f)
+                            font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
                             foreground = Theme.TEXT_PRIMARY
                         },
                     )
                     add(Box.createVerticalStrut(2))
                     add(
                         JLabel(subtitle).apply {
-                            font = font.deriveFont(Font.PLAIN, 11.5f)
-                            foreground = Theme.TEXT_MUTED
+                            font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
+                            foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
                         },
                     )
                     add(Box.createVerticalGlue())

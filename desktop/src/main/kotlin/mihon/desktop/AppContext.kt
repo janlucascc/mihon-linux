@@ -31,52 +31,104 @@ import javax.imageio.ImageIO
 import javax.swing.ImageIcon
 import javax.swing.SwingUtilities
 
-const val COVER_W = 176
-const val COVER_H = 252
-const val COVER_ARC = 14
+const val COVER_W = 152
+const val COVER_H = 224
+const val COVER_ARC = 10
+
+fun easeOutCubic(t: Float): Float {
+    val clamped = t.coerceIn(0f, 1f)
+    val inv = 1f - clamped
+    return 1f - inv * inv * inv
+}
 
 /**
- * Mihon Linux desktop visual identity palette:
- * - Signature Indigo Primary: `#5B5BD6` (`#A6A6FF` high-contrast accent on dark surfaces)
- * - Signature Cyan Accent: `#36C5F0`
- * - Calm neutral surfaces (`#202126` dark, `#000000` AMOLED, `#F7F7FA` light)
+ * Mihon Index desktop visual identity palette:
+ * - Cobalt Primary: `#4F46E5` (hover `#4338CA`, press `#3730A3`; `#818CF8` high-contrast text accent on dark)
+ * - Signal Orange: `#F97316` (hover `#EA580C`) for unread badges and reading progress
+ * - Calm neutral editorial surfaces (`#F7F7FA` light, `#16171C` dark, `#000000` AMOLED)
  * - Semantic colors harmonized for both dark and light surfaces
  */
 object Theme {
     var isDark: Boolean = true
         private set
 
-    val PRIMARY = Color(0x5B, 0x5B, 0xD6)
-    val PRIMARY_HOVER = Color(0x49, 0x49, 0xC7)
-    val PRIMARY_PRESS = Color(0x3C, 0x3C, 0xB0)
+    val PRIMARY = Color(0x4F, 0x46, 0xE5)
+    val PRIMARY_HOVER = Color(0x43, 0x38, 0xCA)
+    val PRIMARY_PRESS = Color(0x37, 0x30, 0xA3)
+    var SIGNAL = Color(0xF9, 0x73, 0x16)
+    var SIGNAL_HOVER = Color(0xEA, 0x58, 0x0C)
     val ACCENT_CYAN = Color(0x36, 0xC5, 0xF0)
 
-    var BG_APP = Color(0x00, 0x00, 0x00)
-    var BG_SIDEBAR = Color(0x07, 0x08, 0x0B)
-    var BG_SURFACE = Color(0x0E, 0x0F, 0x14)
-    var BG_CARD = Color(0x14, 0x15, 0x1B)
-    var BG_CARD_HOVER = Color(0x20, 0x22, 0x2C)
-    var BG_PILL_ACTIVE = Color(0x5B, 0x5B, 0xD6, 52)
+    const val CONTROL_HEIGHT_SMALL = 32
+    const val CONTROL_HEIGHT_COMPACT = 38
+    const val CONTROL_HEIGHT_PRIMARY = 48
+    const val PAGE_GUTTER = 16
+    const val PANEL_GUTTER = 24
+    const val CONTROL_RADIUS = 8
+    const val CARD_RADIUS = 10
+    const val BADGE_RADIUS = 7
+    const val MOTION_FAST_MS = 120
+    const val MOTION_NORMAL_MS = 180
+    const val MOTION_SLOW_MS = 240
+
+    var BG_APP = Color(0x22, 0x22, 0x26)
+    var BG_SIDEBAR = Color(0x2E, 0x2E, 0x32)
+    var BG_SURFACE = Color(0x33, 0x33, 0x37)
+    var BG_CARD = Color(0x38, 0x38, 0x3B)
+    var BG_CARD_HOVER = Color(0x44, 0x44, 0x49)
+    var BG_PILL_ACTIVE = Color(0x42, 0x42, 0x46)
     var BORDER_SUBTLE = Color(255, 255, 255, 22)
-    var ACCENT = Color(0xA6, 0xA6, 0xFF)
-    var ACCENT_HOVER = Color(0x8D, 0x8D, 0xE8)
-    var ACCENT_SOFT = Color(0x5B, 0x5B, 0xD6, 46)
+    var BORDER_STRONG = Color(255, 255, 255, 48)
+    var ACCENT = Color(0x81, 0x8C, 0xF8)
+    var ACCENT_HOVER = Color(0x63, 0x66, 0xF1)
+    var ACCENT_SOFT = Color(0x4F, 0x46, 0xE5, 44)
     var TERTIARY = Color(0x78, 0xB8, 0x86)
-    var TEXT_PRIMARY = Color(0xF4, 0xF5, 0xFA)
-    var TEXT_SECONDARY = Color(0xC2, 0xC6, 0xD6)
-    var TEXT_MUTED = Color(0x90, 0x94, 0xA8)
+    var TEXT_PRIMARY = Color(0xF6, 0xF5, 0xF4)
+    var TEXT_SECONDARY = Color(0xB8, 0xB7, 0xBC)
+    var TEXT_MUTED = Color(0x9A, 0x99, 0x9E)
     var SUCCESS = Color(0x78, 0xB8, 0x86)
     var WARNING = Color(0xF4, 0xC8, 0x75)
     var DANGER = Color(0xFF, 0x8B, 0x8B)
 
     val FONT_DISPLAY: Font by lazy {
-        val candidates = listOf("Inter", "Roboto", "Cantarell", "Noto Sans", "Liberation Sans", "SansSerif")
+        val candidates = listOf("Cantarell", "Inter", "Roboto", "Noto Sans", "Liberation Sans", Font.DIALOG)
         val available = GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames.toSet()
-        val chosen = candidates.firstOrNull { it in available } ?: "SansSerif"
+        val chosen = candidates.firstOrNull { it in available } ?: Font.DIALOG
         Font(chosen, Font.BOLD, 22)
     }
-    val FONT_UI = Font("SansSerif", Font.PLAIN, 13)
+    val FONT_UI = Font(Font.DIALOG, Font.PLAIN, 13)
     val FONT_MONO = Font("Monospaced", Font.PLAIN, 12)
+    val FONT_CJK: Font by lazy {
+        val ge = GraphicsEnvironment.getLocalGraphicsEnvironment()
+        val available = ge.availableFontFamilyNames.toSet()
+        val preferred = listOf("Noto Sans CJK KR", "Noto Sans CJK JP", "Noto Sans CJK SC", "Droid Sans Fallback", "UnDotum")
+        val chosen = preferred.firstOrNull { it in available }
+            ?: ge.allFonts.firstOrNull { it.canDisplay('하') || it.canDisplay('日') }?.family
+            ?: Font.DIALOG
+        Font(chosen, Font.PLAIN, 13)
+    }
+
+    fun drawStringWithFallback(g2: Graphics2D, text: String, x: Int, y: Int) {
+        if (text.isEmpty()) return
+        val primary = g2.font
+        if (primary.canDisplayUpTo(text) == -1) {
+            g2.drawString(text, x, y)
+            return
+        }
+        val fallback = FONT_CJK.deriveFont(primary.style, primary.size2D)
+        val attr = java.text.AttributedString(text)
+        attr.addAttribute(java.awt.font.TextAttribute.FONT, primary, 0, text.length)
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val charCount = Character.charCount(cp)
+            if (!primary.canDisplay(cp) && fallback.canDisplay(cp)) {
+                attr.addAttribute(java.awt.font.TextAttribute.FONT, fallback, i, i + charCount)
+            }
+            i += charCount
+        }
+        g2.drawString(attr.iterator, x, y)
+    }
 
     enum class ThemePreset(
         val displayName: String,
@@ -103,31 +155,31 @@ object Theme {
             Color(0x0E, 0x0F, 0x14),
             Color(0x14, 0x15, 0x1B),
             Color(0x20, 0x22, 0x2C),
-            Color(0x5B, 0x5B, 0xD6, 52),
-            Color(255, 255, 255, 22),
-            Color(0xA6, 0xA6, 0xFF),
-            Color(0x8D, 0x8D, 0xE8),
-            Color(0x5B, 0x5B, 0xD6, 46),
+            Color(0x4F, 0x46, 0xE5, 44),
+            Color(255, 255, 255, 56),
+            Color(0x81, 0x8C, 0xF8),
+            Color(0x63, 0x66, 0xF1),
+            Color(0x4F, 0x46, 0xE5, 44),
             Color(0xF4, 0xF5, 0xFA),
             Color(0xC2, 0xC6, 0xD6),
             Color(0x90, 0x94, 0xA8),
         ),
         DARK(
-            "Dark Indigo (Grafite)",
+            "Escuro (Grafite)",
             true,
-            Color(0x16, 0x17, 0x1C),
-            Color(0x1B, 0x1C, 0x22),
-            Color(0x20, 0x21, 0x26),
-            Color(0x26, 0x28, 0x2F),
-            Color(0x30, 0x33, 0x3C),
-            Color(0x5B, 0x5B, 0xD6, 56),
+            Color(0x22, 0x22, 0x26),
+            Color(0x2E, 0x2E, 0x32),
+            Color(0x33, 0x33, 0x37),
+            Color(0x38, 0x38, 0x3B),
+            Color(0x44, 0x44, 0x49),
+            Color(0x42, 0x42, 0x46),
             Color(255, 255, 255, 22),
-            Color(0xA6, 0xA6, 0xFF),
-            Color(0x8D, 0x8D, 0xE8),
-            Color(0x5B, 0x5B, 0xD6, 48),
-            Color(0xEA, 0xEB, 0xF2),
-            Color(0xB8, 0xBC, 0xCE),
-            Color(0x8C, 0x91, 0xA4),
+            Color(0x81, 0x8C, 0xF8),
+            Color(0x63, 0x66, 0xF1),
+            Color(0x4F, 0x46, 0xE5, 44),
+            Color(0xF6, 0xF5, 0xF4),
+            Color(0xB8, 0xB7, 0xBC),
+            Color(0x9A, 0x99, 0x9E),
         ),
         MIDNIGHT_BLUE(
             "Midnight Navy (Azul Noturno)",
@@ -137,28 +189,28 @@ object Theme {
             Color(0x16, 0x22, 0x36),
             Color(0x1C, 0x2B, 0x42),
             Color(0x27, 0x3B, 0x59),
-            Color(0x25, 0x4B, 0x77),
-            Color(100, 160, 240, 26),
-            Color(0x70, 0xB4, 0xFF),
-            Color(0x94, 0xC8, 0xFF),
-            Color(112, 180, 255, 45),
+            Color(0x4F, 0x46, 0xE5, 52),
+            Color(138, 176, 232, 56),
+            Color(0x81, 0x8C, 0xF8),
+            Color(0x63, 0x66, 0xF1),
+            Color(0x4F, 0x46, 0xE5, 44),
             Color(0xF0, 0xF6, 0xFC),
             Color(0xC9, 0xD1, 0xD9),
             Color(0x8B, 0x94, 0x9E),
         ),
         LIGHT(
-            "Claro Indigo (Padrão)",
+            "Claro (Editorial)",
             false,
             Color(0xF7, 0xF7, 0xFA),
             Color(0xEE, 0xEF, 0xF5),
             Color(0xFF, 0xFF, 0xFF),
             Color(0xFF, 0xFF, 0xFF),
             Color(0xE8, 0xE9, 0xF5),
-            Color(0x5B, 0x5B, 0xD6, 36),
-            Color(22, 23, 34, 22),
-            Color(0x5B, 0x5B, 0xD6),
-            Color(0x49, 0x49, 0xC7),
-            Color(0x5B, 0x5B, 0xD6, 30),
+            Color(0x4F, 0x46, 0xE5, 36),
+            Color(22, 23, 34, 56),
+            Color(0x4F, 0x46, 0xE5),
+            Color(0x43, 0x38, 0xCA),
+            Color(0x4F, 0x46, 0xE5, 32),
             Color(0x16, 0x17, 0x22),
             Color(0x56, 0x58, 0x6B),
             Color(0x78, 0x7B, 0x8F),
@@ -171,24 +223,26 @@ object Theme {
             Color(0x20, 0x21, 0x26),
             Color(0x26, 0x28, 0x2F),
             Color(0x30, 0x33, 0x3C),
-            Color(0x5B, 0x5B, 0xD6, 56),
-            Color(255, 255, 255, 26),
-            Color(0xA6, 0xA6, 0xFF),
-            Color(0x8D, 0x8D, 0xE8),
-            Color(0x5B, 0x5B, 0xD6, 46),
+            Color(0x4F, 0x46, 0xE5, 44),
+            Color(255, 255, 255, 56),
+            Color(0x81, 0x8C, 0xF8),
+            Color(0x63, 0x66, 0xF1),
+            Color(0x4F, 0x46, 0xE5, 44),
             Color(0xEA, 0xEB, 0xF2),
             Color(0xB8, 0xBC, 0xCE),
             Color(0x8C, 0x91, 0xA4),
         ),
     }
 
-    var currentPreset: ThemePreset = ThemePreset.AMOLED
+    var currentPreset: ThemePreset = ThemePreset.DARK
         private set
 
     private val listeners = mutableListOf<(Boolean) -> Unit>()
 
     fun addListener(listener: (Boolean) -> Unit) {
-        listeners.add(listener)
+        if (listener !in listeners) {
+            listeners.add(listener)
+        }
     }
 
     fun removeListener(listener: (Boolean) -> Unit) {
@@ -198,6 +252,8 @@ object Theme {
     fun applyPreset(preset: ThemePreset) {
         currentPreset = preset
         isDark = preset.isDark
+        SIGNAL = Color(0xF9, 0x73, 0x16)
+        SIGNAL_HOVER = Color(0xEA, 0x58, 0x0C)
         BG_APP = preset.bgApp
         BG_SIDEBAR = preset.bgSidebar
         BG_SURFACE = preset.bgSurface
@@ -220,11 +276,13 @@ object Theme {
             SUCCESS = Color(0x78, 0xB8, 0x86)
             WARNING = Color(0xF4, 0xC8, 0x75)
             DANGER = Color(0xFF, 0x8B, 0x8B)
+            BORDER_STRONG = Color(255, 255, 255, 70)
             TERTIARY = SUCCESS
         } else {
             SUCCESS = Color(0x2F, 0xB3, 0x44)
             WARNING = Color(0xE5, 0xA5, 0x0A)
             DANGER = Color(0xE0, 0x1B, 0x24)
+            BORDER_STRONG = Color(22, 23, 34, 70)
             TERTIARY = SUCCESS
         }
     }
@@ -235,21 +293,27 @@ object Theme {
         bgSurface: Color,
         accent: Color,
         textPrimary: Color,
+        signal: Color = Color(0xF9, 0x73, 0x16),
     ) {
         currentPreset = ThemePreset.CUSTOM
         // Determine whether light or dark based on background luminance
         val lum = (0.299 * bgApp.red + 0.587 * bgApp.green + 0.114 * bgApp.blue) / 255
         isDark = lum < 0.5
 
+        SIGNAL = signal
+        SIGNAL_HOVER = Color(
+            (signal.red - 15).coerceAtLeast(0),
+            (signal.green - 27).coerceAtLeast(0),
+            (signal.blue - 10).coerceAtLeast(0),
+        )
         BG_APP = bgApp
         BG_SIDEBAR = bgSidebar
         BG_SURFACE = bgSurface
         BG_CARD = bgSurface
-        BG_CARD_HOVER = if (isDark) Color((bgSurface.red + 20).coerceAtMost(255), (bgSurface.green + 20).coerceAtMost(255), (bgSurface.blue + 20).coerceAtMost(255))
-                        else Color((bgSurface.red - 20).coerceAtLeast(0), (bgSurface.green - 20).coerceAtLeast(0), (bgSurface.blue - 20).coerceAtLeast(0))
-        BG_PILL_ACTIVE = if (isDark) Color((bgSurface.red + 45).coerceAtMost(255), (bgSurface.green + 45).coerceAtMost(255), (bgSurface.blue + 45).coerceAtMost(255))
-                         else Color((bgSurface.red - 40).coerceAtLeast(0), (bgSurface.green - 40).coerceAtLeast(0), (bgSurface.blue - 40).coerceAtLeast(0))
-        BORDER_SUBTLE = if (isDark) Color(255, 255, 255, 28) else Color(0, 0, 0, 24)
+        BG_CARD_HOVER = if (isDark) Color((bgSurface.red + 16).coerceAtMost(255), (bgSurface.green + 16).coerceAtMost(255), (bgSurface.blue + 16).coerceAtMost(255))
+                        else Color((bgSurface.red - 18).coerceAtLeast(0), (bgSurface.green - 18).coerceAtLeast(0), (bgSurface.blue - 18).coerceAtLeast(0))
+        BG_PILL_ACTIVE = Color(accent.red, accent.green, accent.blue, if (isDark) 44 else 36)
+        BORDER_SUBTLE = if (isDark) Color(255, 255, 255, 56) else Color(22, 23, 34, 56)
         ACCENT = accent
         ACCENT_HOVER = if (isDark) {
             Color(
@@ -259,15 +323,15 @@ object Theme {
             )
         } else {
             Color(
-                (accent.red - 20).coerceAtLeast(0),
-                (accent.green - 20).coerceAtLeast(0),
-                (accent.blue - 20).coerceAtLeast(0),
+                (accent.red - 18).coerceAtLeast(0),
+                (accent.green - 18).coerceAtLeast(0),
+                (accent.blue - 18).coerceAtLeast(0),
             )
         }
-        ACCENT_SOFT = if (isDark) Color(accent.red, accent.green, accent.blue, 46) else Color(accent.red, accent.green, accent.blue, 30)
+        ACCENT_SOFT = if (isDark) Color(accent.red, accent.green, accent.blue, 44) else Color(accent.red, accent.green, accent.blue, 32)
         TEXT_PRIMARY = textPrimary
-        TEXT_SECONDARY = if (isDark) Color(200, 200, 200) else Color(70, 70, 70)
-        TEXT_MUTED = if (isDark) Color(150, 150, 150) else Color(110, 110, 110)
+        TEXT_SECONDARY = if (isDark) Color(0xB8, 0xBC, 0xCE) else Color(0x56, 0x58, 0x6B)
+        TEXT_MUTED = if (isDark) Color(0x8C, 0x91, 0xA4) else Color(0x78, 0x7B, 0x8F)
         applySemanticPalette(isDark)
 
         listeners.toList().forEach { runCatching { it(isDark) } }
@@ -384,21 +448,96 @@ class CoverCache(
     private val cacheDir: File = File(System.getProperty("user.home"), ".mihon/cache/covers").apply { mkdirs() },
 ) {
     private val iconsLock = Any()
-    private val icons = object : LinkedHashMap<Long, ImageIcon>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ImageIcon>): Boolean = size > 80
+    private val icons = object : LinkedHashMap<Long, ImageIcon>(48, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ImageIcon>): Boolean {
+            if (size > MemoryManager.coverCacheMaxEntries()) {
+                runCatching { (eldest.value.image as? BufferedImage)?.flush() }
+                return true
+            }
+            return false
+        }
     }
     private val urlIconsLock = Any()
-    private val urlIcons = object : LinkedHashMap<String, ImageIcon>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageIcon>): Boolean = size > 80
+    private val urlIcons = object : LinkedHashMap<String, ImageIcon>(48, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageIcon>): Boolean {
+            if (size > MemoryManager.coverCacheMaxEntries()) {
+                runCatching { (eldest.value.image as? BufferedImage)?.flush() }
+                return true
+            }
+            return false
+        }
     }
     private val placeholders = ConcurrentHashMap<String, ImageIcon>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>()
+    private val fadeStartMs = ConcurrentHashMap<String, Long>()
+    private val writesSinceTrim = java.util.concurrent.atomic.AtomicInteger(0)
+    private val maxDiskCacheBytes = 250L * 1024L * 1024L
+
+    init {
+        MemoryManager.registerTrimCallback { trimMemoryCache() }
+    }
+
+    fun trimMemoryCache() {
+        val target = (MemoryManager.coverCacheMaxEntries() / 2).coerceAtLeast(8)
+        synchronized(iconsLock) {
+            while (icons.size > target) {
+                val firstKey = icons.keys.firstOrNull() ?: break
+                val removed = icons.remove(firstKey)
+                runCatching { (removed?.image as? BufferedImage)?.flush() }
+            }
+        }
+        synchronized(urlIconsLock) {
+            while (urlIcons.size > target) {
+                val firstKey = urlIcons.keys.firstOrNull() ?: break
+                val removed = urlIcons.remove(firstKey)
+                runCatching { (removed?.image as? BufferedImage)?.flush() }
+            }
+        }
+        if (fadeStartMs.size > 64) fadeStartMs.clear()
+    }
+
+    fun fadeAlphaForManga(mangaId: Long): Float = fadeAlphaForKey("m_$mangaId")
+    fun fadeAlphaForUrl(url: String?): Float {
+        val clean = url?.trim()?.takeIf { it.isNotEmpty() } ?: return 1f
+        return fadeAlphaForKey("u_$clean")
+    }
+
+    private fun fadeAlphaForKey(key: String): Float {
+        if (!mihon.desktop.ui.animation.MotionPreferences.isEnabled) return 1f
+        val start = fadeStartMs[key] ?: return 1f
+        val elapsed = (System.currentTimeMillis() - start).toFloat()
+        val duration = mihon.desktop.ui.animation.MotionPreferences.effectiveDurationMs(200).toFloat().coerceAtLeast(1f)
+        if (elapsed >= duration) {
+            fadeStartMs.remove(key)
+            return 1f
+        }
+        return easeOutCubic(elapsed / duration)
+    }
+
+    private fun recordFreshLoad(key: String, loadedFromDisk: Boolean) {
+        if (!loadedFromDisk && mihon.desktop.ui.animation.MotionPreferences.isEnabled) {
+            fadeStartMs[key] = System.currentTimeMillis()
+        }
+    }
+
+    private fun maybeTrimDiskCache() {
+        if (writesSinceTrim.incrementAndGet() % 30 != 0) return
+        val files = cacheDir.listFiles { f -> f.isFile && f.extension.equals("png", ignoreCase = true) } ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= maxDiskCacheBytes) return
+        files.sortedBy { it.lastModified() }.forEach { f ->
+            if (total <= maxDiskCacheBytes * 80 / 100) return@forEach
+            val len = f.length()
+            if (f.delete()) total -= len
+        }
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .dispatcher(Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 16
+            maxRequests = 16
+            maxRequestsPerHost = 6
         })
+        .connectionPool(okhttp3.ConnectionPool(4, 30, TimeUnit.SECONDS))
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)
@@ -541,7 +680,8 @@ class CoverCache(
             .mapNotNull { it.firstOrNull()?.uppercaseChar() }
             .joinToString("")
             .ifEmpty { "M" }
-        return placeholders.computeIfAbsent(initials) { ImageIcon(createPlaceholder(it)) }
+        val key = "${Theme.BG_CARD.rgb}_${Theme.BORDER_SUBTLE.rgb}_${Theme.TEXT_MUTED.rgb}_$initials"
+        return placeholders.computeIfAbsent(key) { ImageIcon(createPlaceholder(initials)) }
     }
 
     private val onLoadedCallbacks = ConcurrentHashMap<String, MutableList<() -> Unit>>()
@@ -579,10 +719,12 @@ class CoverCache(
                     val chPath = runCatching { firstChapterPath() }.getOrNull()
                     renderForManga(manga, chPath)?.also { thumb ->
                         runCatching { ImageIO.write(thumb, "png", cachedFile) }
+                        maybeTrimDiskCache()
                     }?.let { ImageIcon(it) }
                 }
                 if (icon != null) {
                     synchronized(iconsLock) { icons[manga.id] = icon }
+                    recordFreshLoad("m_${manga.id}", cachedImg != null)
                     val callbacks = synchronized(onLoadedCallbacks) { onLoadedCallbacks.remove(key).orEmpty() }
                     SwingUtilities.invokeLater { callbacks.forEach { it.invoke() } }
                 }
@@ -612,10 +754,12 @@ class CoverCache(
                 } else {
                     downloadCover(cleanUrl)?.let { scaleAndRound(it) }?.also { rounded ->
                         runCatching { ImageIO.write(rounded, "png", cachedFile) }
+                        maybeTrimDiskCache()
                     }?.let { ImageIcon(it) }
                 }
                 if (icon != null) {
                     synchronized(urlIconsLock) { urlIcons[cleanUrl] = icon }
+                    recordFreshLoad("u_$cleanUrl", cachedImg != null)
                     SwingUtilities.invokeLater(onLoaded)
                 }
             } finally {
@@ -674,7 +818,7 @@ class CoverCache(
             .url(parsed)
             .header(
                 "User-Agent",
-                if (isMangaDex) "MihonLinux/0.3 (Linux Desktop)"
+                if (isMangaDex) "MihonLinux/0.4 (Linux Desktop)"
                 else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             )
             .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
@@ -711,26 +855,24 @@ class CoverCache(
         }
     }.getOrNull()
 
-    /** Center-crops to COVER_W x COVER_H with crisp Tankobon book spine highlight and hairline border. */
+    /** Center-crops to COVER_W x COVER_H with 10px rounded corners and clean hairline border. */
     private fun scaleAndRound(src: BufferedImage): BufferedImage {
         val scale = maxOf(COVER_W.toDouble() / src.width, COVER_H.toDouble() / src.height)
         val sw = (src.width * scale).toInt().coerceAtLeast(COVER_W)
         val sh = (src.height * scale).toInt().coerceAtLeast(COVER_H)
         val dx = (COVER_W - sw) / 2
         val dy = (COVER_H - sh) / 2
+        val arc = (Theme.CARD_RADIUS * 2).toFloat()
 
         val out = BufferedImage(COVER_W, COVER_H, BufferedImage.TYPE_INT_ARGB)
         val g = out.createGraphics()
         setupQuality(g)
-        g.clip = RoundRectangle2D.Float(0f, 0f, COVER_W.toFloat(), COVER_H.toFloat(), COVER_ARC.toFloat(), COVER_ARC.toFloat())
+        g.clip = RoundRectangle2D.Float(0f, 0f, COVER_W.toFloat(), COVER_H.toFloat(), arc, arc)
         g.drawImage(src, dx, dy, sw, sh, null)
-        // Subtle bottom vignette for legibility
-        g.paint = GradientPaint(0f, (COVER_H - 56).toFloat(), Color(0, 0, 0, 0), 0f, COVER_H.toFloat(), Color(0, 0, 0, 145))
-        g.fillRect(0, COVER_H - 56, COVER_W, 56)
 
         g.clip = null
-        g.color = Color(242, 239, 233, 36)
-        g.drawRoundRect(0, 0, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
+        g.color = Color(255, 255, 255, 28)
+        g.drawRoundRect(0, 0, COVER_W - 1, COVER_H - 1, arc.toInt(), arc.toInt())
         g.dispose()
         return out
     }
@@ -739,24 +881,21 @@ class CoverCache(
         val out = BufferedImage(COVER_W, COVER_H, BufferedImage.TYPE_INT_ARGB)
         val g = out.createGraphics()
         setupQuality(g)
-        // Soft 145deg gradient combining Mihon indigo (#5B5BD6 @ 24%) and cyan (#36C5F0 @ 12%) over calm dark slate
-        g.paint = GradientPaint(
-            0f, 0f, Color(0x28, 0x2A, 0x48),
-            COVER_W.toFloat(), COVER_H.toFloat(), Color(0x1B, 0x27, 0x33),
-        )
-        g.fillRoundRect(0, 0, COVER_W, COVER_H, COVER_ARC, COVER_ARC)
+        val arc = Theme.CARD_RADIUS * 2
 
-        // Subtle decorative inner ring
-        g.color = Color(0xA6, 0xA6, 0xFF, 42)
-        g.drawOval(COVER_W / 2 - 36, COVER_H / 2 - 42, 72, 72)
+        g.color = Theme.BG_CARD
+        g.fillRoundRect(0, 0, COVER_W, COVER_H, arc, arc)
 
-        g.color = Color(0xEA, 0xEB, 0xF2, 165)
-        g.font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 34f)
+        val bookIcon = ModernIcons.library(36) { Theme.TEXT_MUTED }
+        bookIcon.paintIcon(null, g, (COVER_W - 36) / 2, COVER_H / 2 - 34)
+
+        g.color = Theme.TEXT_MUTED
+        g.font = Theme.FONT_UI.deriveFont(Font.BOLD, 14f)
         val fm = g.fontMetrics
-        g.drawString(initials, (COVER_W - fm.stringWidth(initials)) / 2, (COVER_H + fm.ascent) / 2 - 8)
+        g.drawString(initials, (COVER_W - fm.stringWidth(initials)) / 2, COVER_H / 2 + 24)
 
-        g.color = Color(0xA6, 0xA6, 0xFF, 52)
-        g.drawRoundRect(0, 0, COVER_W - 1, COVER_H - 1, COVER_ARC, COVER_ARC)
+        g.color = Theme.BORDER_SUBTLE
+        g.drawRoundRect(0, 0, COVER_W - 1, COVER_H - 1, arc, arc)
         g.dispose()
         return out
     }

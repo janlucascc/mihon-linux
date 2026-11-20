@@ -1,5 +1,6 @@
 package mihon.desktop
 
+import mihon.desktop.ui.components.MihonDropdown
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import java.awt.BorderLayout
@@ -24,6 +25,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.prefs.Preferences
 import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JComboBox
 import javax.swing.JLabel
@@ -95,7 +98,11 @@ object LibraryUpdateScheduler {
     private var appCtxRef: AppContext? = null
 
     fun addUpdateListener(listener: () -> Unit) {
-        listeners.add(listener)
+        if (listener !in listeners) listeners.add(listener)
+    }
+
+    fun removeUpdateListener(listener: () -> Unit) {
+        listeners.remove(listener)
     }
 
     private fun notifyListeners() {
@@ -216,15 +223,15 @@ object LibraryUpdateScheduler {
 class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     private var allEntries: List<UpdateFeedEntry> = emptyList()
     private var unreadOnly = false
-    private var hoveredRow = -1
 
     private val listModel = DefaultListModel<UpdateFeedEntry>()
     private val feedList = JList(listModel)
+    private val hoverAnimator = GridHoverAnimator(feedList)
     private val rowRenderer = UpdateRowCard()
 
     private val subtitleLabel = JLabel("Carregando feed de capítulos…").apply {
         font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
-        foreground = Theme.TEXT_MUTED
+        foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
     }
 
     private val progressBar = JProgressBar(0, 100).apply {
@@ -233,9 +240,28 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         preferredSize = Dimension(220, 22)
     }
 
+    private val errorLabel = JLabel("").apply {
+        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12.5f)
+        foreground = Theme.DANGER
+    }
+    private val btnRetryBanner = ModernButton("Tentar novamente", variant = ModernButton.Variant.SURFACE, compact = true).apply {
+        addActionListener { triggerManualCheck() }
+    }
+    private val errorBanner = JPanel(BorderLayout(12, 0)).apply {
+        isOpaque = true
+        background = Theme.BG_SURFACE
+        border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.DANGER),
+            BorderFactory.createEmptyBorder(8, Theme.PAGE_GUTTER, 8, Theme.PAGE_GUTTER),
+        )
+        add(errorLabel, BorderLayout.CENTER)
+        add(btnRetryBanner, BorderLayout.EAST)
+        isVisible = false
+    }
+
     private val btnCheckNow = ModernButton(
-        text = "Verificar Agora",
-        icon = ModernIcons.sync(15) { Color.WHITE },
+        text = "Verificar agora",
+        icon = ModernIcons.sync(16) { Color.WHITE },
         variant = ModernButton.Variant.PRIMARY,
     ).apply {
         toolTipText = "Buscar novos capítulos em todas as fontes da biblioteca"
@@ -243,24 +269,24 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private val btnFilterUnread = ModernButton(
-        text = "Apenas Não Lidos",
-        icon = ModernIcons.filter(14) { if (unreadOnly) Theme.ACCENT else Theme.TEXT_PRIMARY },
+        text = "Apenas não lidos",
+        icon = ModernIcons.filter(16) { if (unreadOnly) Color.WHITE else Theme.TEXT_PRIMARY },
         variant = ModernButton.Variant.SURFACE,
     ).apply {
         addActionListener {
             unreadOnly = !unreadOnly
-            variant = if (unreadOnly) ModernButton.Variant.FAVORITE else ModernButton.Variant.SURFACE
+            variant = if (unreadOnly) ModernButton.Variant.PRIMARY else ModernButton.Variant.SURFACE
             applyFilter()
         }
     }
 
-    private val intervalCombo = JComboBox(
+    private val intervalCombo = MihonDropdown(
         LibraryUpdateScheduler.INTERVAL_OPTIONS.map { it.second }.toTypedArray(),
     ).apply {
         val currentHours = LibraryUpdateScheduler.intervalHours
         val idx = LibraryUpdateScheduler.INTERVAL_OPTIONS.indexOfFirst { it.first == currentHours }.coerceAtLeast(0)
         selectedIndex = idx
-        preferredSize = Dimension(185, 32)
+        preferredSize = Dimension(185, Theme.CONTROL_HEIGHT_COMPACT)
         toolTipText = "Frequência da verificação automática em segundo plano"
         addActionListener {
             val chosen = LibraryUpdateScheduler.INTERVAL_OPTIONS.getOrNull(selectedIndex)?.first ?: 6
@@ -272,17 +298,39 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         }
     }
 
+    private val centerCards = java.awt.CardLayout()
+    private val centerPanel = JPanel(centerCards)
+    private val emptyTitleLbl = JLabel("Nenhuma atualização recente").apply {
+        font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 18f)
+        foreground = Theme.TEXT_PRIMARY
+        alignmentX = 0.5f
+    }
+    private val emptyDescLbl = JLabel("Clique em \"Verificar agora\" para buscar novos capítulos nas fontes da sua biblioteca.").apply {
+        font = Theme.FONT_UI.deriveFont(Font.PLAIN, 13f)
+        foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+        alignmentX = 0.5f
+    }
+    private val emptyCheckBtn = ModernButton(
+        text = "Verificar agora",
+        icon = ModernIcons.sync(16) { Color.WHITE },
+        variant = ModernButton.Variant.PRIMARY,
+    ).apply {
+        alignmentX = 0.5f
+        addActionListener { triggerManualCheck() }
+    }
+
     private var themeListener: ((Boolean) -> Unit)? = null
+    private var schedulerListener: (() -> Unit)? = null
 
     init {
         background = Theme.BG_APP
 
-        val titleLabel = JLabel("Atualizações da Biblioteca").apply {
-            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 22f)
+        val titleLabel = JLabel("Atualizações").apply {
+            font = Theme.FONT_DISPLAY.deriveFont(Font.BOLD, 25f)
             foreground = Theme.TEXT_PRIMARY
         }
 
-        val leftHeader = JPanel(BorderLayout(0, 4)).apply {
+        val leftHeader = JPanel(BorderLayout(0, 2)).apply {
             isOpaque = false
             add(titleLabel, BorderLayout.NORTH)
             add(subtitleLabel, BorderLayout.SOUTH)
@@ -292,32 +340,43 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             isOpaque = false
             add(JLabel("Automático:").apply {
                 font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
-                foreground = Theme.TEXT_MUTED
+                foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
             })
             add(intervalCombo)
             add(btnFilterUnread)
             add(btnCheckNow)
         }
 
-        val topBar = JPanel(BorderLayout(12, 8)).apply {
-            background = Theme.BG_APP
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(16, 24, 14, 24),
-            )
+        val headerRow = JPanel(BorderLayout(12, 8)).apply {
+            isOpaque = false
             add(leftHeader, BorderLayout.WEST)
             add(rightControls, BorderLayout.EAST)
-            add(progressBar, BorderLayout.SOUTH)
+        }
+
+        val topBar = JPanel(BorderLayout(0, 8)).apply {
+            background = Theme.BG_SURFACE
+            minimumSize = Dimension(0, 64)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(14, Theme.PAGE_GUTTER, 14, Theme.PAGE_GUTTER),
+            )
+            add(headerRow, BorderLayout.NORTH)
+            add(progressBar, BorderLayout.CENTER)
+            add(errorBanner, BorderLayout.SOUTH)
         }
 
         feedList.background = Theme.BG_APP
-        feedList.fixedCellHeight = 68
+        feedList.fixedCellHeight = 76
         feedList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        feedList.border = BorderFactory.createEmptyBorder(10, 20, 18, 20)
+        feedList.border = BorderFactory.createEmptyBorder(10, Theme.PAGE_GUTTER, 18, Theme.PAGE_GUTTER)
         feedList.cellRenderer = ListCellRenderer { _, entry, index, selected, _ ->
             val downloaded = ctx.service.isChapterDownloaded(entry.manga, entry.chapter)
             val downloading = ctx.service.isChapterDownloading(entry.chapter.id)
+            if (!ctx.covers.has(entry.manga.id)) {
+                ctx.covers.load(entry.manga, firstChapterPath = { null }, onLoaded = { feedList.repaint() })
+            }
             rowRenderer.apply {
+                coverIcon = ctx.covers.get(entry.manga.id, entry.manga.title)
                 mangaTitle = entry.manga.title
                 chapterTitle = entry.chapter.name
                 dateText = formatInstant(entry.chapter.dateFetch)
@@ -325,7 +384,7 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 isDownloaded = downloaded
                 isDownloading = downloading
                 selectedState = selected
-                hoveredState = index == hoveredRow
+                hoverProgress = hoverAnimator.progressFor(index)
             }
         }
 
@@ -334,22 +393,13 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 val idx = feedList.locationToIndex(e.point)
                 val valid = if (idx >= 0 && feedList.getCellBounds(idx, idx)?.contains(e.point) == true) idx else -1
                 feedList.cursor = if (valid >= 0) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
-                if (valid != hoveredRow) {
-                    val prev = hoveredRow
-                    hoveredRow = valid
-                    if (prev >= 0) feedList.getCellBounds(prev, prev)?.let { feedList.repaint(it) }
-                    if (valid >= 0) feedList.getCellBounds(valid, valid)?.let { feedList.repaint(it) }
-                }
+                hoverAnimator.setHovered(valid)
             }
         })
 
         feedList.addMouseListener(object : MouseAdapter() {
             override fun mouseExited(e: MouseEvent) {
-                if (hoveredRow != -1) {
-                    val prev = hoveredRow
-                    hoveredRow = -1
-                    feedList.getCellBounds(prev, prev)?.let { feedList.repaint(it) }
-                }
+                hoverAnimator.setHovered(-1)
             }
 
             override fun mouseClicked(e: MouseEvent) {
@@ -372,26 +422,59 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             verticalScrollBar.unitIncrement = 24
         }
 
-        add(topBar, BorderLayout.NORTH)
-        add(scroll, BorderLayout.CENTER)
+        val emptyIcon = JLabel(ModernIcons.updates(48) { if (Theme.isDark) Theme.ACCENT else Theme.PRIMARY }).apply {
+            alignmentX = 0.5f
+        }
+        val emptyBox = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(emptyIcon)
+            add(Box.createVerticalStrut(12))
+            add(emptyTitleLbl)
+            add(Box.createVerticalStrut(6))
+            add(emptyDescLbl)
+            add(Box.createVerticalStrut(16))
+            add(emptyCheckBtn)
+        }
+        val emptyWrap = JPanel(java.awt.GridBagLayout()).apply {
+            background = Theme.BG_APP
+            add(emptyBox)
+        }
 
-        LibraryUpdateScheduler.addUpdateListener {
-            btnCheckNow.isEnabled = !LibraryUpdateScheduler.isChecking
-            btnCheckNow.text = if (LibraryUpdateScheduler.isChecking) "Verificando…" else "Verificar Agora"
-            if (!LibraryUpdateScheduler.isChecking) {
+        centerPanel.background = Theme.BG_APP
+        centerPanel.add(scroll, "feed")
+        centerPanel.add(emptyWrap, "empty")
+
+        add(topBar, BorderLayout.NORTH)
+        add(centerPanel, BorderLayout.CENTER)
+
+        val schedListener = {
+            val checking = LibraryUpdateScheduler.isChecking
+            btnCheckNow.isEnabled = !checking
+            emptyCheckBtn.isEnabled = !checking
+            btnCheckNow.text = if (checking) "Verificando biblioteca…" else "Verificar agora"
+            if (!checking) {
                 refresh()
             }
         }
+        schedulerListener = schedListener
+        LibraryUpdateScheduler.addUpdateListener(schedListener)
 
         val listener = { _: Boolean ->
             background = Theme.BG_APP
-            topBar.background = Theme.BG_APP
+            topBar.background = Theme.BG_SURFACE
             topBar.border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
-                BorderFactory.createEmptyBorder(16, 24, 14, 24),
+                BorderFactory.createEmptyBorder(14, Theme.PAGE_GUTTER, 14, Theme.PAGE_GUTTER),
             )
+            errorBanner.background = Theme.BG_SURFACE
+            errorLabel.foreground = Theme.DANGER
             titleLabel.foreground = Theme.TEXT_PRIMARY
-            subtitleLabel.foreground = Theme.TEXT_MUTED
+            subtitleLabel.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+            emptyWrap.background = Theme.BG_APP
+            emptyTitleLbl.foreground = Theme.TEXT_PRIMARY
+            emptyDescLbl.foreground = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+            centerPanel.background = Theme.BG_APP
             feedList.background = Theme.BG_APP
             scroll.background = Theme.BG_APP
             scroll.viewport.background = Theme.BG_APP
@@ -403,6 +486,8 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     fun dispose() {
+        hoverAnimator.stop()
+        schedulerListener?.let { LibraryUpdateScheduler.removeUpdateListener(it) }
         themeListener?.let { ctx.removeThemeListener(it) }
     }
 
@@ -431,8 +516,12 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
             ).take(120)
         }) { result ->
             result.onSuccess { list ->
+                errorBanner.isVisible = false
                 allEntries = list
                 applyFilter()
+            }.onFailure { err ->
+                errorLabel.text = "Não foi possível carregar atualizações: ${err.message ?: "erro inesperado"}"
+                errorBanner.isVisible = true
             }
         }
     }
@@ -444,17 +533,33 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
 
         val lastCheck = LibraryUpdateScheduler.lastCheckEpochMs
         val lastCheckStr = if (lastCheck > 0L) {
-            val fmt = DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault())
-            "Última verificação: ${fmt.format(Instant.ofEpochMilli(lastCheck))}"
+            val fmt = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+            "Última checagem: ${fmt.format(Instant.ofEpochMilli(lastCheck))}"
         } else {
-            "Nenhuma verificação automática recente"
+            "Nenhuma checagem recente"
         }
-        subtitleLabel.text = "${filtered.size} capítulo(s) listado(s)  •  $lastCheckStr"
+        subtitleLabel.text = "${filtered.size} capítulo(s)  •  $lastCheckStr"
+
+        if (filtered.isEmpty()) {
+            if (unreadOnly && allEntries.isNotEmpty()) {
+                emptyTitleLbl.text = "Nenhum capítulo não lido"
+                emptyDescLbl.text = "Todos os capítulos recentes já foram marcados como lidos."
+                emptyCheckBtn.isVisible = false
+            } else {
+                emptyTitleLbl.text = "Nenhuma atualização recente"
+                emptyDescLbl.text = "Clique em \"Verificar agora\" para buscar novos capítulos nas fontes da sua biblioteca."
+                emptyCheckBtn.isVisible = true
+            }
+            centerCards.show(centerPanel, "empty")
+        } else {
+            centerCards.show(centerPanel, "feed")
+        }
     }
 
     private fun triggerManualCheck() {
+        errorBanner.isVisible = false
         progressBar.value = 0
-        progressBar.string = "Iniciando verificação da biblioteca…"
+        progressBar.string = "Verificando biblioteca…"
         progressBar.isVisible = true
         LibraryUpdateScheduler.checkNow(
             ctx = ctx,
@@ -518,7 +623,7 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
                 },
             ),
         )
-        GooeyContextMenu(items).showAt(feedList, x, y)
+        GooeyContextMenu.showSmart(items, feedList, x, y)
     }
 
     private fun formatInstant(instant: kotlin.time.Instant): String {
@@ -531,6 +636,7 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
     }
 
     private class UpdateRowCard : JPanel() {
+        var coverIcon: javax.swing.ImageIcon? = null
         var mangaTitle: String = ""
         var chapterTitle: String = ""
         var dateText: String = ""
@@ -538,87 +644,120 @@ class UpdatesScreen(private val ctx: AppContext) : JPanel(BorderLayout()) {
         var isDownloaded: Boolean = false
         var isDownloading: Boolean = false
         var selectedState: Boolean = false
-        var hoveredState: Boolean = false
+        var hoverProgress: Float = 0f
 
         init {
             isOpaque = false
+            preferredSize = Dimension(420, 76)
         }
 
         override fun paintComponent(g: Graphics) {
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_LCD_HRGB)
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
 
-            val x = 8
-            val w = width - 16
+            val x = 6
+            val w = width - 12
             val h = height
+            val cardArc = Theme.CARD_RADIUS * 2
 
-            if (selectedState || hoveredState) {
-                g2.color = if (selectedState) Theme.BG_CARD_HOVER else Theme.BG_SURFACE
-                g2.fillRoundRect(x, 3, w, h - 6, 10, 10)
+            if (selectedState) {
+                g2.color = Theme.ACCENT_SOFT
+                g2.fillRoundRect(x, 3, w, h - 6, cardArc, cardArc)
+                g2.color = Theme.PRIMARY
+                g2.stroke = java.awt.BasicStroke(1.2f)
+                g2.drawRoundRect(x, 3, w - 1, h - 7, cardArc, cardArc)
+            } else if (hoverProgress > 0.01f) {
+                val hc = Theme.BG_CARD_HOVER
+                g2.color = Color(hc.red, hc.green, hc.blue, (hc.alpha * hoverProgress).toInt().coerceIn(0, 255))
+                g2.fillRoundRect(x, 3, w, h - 6, cardArc, cardArc)
             }
 
             g2.color = Theme.BORDER_SUBTLE
             g2.drawLine(x + 12, h - 1, x + w - 12, h - 1)
 
-            // Barra de destaque à esquerda para capítulos não lidos
+            // Barra de sinalização laranja à esquerda para capítulos não lidos
             if (!isRead) {
-                g2.color = Theme.ACCENT
-                g2.fillRoundRect(x + 6, 14, 4, h - 28, 4, 4)
+                g2.color = Theme.SIGNAL
+                g2.fillRoundRect(x + 6, 14, 3, h - 28, 3, 3)
             }
 
-            // Selo de status à direita (calculado primeiro para evitar sobreposição no texto)
+            // Capa pequena (40x56)
+            val thumbX = x + 18
+            val thumbW = 40
+            val thumbH = 56
+            val thumbY = (h - thumbH) / 2
+            val icon = coverIcon
+            if (icon != null) {
+                val oldClip = g2.clip
+                g2.clip = java.awt.geom.RoundRectangle2D.Float(thumbX.toFloat(), thumbY.toFloat(), thumbW.toFloat(), thumbH.toFloat(), 12f, 12f)
+                g2.drawImage(icon.image, thumbX, thumbY, thumbW, thumbH, null)
+                g2.clip = oldClip
+            } else {
+                g2.color = Theme.BG_CARD
+                g2.fillRoundRect(thumbX, thumbY, thumbW, thumbH, 12, 12)
+            }
+            g2.color = Theme.BORDER_SUBTLE
+            g2.drawRoundRect(thumbX, thumbY, thumbW - 1, thumbH - 1, 12, 12)
+
+            // Selo de status à direita
             val badgeText = when {
                 isDownloaded -> "Offline"
                 isDownloading -> "Baixando…"
                 isRead -> "Lido"
-                else -> "NOVO"
+                else -> "Novo"
             }
             val badgeBg = when {
-                isDownloaded -> Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 38)
-                isDownloading -> Color(Theme.WARNING.red, Theme.WARNING.green, Theme.WARNING.blue, 38)
+                isDownloaded -> Color(Theme.SUCCESS.red, Theme.SUCCESS.green, Theme.SUCCESS.blue, 36)
+                isDownloading -> Color(Theme.WARNING.red, Theme.WARNING.green, Theme.WARNING.blue, 36)
                 isRead -> Theme.BG_SURFACE
-                else -> Theme.ACCENT_SOFT
+                else -> Theme.SIGNAL
             }
             val badgeFg = when {
-                isDownloaded -> Theme.SUCCESS
-                isDownloading -> Theme.WARNING
-                isRead -> Theme.TEXT_MUTED
-                else -> Theme.ACCENT
+                isDownloaded -> if (Theme.isDark) Theme.SUCCESS else Color(0x16, 0x65, 0x34)
+                isDownloading -> if (Theme.isDark) Theme.WARNING else Color(0x9A, 0x67, 0x00)
+                isRead -> if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+                else -> Color.WHITE
             }
             val badgeIcon = when {
                 isDownloaded -> ModernIcons.check(12) { badgeFg }
                 isDownloading -> ModernIcons.sync(12) { badgeFg }
-                !isRead -> ModernIcons.flame(12) { badgeFg }
                 else -> null
             }
 
-            g2.font = Theme.FONT_MONO.deriveFont(Font.BOLD, 11f)
+            g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 11f)
             val fm = g2.fontMetrics
             val iconGap = if (badgeIcon != null) badgeIcon.iconWidth + 5 else 0
-            val bw = iconGap + fm.stringWidth(badgeText) + 18
-            val bx = x + w - bw - 16
-            val by = (h - 26) / 2
+            val bw = iconGap + fm.stringWidth(badgeText) + 16
+            val bh = 22
+            val arc = Theme.BADGE_RADIUS * 2
+            val bx = x + w - bw - 14
+            val by = (h - bh) / 2
             g2.color = badgeBg
-            g2.fillRoundRect(bx, by, bw, 26, 26, 26)
+            g2.fillRoundRect(bx, by, bw, bh, arc, arc)
+            if (isRead) {
+                g2.color = Theme.BORDER_SUBTLE
+                g2.drawRoundRect(bx, by, bw - 1, bh - 1, arc, arc)
+            }
             if (badgeIcon != null) {
-                badgeIcon.paintIcon(this, g2, bx + 9, (h - badgeIcon.iconHeight) / 2)
+                badgeIcon.paintIcon(this, g2, bx + 8, (h - badgeIcon.iconHeight) / 2)
             }
             g2.color = badgeFg
-            g2.drawString(badgeText, bx + 9 + iconGap, by + ((26 - fm.height) / 2) + fm.ascent)
+            g2.drawString(badgeText, bx + 8 + iconGap, by + ((bh - fm.height) / 2) + fm.ascent)
 
-            val textX = x + 22
-            val maxTextW = (bx - textX - 16).coerceAtLeast(60)
+            val textX = thumbX + thumbW + 14
+            val maxTextW = (bx - textX - 14).coerceAtLeast(60)
 
             // Título do Mangá
             g2.font = Theme.FONT_UI.deriveFont(Font.BOLD, 13.5f)
-            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.TEXT_PRIMARY
-            g2.drawString(clipUiText(g2, mangaTitle, maxTextW), textX, 26)
+            g2.color = if (isRead) Theme.TEXT_SECONDARY else Theme.TEXT_PRIMARY
+            Theme.drawStringWithFallback(g2, clipUiText(g2, mangaTitle, maxTextW), textX, 30)
 
             // Nome do Capítulo + Data
             g2.font = Theme.FONT_UI.deriveFont(Font.PLAIN, 12f)
-            g2.color = if (isRead) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
-            g2.drawString(clipUiText(g2, "$chapterTitle   •   $dateText", maxTextW), textX, 48)
+            g2.color = if (Theme.isDark) Theme.TEXT_MUTED else Theme.TEXT_SECONDARY
+            Theme.drawStringWithFallback(g2, clipUiText(g2, "$chapterTitle   •   $dateText", maxTextW), textX, 51)
 
             g2.dispose()
         }
